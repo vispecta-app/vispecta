@@ -1,27 +1,39 @@
-"""Writes public/samples/simple-scene/Infra-Alignment.ifc (python3 scripts/make-sample-alignment.py <out>): an IFC 4.3 alignment along the centre line of the track in
-buildingSMART's Simple-Scene (Infra-Rail.ifc). Same units (mm) and map conversion as the scene,
-so it lies on the track. Straight, 40 m, top of rail level, stations 0+000 to 0+040."""
+"""Writes public/samples/simple-scene/Infra-Alignment.ifc (python3 scripts/make-sample-alignment.py <out>).
+
+Two IFC 4.3 alignments for buildingSMART's Simple-Scene, with the scene's units (mm), CRS and map
+conversion, so they lie on its models:
+- "Track": centre line of the rails in Infra-Rail.ifc – straight, 40 m, at top of rail, 0+000 to 0+040
+- "Road": centre line of the carriageway in Infra-Road.ifc (through its centre line markings) –
+  straight, 80 m, at road surface, 0+000 to 0+080
+Each has a horizontal and a vertical layout (one LINE and one CONSTANTGRADIENT segment), a FootPrint
+and Axis representation, and a station referent with Pset_Stationing. The output is the same on
+every run (fixed GUID seed).
+"""
 import math, random, string, sys
 
-random.seed(20261114)  # stable GUIDs
+# centre lines measured from the scene's geometry, in metres:
+# (name, description, start x, start y, end x, end y, level)
+ALIGNMENTS = [
+    ('Track', 'Centre line of the rail track in the sample scene', 8.660, 55.000, 43.302, 35.000, 7.775),
+    ('Road', 'Centre line of the road carriageway in the sample scene', -25.981, 5.000, 43.301, 45.000, 0.0),
+]
+
+random.seed(20261114)
 CH = string.digits + string.ascii_uppercase + string.ascii_lowercase + '_$'
 def guid():
     return random.choice('0123') + ''.join(random.choice(CH) for _ in range(21))
 
-# centre line measured from the rails of Infra-Rail.ifc (metres): see the PR / railgeom
-X0, Y0, X1, Y1, Z = 8.660, 55.000, 43.302, 35.000, 7.775
-L = math.hypot(X1 - X0, Y1 - Y0)
-dirx, diry = (X1 - X0) / L, (Y1 - Y0) / L
-ang = math.atan2(diry, dirx)
 mm = lambda v: v * 1000.0
 f = lambda v: repr(float(round(v, 6)))
-
 lines = []
-n = [0]
+count = [0]
 def e(s):
-    n[0] += 1; lines.append(f"#{n[0]}={s};"); return f"#{n[0]}"
+    count[0] += 1
+    lines.append(f"#{count[0]}={s};")
+    return f"#{count[0]}"
 
-org = e("IFCORGANIZATION($,'Vispecta','Sample alignment for the buildingSMART IFC 4.3 Simple-Scene',$,$)")
+# --- project, units, georeferencing (as in the scene files)
+org = e("IFCORGANIZATION($,'Vispecta','Sample alignments for the buildingSMART IFC 4.3 Simple-Scene',$,$)")
 person = e("IFCPERSON($,'Vispecta',$,$,$,$,$,$)")
 po = e(f"IFCPERSONANDORGANIZATION({person},{org},$)")
 app = e(f"IFCAPPLICATION({org},'1','Vispecta sample generator','vispecta')")
@@ -32,52 +44,54 @@ ctx = e(f"IFCGEOMETRICREPRESENTATIONCONTEXT($,'Model',3,0.001,{wcs},$)")
 axis_ctx = e(f"IFCGEOMETRICREPRESENTATIONSUBCONTEXT('Axis','Model',*,*,*,*,{ctx},$,.MODEL_VIEW.,$)")
 u1 = e("IFCSIUNIT(*,.LENGTHUNIT.,.MILLI.,.METRE.)"); u2 = e("IFCSIUNIT(*,.PLANEANGLEUNIT.,$,.RADIAN.)")
 units = e(f"IFCUNITASSIGNMENT(({u1},{u2}))")
-proj = e(f"IFCPROJECT('{guid()}',{oh},'Vispecta sample alignment','Alignment along the track of the buildingSMART IFC 4.3 Simple-Scene',$,$,$,({ctx}),{units})")
+proj = e(f"IFCPROJECT('{guid()}',{oh},'Vispecta sample alignments','Alignments along the track and the road of the buildingSMART IFC 4.3 Simple-Scene',$,$,$,({ctx}),{units})")
 crsu = e("IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.)")
 crs = e(f"IFCPROJECTEDCRS('EPSG:32760','EPSG:32760 - WGS 84 / UTM zone 60S','WGS 84',$,$,$,{crsu})")
 e(f"IFCMAPCONVERSION({ctx},{crs},729011.2258823584,9063960.607644705,0.,1.,0.,0.001)")
 site_pl = e(f"IFCLOCALPLACEMENT($,{wcs})")
 site = e(f"IFCSITE('{guid()}',{oh},'environment - site','Sample scene site',$,{site_pl},$,$,.ELEMENT.,$,$,0.,$,$)")
 e(f"IFCRELAGGREGATES('{guid()}',{oh},$,$,{proj},({site}))")
-
-# --- geometry (representation): horizontal composite curve and gradient curve, both straight
 o2 = e("IFCCARTESIANPOINT((0.,0.))"); d2 = e("IFCDIRECTION((1.,0.))")
-vec = e(f"IFCVECTOR({d2},1.)")
-line2 = e(f"IFCLINE({o2},{vec})")
-hp = e(f"IFCCARTESIANPOINT(({f(mm(X0))},{f(mm(Y0))}))"); hd = e(f"IFCDIRECTION(({f(dirx)},{f(diry)}))")
-hpl = e(f"IFCAXIS2PLACEMENT2D({hp},{hd})")
-hseg = e(f"IFCCURVESEGMENT(.DISCONTINUOUS.,{hpl},IFCLENGTHMEASURE(0.),IFCLENGTHMEASURE({f(mm(L))}),{line2})")
-hcurve = e(f"IFCCOMPOSITECURVE(({hseg}),.F.)")
-vp = e(f"IFCCARTESIANPOINT((0.,{f(mm(Z))}))"); vd = e("IFCDIRECTION((1.,0.))")
-vpl = e(f"IFCAXIS2PLACEMENT2D({vp},{vd})")
-vseg = e(f"IFCCURVESEGMENT(.DISCONTINUOUS.,{vpl},IFCLENGTHMEASURE(0.),IFCLENGTHMEASURE({f(mm(L))}),{line2})")
-gcurve = e(f"IFCGRADIENTCURVE(({vseg}),.F.,{hcurve},$)")
-r_foot = e(f"IFCSHAPEREPRESENTATION({axis_ctx},'FootPrint','Curve2D',({hcurve}))")
-r_axis = e(f"IFCSHAPEREPRESENTATION({axis_ctx},'Axis','Curve3D',({gcurve}))")
-pds = e(f"IFCPRODUCTDEFINITIONSHAPE($,$,({r_foot},{r_axis}))")
+line2 = e(f"IFCLINE({o2},{e(f'IFCVECTOR({d2},1.)')})")
 
-# --- semantics: alignment, horizontal (one LINE), vertical (one CONSTANTGRADIENT)
-apl = e(f"IFCLOCALPLACEMENT({site_pl},{wcs})")
-aln = e(f"IFCALIGNMENT('{guid()}',{oh},'Track','Centre line of the rail track in the sample scene',$,{apl},{pds},.NOTDEFINED.)")
-e(f"IFCRELAGGREGATES('{guid()}',{oh},$,$,{proj},({aln}))")
-hz = e(f"IFCALIGNMENTHORIZONTAL('{guid()}',{oh},$,$,$,{apl},$)")
-vt = e(f"IFCALIGNMENTVERTICAL('{guid()}',{oh},$,$,$,{apl},$)")
-sp = e(f"IFCCARTESIANPOINT(({f(mm(X0))},{f(mm(Y0))}))")
-hparams = e(f"IFCALIGNMENTHORIZONTALSEGMENT($,$,{sp},{f(ang)},0.,0.,{f(mm(L))},$,.LINE.)")
-hsegment = e(f"IFCALIGNMENTSEGMENT('{guid()}',{oh},$,$,$,{apl},$,{hparams})")
-vparams = e(f"IFCALIGNMENTVERTICALSEGMENT($,$,0.,{f(mm(L))},{f(mm(Z))},0.,0.,$,.CONSTANTGRADIENT.)")
-vsegment = e(f"IFCALIGNMENTSEGMENT('{guid()}',{oh},$,$,$,{apl},$,{vparams})")
-e(f"IFCRELNESTS('{guid()}',{oh},$,$,{hz},({hsegment}))")
-e(f"IFCRELNESTS('{guid()}',{oh},$,$,{vt},({vsegment}))")
-# start station 0+000 as a referent at the start of the alignment
-rpl = e(f"IFCLOCALPLACEMENT({site_pl},{wcs})")
-ref = e(f"IFCREFERENT('{guid()}',{oh},'0+000',$,$,{rpl},$,.STATION.)")
-e(f"IFCRELNESTS('{guid()}',{oh},$,$,{aln},({ref},{hz},{vt}))")
-st = e("IFCPROPERTYSINGLEVALUE('Station',$,IFCLENGTHMEASURE(0.),$)")
-ps = e(f"IFCPROPERTYSET('{guid()}',{oh},'Pset_Stationing',$,({st}))")
-e(f"IFCRELDEFINESBYPROPERTIES('{guid()}',{oh},$,$,({ref}),{ps})")
 
-head = """ISO-10303-21;
+def alignment(name, desc, x0, y0, x1, y1, z):
+    """One straight alignment: representation, horizontal and vertical layout, start station."""
+    length = math.hypot(x1 - x0, y1 - y0)
+    dx, dy = (x1 - x0) / length, (y1 - y0) / length
+    # geometry: a composite curve in plan and a gradient curve on top of it
+    hpl = e(f"IFCAXIS2PLACEMENT2D({e(f'IFCCARTESIANPOINT(({f(mm(x0))},{f(mm(y0))}))')},{e(f'IFCDIRECTION(({f(dx)},{f(dy)}))')})")
+    hcurve = e(f"IFCCOMPOSITECURVE(({e(f'IFCCURVESEGMENT(.DISCONTINUOUS.,{hpl},IFCLENGTHMEASURE(0.),IFCLENGTHMEASURE({f(mm(length))}),{line2})')}),.F.)")
+    vpl = e(f"IFCAXIS2PLACEMENT2D({e(f'IFCCARTESIANPOINT((0.,{f(mm(z))}))')},{d2})")
+    vseg = e(f"IFCCURVESEGMENT(.DISCONTINUOUS.,{vpl},IFCLENGTHMEASURE(0.),IFCLENGTHMEASURE({f(mm(length))}),{line2})")
+    gcurve = e(f"IFCGRADIENTCURVE(({vseg}),.F.,{hcurve},$)")
+    foot = e(f"IFCSHAPEREPRESENTATION({axis_ctx},'FootPrint','Curve2D',({hcurve}))")
+    axis = e(f"IFCSHAPEREPRESENTATION({axis_ctx},'Axis','Curve3D',({gcurve}))")
+    shape = e(f"IFCPRODUCTDEFINITIONSHAPE($,$,({foot},{axis}))")
+    # semantics
+    apl = e(f"IFCLOCALPLACEMENT({site_pl},{wcs})")
+    aln = e(f"IFCALIGNMENT('{guid()}',{oh},'{name}','{desc}',$,{apl},{shape},.NOTDEFINED.)")
+    e(f"IFCRELAGGREGATES('{guid()}',{oh},$,$,{proj},({aln}))")
+    hz = e(f"IFCALIGNMENTHORIZONTAL('{guid()}',{oh},$,$,$,{apl},$)")
+    vt = e(f"IFCALIGNMENTVERTICAL('{guid()}',{oh},$,$,$,{apl},$)")
+    hpar = e(f"IFCALIGNMENTHORIZONTALSEGMENT($,$,{e(f'IFCCARTESIANPOINT(({f(mm(x0))},{f(mm(y0))}))')},{f(math.atan2(dy, dx))},0.,0.,{f(mm(length))},$,.LINE.)")
+    hseg = e(f"IFCALIGNMENTSEGMENT('{guid()}',{oh},$,$,$,{apl},$,{hpar})")
+    vpar = e(f"IFCALIGNMENTVERTICALSEGMENT($,$,0.,{f(mm(length))},{f(mm(z))},0.,0.,$,.CONSTANTGRADIENT.)")
+    vsg = e(f"IFCALIGNMENTSEGMENT('{guid()}',{oh},$,$,$,{apl},$,{vpar})")
+    e(f"IFCRELNESTS('{guid()}',{oh},$,$,{hz},({hseg}))")
+    e(f"IFCRELNESTS('{guid()}',{oh},$,$,{vt},({vsg}))")
+    ref = e(f"IFCREFERENT('{guid()}',{oh},'0+000',$,$,{e(f'IFCLOCALPLACEMENT({site_pl},{wcs})')},$,.STATION.)")
+    e(f"IFCRELNESTS('{guid()}',{oh},$,$,{aln},({ref},{hz},{vt}))")
+    station = e("IFCPROPERTYSINGLEVALUE('Station',$,IFCLENGTHMEASURE(0.),$)")
+    ps = e(f"IFCPROPERTYSET('{guid()}',{oh},'Pset_Stationing',$,({station}))")
+    e(f"IFCRELDEFINESBYPROPERTIES('{guid()}',{oh},$,$,({ref}),{ps})")
+    return length
+
+
+for a in ALIGNMENTS:
+    print(f'{a[0]}: {alignment(*a):.3f} m')
+
+HEAD = """ISO-10303-21;
 HEADER;
 FILE_DESCRIPTION(('ViewDefinition [Alignment-basedReferenceView]'),'2;1');
 FILE_NAME('Infra-Alignment.ifc','2026-11-14T00:00:00',('Vispecta'),('Vispecta'),'Vispecta sample generator','Vispecta','');
@@ -85,5 +99,6 @@ FILE_SCHEMA(('IFC4X3_ADD2'));
 ENDSEC;
 DATA;
 """
-open(sys.argv[1], 'w').write(head + "\n".join(lines) + "\nENDSEC;\nEND-ISO-10303-21;\n")
-print('length', round(L, 3), 'angle deg', round(math.degrees(ang), 3), 'entities', n[0])
+with open(sys.argv[1], 'w') as out:
+    out.write(HEAD + "\n".join(lines) + "\nENDSEC;\nEND-ISO-10303-21;\n")
+print('entities', count[0])
