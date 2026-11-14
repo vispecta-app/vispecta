@@ -166,7 +166,7 @@ async function openFiles(files) {
 
 // "Try it with sample models": buildingSMART's IFC 4.3 sample scene (CC BY 4.0), served by the site
 // itself (public/samples), opened like local files and grouped into infrastructure and building.
-const SAMPLES = { dir: 'samples/simple-scene/', files: ['Infra-Bridge', 'Infra-Electrical', 'Infra-Landscaping', 'Infra-Plumbing', 'Infra-Rail', 'Infra-Road', 'Building-Architecture', 'Building-Hvac', 'Building-Landscaping', 'Building-Structural'] };
+const SAMPLES = { dir: 'samples/simple-scene/', files: ['Infra-Bridge', 'Infra-Electrical', 'Infra-Landscaping', 'Infra-Plumbing', 'Infra-Rail', 'Infra-Alignment', 'Infra-Road', 'Building-Architecture', 'Building-Hvac', 'Building-Landscaping', 'Building-Structural'] };
 async function openSamples() {
   let files;
   try {
