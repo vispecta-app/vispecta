@@ -164,6 +164,38 @@ async function openFiles(files) {
   }
 }
 
+// "Try it with sample models": buildingSMART's IFC 4.3 sample scene (CC BY 4.0), served by the site
+// itself (public/samples), opened like local files and grouped into infrastructure and building.
+const SAMPLES = { dir: 'samples/simple-scene/', files: ['Infra-Bridge', 'Infra-Electrical', 'Infra-Landscaping', 'Infra-Plumbing', 'Infra-Rail', 'Infra-Alignment', 'Infra-Road', 'Building-Architecture', 'Building-Hvac', 'Building-Landscaping', 'Building-Structural'] };
+async function openSamples() {
+  let files;
+  try {
+    files = await withLoading(async (progress) => {
+      let done = 0;
+      progress(t('samples.loading'), 0);
+      return Promise.all(SAMPLES.files.map(async (name) => {
+        const res = await fetch(`${SAMPLES.dir}${name}.ifc`);
+        if (!res.ok) throw new Error(`${name}.ifc: ${res.status}`);
+        const file = new File([await res.blob()], `${name}.ifc`, { type: 'application/x-step' });
+        progress(t('samples.loading'), ++done / SAMPLES.files.length);
+        return file;
+      }));
+    });
+  } catch (err) { toast(t('samples.failed', { error: err.message || err })); return; }
+  const before = new Set(viewer.models);
+  await openIfcFiles(files);
+  const added = viewer.models.filter((m) => !before.has(m));
+  for (const [key, re] of [['samples.infra', /^Infra-/], ['samples.building', /^Building-/]]) {
+    const models = added.filter((m) => re.test(m.name));
+    if (!models.length) continue;
+    const g = { id: `g${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, name: t(key), visible: true, open: true };
+    state.modelGroups.push(g);
+    for (const m of models) { m.groupId = g.id; m.setGroupHidden(false); }
+  }
+  afterModelsChanged();
+  projects.touch?.();
+}
+
 async function openIfcFiles(list, keys = null) {
   const before = viewer.models.length;
   await withLoading(async (progress) => {
@@ -607,6 +639,7 @@ document.addEventListener('click', (e) => {
     },
     'reset-colors': () => { for (const m of viewer.models) m.setColor(null); renderModels(); projects.touch?.(); },
     'sv-auto': () => setSvAuto(!svAuto),
+    'open-samples': () => openSamples(),
   };
   actions[btn.dataset.action]?.();
 });
