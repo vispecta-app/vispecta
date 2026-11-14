@@ -6,4 +6,4 @@ buildingSMART International's sample test files: https://github.com/buildingSMAR
 (C) buildingSMART International Ltd. Licensed under the Creative Commons Attribution 4.0
 International License (CC BY 4.0): https://creativecommons.org/licenses/by/4.0/
 
-They are unchanged. Vispecta's "Try sample models" button on the start screen loads them.
+They are unchanged. buildingSMART International does not endorse Vispecta. Vispecta's "Try sample models" button on the start screen loads them.
