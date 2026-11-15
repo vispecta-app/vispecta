@@ -122,7 +122,7 @@ export class SectionViewer {
   }
 
   close() {
-    if (this.win) { const w = this.win; this.dock(); w.close(); }
+    if (this.win) this.dock(); // also closes the popup window (#38)
     this.el.hidden = true;
     this.plane = null;
     this.section = null;
@@ -344,13 +344,19 @@ export class SectionViewer {
     this.popBtn.title = this.ctx.t('sv.dock');
     this.win = w;
     w.addEventListener('keydown', this.onKey);
-    w.addEventListener('pagehide', () => { if (this.win === w) this.dock(); });
+    // the user closed the popup window itself: bring the section back without closing it again (#38)
+    w.addEventListener('pagehide', () => { if (this.win === w) this.dock({ closing: true }); });
+    // the main page goes away (reload, other site): take the popup with it, it can't work alone (#38)
+    if (!this.onMainHide) { this.onMainHide = () => { if (this.win && !this.win.closed) this.win.close(); }; window.addEventListener('pagehide', this.onMainHide); }
     this.#updateHead();
     setTimeout(() => { this.fit(); this.render(); }, 50);
   }
 
-  /** Back into the main window. */
-  dock() {
+  /**
+   * Back into the main window. The popup window is closed too, so no empty about:blank window is
+   * left behind (#38); `closing` is set when the popup is already closing by itself.
+   */
+  dock({ closing = false } = {}) {
     const w = this.win;
     if (!w) return;
     this.win = null;
@@ -359,6 +365,7 @@ export class SectionViewer {
     if (this.saved) this.el.setAttribute('style', this.saved);
     this.popBtn.textContent = '⧉';
     this.popBtn.title = this.ctx.t('sv.popOut');
+    if (!closing && !w.closed) w.close();
     setTimeout(() => { this.fit(); this.render(); }, 30);
   }
 }

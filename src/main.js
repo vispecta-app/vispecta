@@ -637,7 +637,10 @@ document.addEventListener('click', (e) => {
       renderModels();
       projects.touch?.();
     },
-    'reset-colors': () => { for (const m of viewer.models) m.setColor(null); renderModels(); projects.touch?.(); },
+    // "Original colours" also clears colours given to single elements (IDS, filters, smart views) (#40)
+    'reset-colors': () => resetColors(),
+    'reset-view': () => resetView(),
+    'reset-all': () => resetView({ all: true }),
     'sv-auto': () => setSvAuto(!svAuto),
     'open-samples': () => openSamples(),
   };
@@ -725,6 +728,43 @@ function showAll() {
   refreshVisibilityUi();
 }
 
+/** Original colours: no model colour and no element colours (IDS, filters, smart views, BCF). (#40) */
+function resetColors() {
+  if (comparison) endComparison();
+  filters.resetColors();
+  for (const m of viewer.models) { m.setColor(null); m.resetElementColors(); }
+  renderModels();
+  projects.touch?.();
+}
+
+/**
+ * Reset view (#40): back to a clean view in one go – original colours, no transparency, X-ray,
+ * isolation, storey or selection, everything shown, camera on the whole scene. Models, groups,
+ * issues and IDS results stay. With `all`, section planes and measurements are removed too.
+ */
+function resetView({ all = false } = {}) {
+  resetColors();
+  for (const m of viewer.models) {
+    m.resetElementOpacity();
+    m._tonedDown = [];
+    if (m.opacity < 1) m.setOpacity(1);
+    m.showAll({ includeSpaces: state.spacesVisible });
+  }
+  if (state.xray) setXray(false);
+  if (state.storey) showStorey(null);
+  clearSelection();
+  if (all) {
+    viewer.clearPlanes();
+    renderPlanes();
+    if (measure.mode) setMeasureMode(null);
+    measure.clear();
+  }
+  renderModels();
+  refreshVisibilityUi();
+  viewer.fitAll();
+  toast(t(all ? 'msg.allReset' : 'msg.viewReset'), true);
+}
+
 function toggleSpaces() {
   state.spacesVisible = !state.spacesVisible;
   for (const m of viewer.models) {
@@ -754,6 +794,7 @@ document.addEventListener('keydown', (e) => {
     else clearSelection();
   } else if (e.key === 'f' || e.key === 'F') fitSelection();
   else if (e.key === 'H' && e.shiftKey) showAll();
+  else if (e.key === 'R' && e.shiftKey && !e.ctrlKey && !e.metaKey) resetView(); // (#40)
   else if (e.key === 'h') hideSelected();
   else if (e.key === 'i' || e.key === 'I') isolateSelected();
   else if (e.key === 'e' || e.key === 'E') setEditMode(!state.editMode);

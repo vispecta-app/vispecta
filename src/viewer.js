@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { sectionFill } from './model.js';
+import { SectionCaps } from './caps.js';
 
 const AXES = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
 
@@ -11,7 +12,7 @@ export class Viewer extends EventTarget {
     this.container = container;
     this.models = [];
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, stencil: true }); // stencil: section caps (#37)
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.localClippingEnabled = false;
     renderer.setClearColor(0x000000, 0);
@@ -65,6 +66,7 @@ export class Viewer extends EventTarget {
 
     // Snitplaner
     this.planes = []; // {id, plane, axis, helper, enabled}
+    this.caps = new SectionCaps(this, { on: sectionFill.hatch, size: sectionFill.hatchSize }); // cut faces (#37)
     this.planeSeq = 1;
     this.showPlaneHelpers = true;
 
@@ -96,7 +98,7 @@ export class Viewer extends EventTarget {
       lastCam = key;
       lastRender = now;
       this.#updateClip();
-      renderer.render(this.scene, this.camera);
+      this.renderFrame();
       this.#renderGizmo();
       for (const fn of this.renderHooks) fn();
     };
@@ -639,6 +641,7 @@ export class Viewer extends EventTarget {
     this.dispatchEvent(new Event('planeschanged'));
     this.renderer.clippingPlanes = this.planes.filter((p) => p.enabled).map((p) => p.plane);
     sectionFill.active.value = this.renderer.clippingPlanes.length && this.sectionFillOn !== false ? 1 : 0;
+    this.caps.on = sectionFill.active.value === 1;
     for (const p of this.planes) this.#updateHelper(p);
   }
 
@@ -686,8 +689,14 @@ export class Viewer extends EventTarget {
     return { x: ((v.x + 1) / 2) * w, y: ((1 - v.y) / 2) * hgt };
   }
 
-  screenshot() {
+  /** Renders the scene once (with the section caps, #37). Used by the loop and for snapshots. */
+  renderFrame() {
+    this.caps.update();
     this.renderer.render(this.scene, this.camera);
+  }
+
+  screenshot() {
+    this.renderFrame();
     return this.renderer.domElement.toDataURL('image/png');
   }
 }

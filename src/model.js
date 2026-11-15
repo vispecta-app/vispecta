@@ -10,8 +10,8 @@ const XRAY_OPACITY = 0.12;
 const PICK_MATERIAL = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
 
 /**
- * Shared uniforms: while a section is active, back faces (= the inside of cut solids) are drawn
- * as a flat cut face in a darker tone of the element colour, optionally with diagonal hatching.
+ * Shared uniforms of the cut faces: `active` while section caps are shown (caps.js, #37), and the
+ * hatching of the caps.
  */
 export const sectionFill = {
   active: { value: 0 },
@@ -73,21 +73,22 @@ export function styledColor(c) {
   return out;
 }
 
+/*
+ * Cut faces (#37): while section caps are shown (uSectionActive), the model materials discard
+ * their back faces. The inside of cut solids is then shown only by the caps, which caps.js draws
+ * exactly in the section plane with the stencil buffer – so they don't z-fight with touching
+ * solids and their hatching sticks to the plane. With "Colour cut faces" off, back faces are drawn
+ * as usual.
+ */
 function installSectionFill(material) {
+  material.userData.sectionFill = true; // caps.js draws caps for meshes with this material
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uSectionActive = sectionFill.active;
-    shader.uniforms.uSectionHatch = sectionFill.hatch;
-    shader.uniforms.uHatchSize = sectionFill.hatchSize;
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform float uSectionActive;\nuniform float uSectionHatch;\nuniform vec2 uHatchSize;')
-      .replace('#include <opaque_fragment>', `if (uSectionActive > 0.5 && !gl_FrontFacing) {
-  vec3 cutCol = diffuseColor.rgb * 0.72;
-  if (uSectionHatch > 0.5 && mod(gl_FragCoord.x + gl_FragCoord.y, uHatchSize.x) < uHatchSize.y) cutCol = diffuseColor.rgb * 0.34;
-  outgoingLight = cutCol;
-}
-#include <opaque_fragment>`);
+      .replace('#include <common>', '#include <common>\nuniform float uSectionActive;')
+      .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n#if NUM_CLIPPING_PLANES > 0\nif (uSectionActive > 0.5 && !gl_FrontFacing) discard;\n#endif');
   };
-  material.customProgramCacheKey = () => 'ifc-section-2';
+  material.customProgramCacheKey = () => 'ifc-section-4';
 }
 
 export class IfcModel {
