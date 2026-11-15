@@ -243,6 +243,15 @@ export class SectionViewer {
         svg.append(mk('path', { d: p.d, fill: p.fill, stroke: p.stroke, 'stroke-width': 1.2, 'fill-rule': 'evenodd', 'vector-effect': 'non-scaling-stroke', 'stroke-linejoin': 'round' }));
         if (hatch && p.fill && p.fill !== 'none') svg.append(mk('path', { d: p.d, fill: 'url(#sv-hatch)', stroke: 'none', 'fill-rule': 'evenodd' }));
       }
+      // point cloud dots (#27): small squares, about 3 px
+      if (sec.cloud) {
+        const d = 2.6 * px;
+        for (const g of sec.cloud) {
+          const parts = [];
+          for (let k = 0; k < g.xy.length; k += 2) parts.push(`M${(g.xy[k] - d / 2).toFixed(4)} ${(-g.xy[k + 1] - d / 2).toFixed(4)}h${d.toFixed(4)}v${d.toFixed(4)}h${(-d).toFixed(4)}z`);
+          svg.append(mk('path', { d: parts.join(''), fill: g.hex, stroke: 'none' }));
+        }
+      }
       // marks: the alignment axis
       for (const m of sec.marks || []) {
         if (!m.line) continue;

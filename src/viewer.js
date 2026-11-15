@@ -11,6 +11,7 @@ export class Viewer extends EventTarget {
     super();
     this.container = container;
     this.models = [];
+    this.clouds = []; // point clouds (#27)
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, stencil: true }); // stencil: section caps (#37)
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -184,8 +185,83 @@ export class Viewer extends EventTarget {
     this.models.push(model);
     this.modelRoot.add(model.group);
     model.setSelection([], this.highlightMaterial);
+    for (const c of this.clouds) this.placeCloud(c); // the model may bring the map conversion (#27)
     this.#updateSceneRadius();
     this.invalidate(1000);
+  }
+
+  // ---------------------------------------------------------- point clouds (#27)
+  /**
+   * Adds a point cloud. Its points are in its own coordinates: either the IFC coordinates of the
+   * models, or map coordinates (UTM, DKS …) that the models' IfcMapConversion turns into IFC
+   * coordinates. placeCloud picks whichever lands nearer the models. Without models, the first
+   * cloud defines the coordinate system.
+   */
+  addCloud(cloud) {
+    if (!this.referenceMatrix) {
+      const [x, y, z] = cloud.origin;
+      this.referenceMatrix = new THREE.Matrix4().makeTranslation(-x, -z, y); // IFC (x, y, z) -> viewer (x, z, -y), at the origin
+    }
+    this.clouds.push(cloud);
+    this.modelRoot.add(cloud.points);
+    cloud.setPointSize(cloud.pointSize, this.renderer.getPixelRatio());
+    this.placeCloud(cloud);
+    this.#updateSceneRadius();
+    this.invalidate(500);
+  }
+
+  removeCloud(cloud) {
+    this.clouds = this.clouds.filter((c) => c !== cloud);
+    cloud.dispose();
+    if (!this.models.length && !this.clouds.length) { this.referenceMatrix = null; this.referenceModel = null; }
+    this.#updateSceneRadius();
+    this.invalidate(300);
+  }
+
+  /** The IfcMapConversion used for map coordinates: of the reference model, else of any model. */
+  #mapModel() {
+    if (this.referenceModel?.georef?.map) return this.referenceModel;
+    return this.models.find((m) => m.georef?.map) || null;
+  }
+
+  /** Places a cloud (see addCloud). Returns the distance (m) between the cloud and the models, or null. */
+  placeCloud(cloud) {
+    const toViewer = new THREE.Matrix4().copy(this.referenceMatrix || new THREE.Matrix4())
+      .multiply(new THREE.Matrix4().set(1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1)); // IFC (Z up) -> viewer (Y up)
+    const [ox, oy, oz] = cloud.origin;
+    const raw = new THREE.Matrix4().makeTranslation(ox, oy, oz); // source = IFC coordinates
+    const candidates = [['raw', raw]];
+    const mm = this.#mapModel();
+    if (mm) {
+      // map (e, n, h) -> IFC project coordinates (m): inverse IfcMapConversion
+      const m = mm.georef.map, ls = mm.lengthScale || 1;
+      const k = ls / (m.scale * m.mapScale), t = ls / m.scale;
+      const toIfc = new THREE.Matrix4().set(
+        k * m.a, k * m.b, 0, -t * (m.a * m.eastings + m.b * m.northings),
+        -k * m.b, k * m.a, 0, -t * (-m.b * m.eastings + m.a * m.northings),
+        0, 0, k, -t * m.height,
+        0, 0, 0, 1);
+      candidates.push(['map', toIfc.multiply(raw)]);
+    }
+    // the models' extent, in IFC coordinates
+    const box = this.sceneBox({ visibleOnly: false, clouds: false });
+    const center = box.isEmpty() ? null : this.toIfc(box.getCenter(new THREE.Vector3()));
+    let best = candidates[0], bestD = Infinity;
+    for (const c of candidates) {
+      const o = new THREE.Vector3(0, 0, 0).applyMatrix4(c[1]); // the cloud's origin in IFC coordinates
+      const d = center ? Math.hypot(o.x - center.x, o.y - center.y) : 0;
+      if (d < bestD) { best = c; bestD = d; }
+    }
+    cloud.placement = best[0];
+    cloud.points.matrix.multiplyMatrices(toViewer, best[1]);
+    cloud.points.matrixWorldNeedsUpdate = true;
+    cloud.points.updateMatrixWorld(true);
+    // distance between the cloud's centre and the models (for the warning about far apart data, #28)
+    if (!center) return null;
+    const cb = cloud.getBox();
+    const cc = this.toIfc(cb.getCenter(new THREE.Vector3()));
+    const size = box.getSize(new THREE.Vector3()).length() / 2 + cb.getSize(new THREE.Vector3()).length() / 2;
+    return Math.max(0, Math.hypot(cc.x - center.x, cc.y - center.y) - size);
   }
 
   /** Group matrix of a model: from its own coordinates into those of the reference model. */
@@ -208,6 +284,7 @@ export class Viewer extends EventTarget {
     } else {
       this.#place(model);
     }
+    for (const c of this.clouds) this.placeCloud(c);
     this.modelRoot.updateMatrixWorld(true);
     this.#updateSceneRadius();
     this.dispatchEvent(Object.assign(new Event('modelmoved'), { model }));
@@ -238,18 +315,20 @@ export class Viewer extends EventTarget {
   removeModel(model) {
     this.models = this.models.filter((m) => m !== model);
     model.dispose();
-    if (!this.models.length) { this.referenceMatrix = null; this.referenceModel = null; }
+    if (!this.models.length && !this.clouds.length) { this.referenceMatrix = null; this.referenceModel = null; }
+    if (this.models.length || this.clouds.length) for (const c of this.clouds) this.placeCloud(c);
     this.#updateSceneRadius();
     this.invalidate(300);
     this.dispatchEvent(Object.assign(new Event('modelremoved'), { model }));
   }
 
-  sceneBox({ visibleOnly = true } = {}) {
+  sceneBox({ visibleOnly = true, clouds = true } = {}) {
     const box = new THREE.Box3();
     for (const m of this.models) {
       if (visibleOnly && !m.visible) continue;
       box.union(m.getBox());
     }
+    if (clouds) for (const c of this.clouds) if (!visibleOnly || c.visible) box.union(c.getBox());
     return box;
   }
 
