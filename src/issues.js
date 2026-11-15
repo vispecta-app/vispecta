@@ -27,7 +27,7 @@ export class IssuesPanel {
     const c = document.createElement('canvas');
     c.width = Math.round(src.width * scale);
     c.height = Math.round(src.height * scale);
-    this.ctx.viewer.renderFrame();
+    this.ctx.viewer.renderFrame({ still: true });
     c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
     return dataUrlBytes(c.toDataURL('image/png'));
   }

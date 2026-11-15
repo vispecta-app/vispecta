@@ -99,7 +99,24 @@ class Sink {
     return slot;
   }
 
+  /**
+   * Puts the kept points in random order (Fisher–Yates over all attributes), so the first k points
+   * are an even sample of the whole cloud: the viewer can then draw fewer points while the camera
+   * moves, or at a lower density, just by drawing the first k.
+   */
+  shuffle() {
+    const n = this.n, P = this.pos, C = this.rgb, I = this.int, K = this.cls;
+    for (let i = n - 1; i > 0; i--) {
+      const j = Math.floor(this.random() * (i + 1));
+      for (let k = 0; k < 3; k++) { const t = P[i * 3 + k]; P[i * 3 + k] = P[j * 3 + k]; P[j * 3 + k] = t; }
+      if (C) for (let k = 0; k < 3; k++) { const t = C[i * 3 + k]; C[i * 3 + k] = C[j * 3 + k]; C[j * 3 + k] = t; }
+      if (I) { const t = I[i]; I[i] = I[j]; I[j] = t; }
+      if (K) { const t = K[i]; K[i] = K[j]; K[j] = t; }
+    }
+  }
+
   result(format) {
+    this.shuffle();
     const n = this.n;
     const out = {
       format,
@@ -214,9 +231,12 @@ async function readLaz(file, h, sink) {
     const count = reader.getCount(), len = reader.getPointLength();
     const ptPtr = laz._malloc(len);
     const step = Math.max(1, Math.floor(count / 100));
+    // one view on the point buffer for all points (a new DataView per point is slow); made again
+    // only if the WASM memory grows and its buffer changes
+    let buf = laz.HEAPU8.buffer, v = new DataView(buf, ptPtr, len);
     for (let i = 0; i < count; i++) {
       reader.getPoint(ptPtr);
-      const v = new DataView(laz.HEAPU8.buffer, ptPtr, len);
+      if (laz.HEAPU8.buffer !== buf) { buf = laz.HEAPU8.buffer; v = new DataView(buf, ptPtr, len); }
       lasPoint(sink, h, v, 0);
       if (i % step === 0) progress(i / count);
     }
