@@ -73,6 +73,52 @@ export function styledColor(c) {
   return out;
 }
 
+/*
+ * Cut faces (#37). A back face seen through a section plane is the inside of a cut solid and is
+ * drawn in a darker tone, optionally hatched. The hatching used to be computed in screen space
+ * (gl_FragCoord), so it stood still on the screen while the model moved under it and seemed to
+ * crawl and flicker over the cut faces while navigating. It is now computed in the section plane
+ * itself: the view ray is intersected with the plane it passed through, and that point is
+ * expressed in the plane's own axes. The hatch sticks to the cut face like on a drawing; its
+ * spacing stays about uHatchSize.x device pixels, in steps of powers of two when zooming.
+ * (Z-fighting where cut solids touch other solids is a separate matter; real caps drawn with the
+ * stencil buffer would solve it – see #37.)
+ */
+const SECTION_FRAGMENT = `
+if (uSectionActive > 0.5 && !gl_FrontFacing) {
+  vec3 cutCol = diffuseColor.rgb * 0.72;
+#if NUM_CLIPPING_PLANES > 0
+  if (uSectionHatch > 0.5) {
+    vec3 X = -vClipPosition;                       // this fragment, view space
+    vec3 E = isOrthographic ? vec3(X.xy, 0.0) : vec3(0.0);
+    vec3 D = X - E;                                // view ray up to the fragment
+    float bestT = -1.0;
+    vec3 bestN = vec3(0.0);
+    for (int i = 0; i < NUM_CLIPPING_PLANES; i++) {
+      vec4 pl = clippingPlanes[i];                 // kept side: dot(n, X) + c >= 0
+      float den = dot(pl.xyz, D);
+      if (den <= 1e-9) continue;                   // the ray must go from the cut-away side into the kept side
+      float t = -(dot(pl.xyz, E) + pl.w) / den;
+      if (t > bestT && t <= 1.0) { bestT = t; bestN = pl.xyz; }
+    }
+    if (bestT > 0.0) {
+      mat3 toWorld = transpose(mat3(viewMatrix));
+      vec3 Qw = toWorld * (E + D * bestT - viewMatrix[3].xyz); // the point in the plane, world space
+      vec3 n = normalize(toWorld * bestN);
+      vec3 a = abs(n.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+      vec3 u = normalize(cross(a, n));
+      vec3 v = cross(n, u);
+      float k = dot(Qw, u) + dot(Qw, v);           // diagonal lines in the plane
+      float perPx = max(length(vec2(dFdx(k), dFdy(k))), 1e-9);
+      float lod = exp2(ceil(log2(uHatchSize.x * perPx)));
+      if (fract(k / lod) < uHatchSize.y * perPx / lod) cutCol = diffuseColor.rgb * 0.34;
+    }
+  }
+#endif
+  outgoingLight = cutCol;
+}
+#include <opaque_fragment>`;
+
 function installSectionFill(material) {
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uSectionActive = sectionFill.active;
@@ -80,14 +126,9 @@ function installSectionFill(material) {
     shader.uniforms.uHatchSize = sectionFill.hatchSize;
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', '#include <common>\nuniform float uSectionActive;\nuniform float uSectionHatch;\nuniform vec2 uHatchSize;')
-      .replace('#include <opaque_fragment>', `if (uSectionActive > 0.5 && !gl_FrontFacing) {
-  vec3 cutCol = diffuseColor.rgb * 0.72;
-  if (uSectionHatch > 0.5 && mod(gl_FragCoord.x + gl_FragCoord.y, uHatchSize.x) < uHatchSize.y) cutCol = diffuseColor.rgb * 0.34;
-  outgoingLight = cutCol;
-}
-#include <opaque_fragment>`);
+      .replace('#include <opaque_fragment>', SECTION_FRAGMENT);
   };
-  material.customProgramCacheKey = () => 'ifc-section-2';
+  material.customProgramCacheKey = () => 'ifc-section-3';
 }
 
 export class IfcModel {
