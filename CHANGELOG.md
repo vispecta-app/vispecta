@@ -6,6 +6,8 @@ https://github.com/vispecta-app/vispecta/releases
 ## Unreleased
 
 ### Added
+- **Point clouds load faster and are lighter to navigate:** fewer points are drawn while the camera
+  moves, and *Points shown* (100/50/25/10 %) on the card. ([#27](https://github.com/vispecta-app/vispecta/issues/27))
 - **Stationing format.** Five formats – `12+345.678`, `123+45.68` (100 m stations), `12.346`,
   `km 12,346`, `12345.678 m` – one setting for the whole app, remembered and saved in projects;
   typing accepts every format. ([#29](https://github.com/vispecta-app/vispecta/issues/29))
