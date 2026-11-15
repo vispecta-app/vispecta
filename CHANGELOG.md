@@ -3,7 +3,16 @@
 Changes per release, with the GitHub issue each one belongs to. Releases and their full notes:
 https://github.com/vispecta-app/vispecta/releases
 
-## v0.0.3 (unreleased)
+## Unreleased
+
+### Added
+- **A second sample: Chesapeake Bay Bridge-Tunnel.** The start screen now offers two samples.
+  The new one is a synthetic 31 km bridge–tunnel corridor from buildingSMART's community samples
+  (MIT; geometry from OpenStreetMap, ODbL) with two alignments and 17,553 elements – 26 MB,
+  about 5 MB to download. It opens at Island #1 (station 6+083).
+  ([#41](https://github.com/vispecta-app/vispecta/issues/41))
+
+## v0.0.3
 
 ### Fixed
 - **Section window left an empty `about:blank` window behind** when it was docked back from its
@@ -24,11 +33,6 @@ https://github.com/vispecta-app/vispecta/releases
   everything shown, no X-ray, storey or selection, zoom to all. Models, groups, issues and IDS
   results stay. **Reset all** also removes section planes and measurements.
   ([#40](https://github.com/vispecta-app/vispecta/issues/40))
-- **A second sample: Chesapeake Bay Bridge-Tunnel.** The start screen now offers two samples.
-  The new one is a synthetic 31 km bridge–tunnel corridor from buildingSMART's community samples
-  (MIT; geometry from OpenStreetMap, ODbL) with two alignments and 17,553 elements – 26 MB,
-  about 5 MB to download. It opens at Island #1 (station 6+083).
-  ([#41](https://github.com/vispecta-app/vispecta/issues/41))
 - Sample models on the start screen with two alignments, *Track* and *Road*
   ([#35](https://github.com/vispecta-app/vispecta/pull/35),
   [#36](https://github.com/vispecta-app/vispecta/pull/36)).
