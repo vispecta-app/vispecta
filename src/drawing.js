@@ -104,6 +104,16 @@ export function computeSection(viewer, entry, { marks = [], annot = null } = {})
     out.push({ line: [[0, bounds.minY - pad], [0, bounds.maxY + pad]], color: AXIS_COLOR, dash: 'dashdot', layer: 'ALIGNMENT_AXIS' });
     out.push({ text: entry.stationLabel || '', at: [0, bounds.maxY + pad], dx: 1.2, dy: -1, size: 3, color: AXIS_COLOR, layer: 'ALIGNMENT_AXIS' });
   }
+  // offset lines (#26): vertical lines at the offsets of the corridor, labelled at the top
+  if (entry.station && Number.isFinite(bounds.minX)) {
+    const offs = viewer.corridor?.sectionOffsets(entry) || [];
+    const pad = 0.06 * (bounds.maxY - bounds.minY || 1);
+    for (const o of offs) {
+      bounds.minX = Math.min(bounds.minX, o); bounds.maxX = Math.max(bounds.maxX, o);
+      out.push({ line: [[o, bounds.minY - pad], [o, bounds.maxY + pad]], color: OFFSET_LINE_COLOR, dash: 'dash', layer: 'OFFSET_LINES' });
+      out.push({ text: `${o > 0 ? '+' : ''}${o.toFixed(2)}`, at: [o, bounds.minY - pad], dx: 0, dy: 3, size: 2.5, anchor: 'middle', color: OFFSET_LINE_COLOR, layer: 'OFFSET_LINES' });
+    }
+  }
   // marks in plans (e.g. section marks) widen the drawing
   if (ax.horizontal && Number.isFinite(bounds.minX)) {
     for (const mk of marks) for (const p of mk.line || (mk.arrow ? [mk.arrow] : [mk.at])) {
@@ -334,6 +344,7 @@ function annotationMarks(section, lay) {
 }
 
 export const AXIS_COLOR = '#C8372D';
+export const OFFSET_LINE_COLOR = '#8E44AD'; // offset lines (#26)
 
 // ----------------------------------------------------------- longitudinal profile
 const niceStep = (range, maxCount, steps = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000]) =>

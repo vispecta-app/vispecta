@@ -100,6 +100,9 @@ Cross sections get letters (A–A, B–B …). In 3D and on plan drawings each o
 
 **Section window:** the ▣ button of a section plane opens a window with the live 2D cut of that plane, next to the 3D view. There you step through the sections with ‹ ›, the arrow keys or a typed station, and set the step length. The model shows the section mark of the current cut at the same time. The window has a grid (offset from the axis and height), zoom (wheel), pan (drag), *Fit* (`F`), and shows the coordinates under the cursor. ⧉ pops it out into a browser window of its own, e.g. on a second screen, and closing that window puts it back. With *Section → Sections in a window of their own*, every new section opens there straight away (the browser must allow pop-ups for the page). A key plan in the corner (▦) shows the visible models, the alignments and the cut line with its view direction, and the plane of the window is drawn in the accent colour in the 3D view. Cut faces are hatched here too.
 
+### Offset lines and corridors
+*Alignment → Offset lines and corridor* draws lines at fixed offsets from an alignment or a drawn line (e.g. −5 and +5 m; perpendicular in plan, right positive as in the section window), limited to a station range (#26). They show in 3D, and as dashed vertical lines in station sections, the section window and exported drawings (DXF layer `OFFSET_LINES`). *Find elements* lists the elements inside the band between the outermost offsets or crossing it – by their geometry, not their insertion point – per class, and can colour (inside violet, crossing orange), select or isolate them, or export the list as CSV with station and offset. The corridor is saved in the project.
+
 ### Point clouds
 Surveys and laser scans can be loaded next to the IFC models (#27) – drop the file like an IFC file:
 
@@ -118,6 +121,12 @@ Point clouds are not saved in projects or workspaces yet; open the file again.
 
 ### Go to station / drive along
 **Alignment → Go to station / drive along** puts the camera at eye height on an alignment (or a drawn line), looking ahead. Type a station and press Enter (↑/↓ step), or press ▶ to drive at 5–200 km/h. The camera follows the curves and the vertical profile, and ⇄ changes the direction. Dragging the view or pressing Esc pauses.
+
+### Stationing format
+*Alignment → Station format* sets how stations are written everywhere – labels, fields, the section window, profiles, series and drawings (#29): `12+345.678` (km + m, default), `123+45.68` (stations of 100 m), `12.346` (km with decimals), `km 12,346` or `12345.678 m`. Typing accepts every format (`12+345`, `km 12,345`, `12345 m`; a bare number counts as km when a km format is chosen). The choice is remembered and saved in the project.
+
+### Models far apart
+After loading, Vispecta warns when a model lies more than 1000 m (adjustable under the model list) from the others – by the gap between their boxes, in map coordinates when the models have an `IfcMapConversion` (#28). The message names the model and the distance and the likely cause (another map coordinate system, a map conversion in only one model, map vs. local coordinates, or another base point), and the model card shows ⚠.
 
 ### Measure
 **Measure** (toolbar or `M`) opens the measuring panel with three tools:

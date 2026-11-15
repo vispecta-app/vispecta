@@ -255,7 +255,8 @@ export class SectionViewer {
       // marks: the alignment axis
       for (const m of sec.marks || []) {
         if (!m.line) continue;
-        svg.append(mk('path', { d: `M${m.line.map((q) => `${q[0]} ${-q[1]}`).join('L')}`, fill: 'none', stroke: m.color || '#c0392b', 'stroke-width': 1.2, 'stroke-dasharray': '10 3 2 3', 'vector-effect': 'non-scaling-stroke' }));
+        svg.append(mk('path', { d: `M${m.line.map((q) => `${q[0]} ${-q[1]}`).join('L')}`, fill: 'none', stroke: m.color || '#c0392b', 'stroke-width': 1.2, 'stroke-dasharray': m.dash === 'dash' ? '6 4' : '10 3 2 3', 'vector-effect': 'non-scaling-stroke' }));
+        if (m.layer === 'OFFSET_LINES') { const tx = mk('text', { x: m.line[0][0] + 3 * px, y: -m.line[1][1] + 12 * px, 'font-size': 11 * px, fill: m.color }); tx.textContent = `${m.line[0][0] > 0 ? '+' : ''}${m.line[0][0].toFixed(2)}`; svg.append(tx); }
       }
     }
     this.ptsBtn.classList.toggle('on', !!this.showPoints);

@@ -175,8 +175,13 @@
               </select></label>
             <label id="station-custom-wrap" hidden><input type="number" id="station-custom" min="0.1" step="any" value="15" class="sm" /> m</label>
           </div>
+          <div class="menu-sub">
+            <label><span data-i18n="aln.formatTitle"></span>
+              <select id="station-format-menu" class="sm station-format"></select></label>
+          </div>
           <div class="menu-sep"></div>
           <button class="menu-item" data-action="plane-station"><span class="mi-icon"><svg viewBox="0 0 24 24"><path d="M3 18c5-1 8-6 18-12M12 5v14M9 12h6"/></svg></span><span class="mi-text"><b data-i18n="st.menu"></b><small data-i18n="st.menuDesc"></small></span></button>
+          <button class="menu-item" data-action="corridor"><span class="mi-icon"><svg viewBox="0 0 24 24"><path d="M4 20C8 14 12 10 20 4" stroke-dasharray="3 2"/><path d="M8 20c3-4 7-8 12-12M4 16C7 11 10 8 16 4"/></svg></span><span class="mi-text"><b data-i18n="cor.menu"></b><small data-i18n="cor.menuDesc"></small></span></button>
           <button class="menu-item" data-action="profile"><span class="mi-icon"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 3 4-7 5 5M3 21h18"/></svg></span><span class="mi-text"><b data-i18n="prof.menu"></b><small data-i18n="prof.menuDesc"></small></span></button>
           <button class="menu-item" data-action="drive"><span class="mi-icon"><svg viewBox="0 0 24 24"><path d="M6 21l3-18M18 21l-3-18M7.5 12h9M8.5 6h7M6.8 17h10.4"/></svg></span><span class="mi-text"><b data-i18n="drive.menu"></b><small data-i18n="drive.menuDesc"></small></span></button>
           <div class="menu-sep"></div>
@@ -250,6 +255,7 @@
             <button class="btn sm" data-action="model-group-new" data-i18n="mg.new" data-i18n-title="mg.newTitle"></button>
             <button class="btn sm" data-action="color-by-model" data-i18n="models.colorByModel"></button>
             <button class="btn sm" data-action="reset-colors" data-i18n="models.resetColors"></button>
+            <label class="coord-warn-set small muted" data-i18n-title="coord.settingTitle"><span data-i18n="coord.setting"></span> <input type="number" id="coord-warn-m" min="10" step="100" class="num-sm" /> m</label>
           </div>
         </section>
         <section class="tab-body" id="tab-tree">
@@ -375,7 +381,7 @@
             <div class="measure-opts">
               <label class="chk"><input type="checkbox" id="measure-snap" checked /> <span data-i18n="measure.snapLabel"></span></label>
               <select id="measure-unit" class="sm"><option value="m">m</option><option value="mm">mm</option></select>
-              <select id="station-format" class="sm" data-i18n-title="aln.formatTitle"><option value="km">0+000.000</option><option value="m">0.000 m</option></select>
+              <select id="station-format" class="sm station-format" data-i18n-title="aln.formatTitle"></select>
             </div>
             <div class="measure-opts lock-opts">
               <label class="chk" data-i18n-title="measure.lockXYTitle"><input type="checkbox" id="measure-lock-xy" /> <span data-i18n="measure.lockXY"></span></label>
@@ -533,6 +539,24 @@
         <button class="btn" data-action="prof-export" data-fmt="svg">SVG</button>
         <button class="btn" data-action="prof-export" data-fmt="pdf">PDF</button>
         <button class="btn primary" data-action="prof-show" data-i18n="prof.show"></button>
+      </div>
+    </dialog>
+
+    <dialog id="corridor-dialog">
+      <h2 data-i18n="cor.title"></h2>
+      <p class="muted small" data-i18n="cor.intro"></p>
+      <label class="field"><span data-i18n="prof.path"></span><select id="cor-path"></select></label>
+      <div class="grid3">
+        <label class="field"><span data-i18n="cor.offsets"></span><input id="cor-offsets" type="text" value="-5 5" data-i18n-title="cor.offsetsTitle" /></label>
+        <label class="field"><span data-i18n="prof.from"></span><input id="cor-from" type="text" inputmode="decimal" /></label>
+        <label class="field"><span data-i18n="prof.to"></span><input id="cor-to" type="text" inputmode="decimal" /></label>
+      </div>
+      <div id="cor-results"></div>
+      <div class="dialog-btns">
+        <form method="dialog"><button class="btn" data-i18n="common.close"></button></form>
+        <button class="btn" data-action="cor-clear" data-i18n="cor.clear"></button>
+        <button class="btn" data-action="cor-show" data-i18n="cor.show"></button>
+        <button class="btn primary" data-action="cor-find" data-i18n="cor.find"></button>
       </div>
     </dialog>
 

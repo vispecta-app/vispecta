@@ -32,8 +32,9 @@ import { ProjectManager } from './projects.js';
 import { SectionViewer } from './secview.js';
 import { FilterPanel, keyLabel } from './filters.js';
 import { IssuesPanel } from './issues.js';
-import { readAlignments, AlignmentLayer, SectionMarks, pointAt, heightAt, project, formatStation } from './alignment.js';
+import { readAlignments, AlignmentLayer, SectionMarks, pointAt, heightAt, project, formatStation, parseStation, setStationFormat, stationFormat, STATION_FORMATS } from './alignment.js';
 import { loadPointCloud, LAS_CLASSES, classColor as lasClassColor } from './pointcloud.js';
+import { Corridor } from './corridor.js';
 import { computeSection, computeProfile, planeAxes, layout, toSvg, toPdf, toPdfPages, toDxf, renderBackground, SCALES, AXIS_COLOR } from './drawing.js';
 import { runIdsCheck, colorIdsResult, idsCsv, specSummary, setIdsColors, IDS_EXAMPLES } from './ids.js';
 import { compareModels, showComparison, clearComparison, comparisonCsv, geomText, summaryText, CMP_COLORS, setCompareColors } from './compare.js';
@@ -226,6 +227,116 @@ async function openSamples(key = 'scene') {
   projects.touch?.();
 }
 
+// ------------------------------------------------------------- offset lines and corridors (#26)
+const corridor = new Corridor(viewer, $('#viewport'));
+viewer.corridor = corridor; // computeSection draws the offsets in station sections
+let corridorHits = null;
+
+function openCorridorDialog() {
+  const list = allAlignments();
+  if (!list.length) return toast(t('aln.none'));
+  const sel = $('#cor-path');
+  const cur = corridor.def?.al;
+  sel.replaceChildren(...list.map((a, i) => h('option', { value: String(i), text: a.drawn ? `✎ ${a.name}` : a.name, selected: a === cur })));
+  const al = cur && list.includes(cur) ? cur : list[+sel.value];
+  if (!corridor.def || corridor.def.al !== al) {
+    $('#cor-from').value = formatStation(al.station0);
+    $('#cor-to').value = formatStation(al.station0 + al.length);
+  }
+  renderCorridorHits();
+  $('#corridor-dialog').showModal();
+}
+$('#cor-path').addEventListener('change', () => {
+  const al = allAlignments()[+$('#cor-path').value];
+  if (al) { $('#cor-from').value = formatStation(al.station0); $('#cor-to').value = formatStation(al.station0 + al.length); }
+});
+
+/** The definition in the dialog, or null (with a message). */
+function corridorFromDialog() {
+  const al = allAlignments()[+$('#cor-path').value];
+  if (!al) { toast(t('aln.none')); return null; }
+  const offsets = [...new Set($('#cor-offsets').value.split(/[;\s]+|,(?=\s)|,(?=-)/).map((x) => +x.replace(',', '.')).filter(Number.isFinite))].sort((a, b) => a - b);
+  if (!offsets.length) { toast(t('cor.noOffsets')); return null; }
+  const from = parseStation($('#cor-from').value), to = parseStation($('#cor-to').value);
+  if (from === null || to === null) { toast(t('st.bad', { v: from === null ? $('#cor-from').value : $('#cor-to').value })); return null; }
+  return { al, offsets, from: from - al.station0, to: to - al.station0 };
+}
+
+function showCorridor() {
+  const def = corridorFromDialog();
+  if (!def) return false;
+  corridor.set(def);
+  corridorHits = null;
+  renderCorridorHits();
+  secViewer?.planesChanged?.();
+  projects.touch?.();
+  return true;
+}
+
+async function findInCorridor() {
+  if (!showCorridor()) return;
+  if (corridor.def.offsets.length < 2) return toast(t('cor.needTwo'));
+  corridorHits = await withLoading(async (progress) => { progress(t('cor.finding'), 0.3); await new Promise((r) => setTimeout(r, 30)); return corridor.find(); });
+  renderCorridorHits();
+}
+
+function renderCorridorHits() {
+  const box = $('#cor-results');
+  if (!corridorHits) { box.replaceChildren(h('p', { class: 'muted small', text: t('cor.hint') })); return; }
+  if (!corridorHits.length) { box.replaceChildren(h('p', { class: 'muted small', text: t('cor.none') })); return; }
+  const byClass = new Map();
+  for (const r of corridorHits) {
+    const cls = r.model.typeName(r.id) || 'IfcElement';
+    const c = byClass.get(cls) || { inside: 0, crosses: 0 };
+    c[r.status]++;
+    byClass.set(cls, c);
+  }
+  const inside = corridorHits.filter((r) => r.status === 'inside').length;
+  box.replaceChildren(
+    h('p', { class: 'small', text: t('cor.summary', { inside: fmtNum(inside), crosses: fmtNum(corridorHits.length - inside) }) }),
+    h('table', { class: 'cor-table' },
+      h('tr', {}, h('th', { text: t('cor.class') }), h('th', { text: t('cor.inside') }), h('th', { text: t('cor.crosses') })),
+      [...byClass].sort((a, b) => (b[1].inside + b[1].crosses) - (a[1].inside + a[1].crosses)).map(([cls, c]) => h('tr', {}, h('td', { text: cls }), h('td', { text: fmtNum(c.inside) }), h('td', { text: fmtNum(c.crosses) })))),
+    h('div', { class: 'card-btns' },
+      h('button', { class: 'btn sm', text: t('cor.colour'), onclick: () => colourCorridorHits() }),
+      h('button', { class: 'btn sm', text: t('cor.select'), onclick: () => selectCorridorHits(false) }),
+      h('button', { class: 'btn sm', text: t('cor.isolate'), onclick: () => selectCorridorHits(true) }),
+      h('button', { class: 'btn sm', text: 'CSV', onclick: () => corridorCsv() })));
+}
+
+function colourCorridorHits() {
+  const per = new Map();
+  for (const r of corridorHits || []) {
+    if (!per.has(r.model)) per.set(r.model, new Map());
+    per.get(r.model).set(r.id, r.status === 'inside' ? 0x8e44ad : 0xf08a24);
+  }
+  for (const m of viewer.models) m.setElementColors(per.get(m) || new Map());
+  viewer.invalidate();
+}
+
+function selectCorridorHits(isolate) {
+  state.selection.clear();
+  for (const r of corridorHits || []) {
+    if (!state.selection.has(r.model)) state.selection.set(r.model, new Set());
+    state.selection.get(r.model).add(r.id);
+  }
+  applySelection();
+  if (isolate) isolateSelected();
+  $('#corridor-dialog').close();
+}
+
+function corridorCsv() {
+  const al = corridor.def.al;
+  const q = (x) => `"${String(x ?? '').replace(/"/g, '""')}"`;
+  const rows = [['Model', 'GlobalId', 'Class', 'Name', 'Status', 'Station', 'Offset (m)'].map(q).join(';')];
+  for (const r of corridorHits || []) {
+    let guid = '';
+    try { guid = r.model.api.GetLine(r.model.modelID, r.id, false)?.GlobalId?.value || ''; } catch { /* ignore */ }
+    rows.push([r.model.name, guid, r.model.typeName(r.id), r.model.nameOf?.(r.id) || r.model.label(r.id), r.status, formatStation(al.station0 + r.s), r.offset.toFixed(3)].map(q).join(';'));
+  }
+  download(`corridor-${al.name.replace(/[^\w.-]+/g, '_')}.csv`, `﻿${rows.join('\r\n')}`, 'text/csv');
+}
+
 // ------------------------------------------------------------- point clouds (#27)
 const CLOUD_FILE = /\.(las|laz|ply|xyz|pts|csv|txt)$/i;
 viewer.cloudSlab = 0.1; // half thickness (m) of the slab of points shown in sections
@@ -333,6 +444,7 @@ async function openIfcFiles(list, keys = null) {
   });
   afterModelsChanged();
   viewer.fitBox(viewer.sceneBox(), { keepDirection: before > 0 });
+  checkCoordinates();
 }
 
 // ------------------------------------------------------------- length units
@@ -350,6 +462,97 @@ function modelOrigin(m, f = m.unitFix) {
 function unitCandidates(m) {
   const s = m.declaredLengthScale ?? 1;
   return UNIT_SCALES.filter((r) => Math.abs(r - s) / r > 1e-6).map((r) => r / s);
+}
+
+// ------------------------------------------------------------- coordinates far apart (#28)
+// Models of one project overlap or touch, even long track models. After loading, the models are
+// grouped by the gap between their boxes (not their centres); a group more than `coordWarnM` from
+// the main group probably uses another coordinate system or project base point.
+let coordWarnM = 1000;
+try { const v = +localStorage.getItem('onlineifc.coordWarnM'); if (v > 0) coordWarnM = v; } catch { /* ignore */ }
+
+function boxGap(a, b) {
+  const dx = Math.max(0, a.min.x - b.max.x, b.min.x - a.max.x);
+  const dy = Math.max(0, a.min.y - b.max.y, b.min.y - a.max.y);
+  const dz = Math.max(0, a.min.z - b.max.z, b.min.z - a.max.z);
+  return Math.hypot(dx, dy, dz);
+}
+
+/** Why a model may lie apart from the others (an i18n key), from its georeferencing and the offset. */
+function farCause(m, others) {
+  const mine = !!m.georef?.map, theirs = others.some((o) => o.georef?.map);
+  if (mine && !theirs) return 'coord.causeMapThis';
+  if (!mine && theirs) return 'coord.causeMapOthers';
+  if (mine && others.every((o) => o.georef?.map)) {
+    // all georeferenced: in different map coordinate systems (CRS), or far apart in the same one
+    const crs = (x) => x.georef.map.crs || '';
+    const theirsCrs = [...new Set(others.map(crs).filter(Boolean))];
+    if (crs(m) && theirsCrs.length && !theirsCrs.includes(crs(m))) return { key: 'coord.causeCrs', vars: { mine: crs(m), theirs: theirsCrs.join(', ') } };
+    return 'coord.causeMapApart';
+  }
+  // the offset between the models is about the eastings/northings of a map conversion: one model is
+  // in map coordinates, the other in local coordinates
+  const c = (x) => viewer.toIfc(x.getBox().getCenter(new THREE.Vector3())); // IFC coordinates, as placed
+  const a = c(m), d = Math.hypot(...['x', 'y'].map((k) => a[k] - (others.reduce((s, o) => s + c(o)[k], 0) / others.length)));
+  for (const g of [m, ...others].map((x) => x.georef?.map).filter(Boolean)) {
+    const en = Math.hypot(g.eastings * g.mapScale, g.northings * g.mapScale);
+    if (en > 0 && Math.abs(d - en) < en * 0.02) return 'coord.causeMapLocal';
+  }
+  return 'coord.causeBase';
+}
+
+/**
+ * The box of a model in the coordinates it claims: map coordinates (easting, northing, height)
+ * when it has an IfcMapConversion, else its IFC coordinates. Two georeferenced models with local
+ * IFC coordinates around 0,0 can lie far apart on the map; a model without a map conversion next
+ * to one with it shows as far apart when it is placed in local coordinates. null: no geometry.
+ */
+function claimedBox(m) {
+  const b = m.getBox();
+  if (b.isEmpty()) return null;
+  const out = new THREE.Box3();
+  for (const x of [b.min.x, b.max.x]) for (const y of [b.min.y, b.max.y]) for (const z of [b.min.z, b.max.z]) {
+    const q = viewer.toIfc(new THREE.Vector3(x, y, z));
+    const mp = m.georef?.map ? m.toMap(q) : null;
+    out.expandByPoint(mp ? new THREE.Vector3(mp.e, mp.n, mp.h) : new THREE.Vector3(q.x, q.y, q.z));
+  }
+  return out;
+}
+
+const causeText = (c) => (typeof c === 'string' ? t(c) : t(c.key, c.vars));
+
+function checkCoordinates({ announce = true } = {}) {
+  const boxes = new Map();
+  for (const m of viewer.models) { const b = m.visible ? claimedBox(m) : null; if (b) boxes.set(m, b); }
+  const ms = [...boxes.keys()];
+  for (const m of viewer.models) if (!boxes.has(m)) m.coordWarning = null;
+  // groups: models whose boxes are within coordWarnM of each other (single linkage)
+  const groups = [];
+  for (const m of ms) {
+    const near = groups.filter((g) => g.some((o) => boxGap(boxes.get(m), boxes.get(o)) <= coordWarnM));
+    const merged = [m, ...near.flat()];
+    for (const g of near) groups.splice(groups.indexOf(g), 1);
+    groups.push(merged);
+  }
+  const prev = new Map(viewer.models.map((m) => [m, m.coordWarning]));
+  for (const m of ms) m.coordWarning = null;
+  if (groups.length > 1) {
+    // the main group: the most models, then the largest extent
+    const size = (g) => g.reduce((b, m) => b.union(boxes.get(m)), new THREE.Box3()).getSize(new THREE.Vector3()).length();
+    groups.sort((a, b) => b.length - a.length || size(b) - size(a));
+    const main = groups[0];
+    for (const g of groups.slice(1)) {
+      for (const m of g) {
+        const d = Math.min(...main.map((o) => boxGap(boxes.get(m), boxes.get(o))));
+        m.coordWarning = { km: d / 1000, cause: farCause(m, main), dismissed: prev.get(m)?.dismissed || false };
+      }
+    }
+  }
+  if (announce) {
+    const fresh = ms.filter((m) => m.coordWarning && !prev.get(m));
+    for (const m of fresh.slice(0, 3)) toast(`${t('coord.far', { name: m.alias || m.name, km: m.coordWarning.km.toFixed(1) })} ${causeText(m.coordWarning.cause)}`);
+  }
+  renderModels();
 }
 
 function checkUnits(model) {
@@ -754,6 +957,10 @@ document.addEventListener('click', (e) => {
     'reset-all': () => resetView({ all: true }),
     'sv-auto': () => setSvAuto(!svAuto),
     'open-samples': () => openSamples(btn.dataset.sample),
+    corridor: () => openCorridorDialog(),
+    'cor-show': () => showCorridor(),
+    'cor-find': () => findInCorridor(),
+    'cor-clear': () => { corridor.clear(); corridorHits = null; renderCorridorHits(); secViewer?.planesChanged?.(); projects.touch?.(); },
   };
   actions[btn.dataset.action]?.();
 });
@@ -1108,6 +1315,12 @@ function modelCard(m) {
       h('button', { class: 'mg-caret', text: open ? '▾' : '▸', 'aria-label': t('models.details'), onclick: () => { m.cardOpen = !open; renderModels(); } }),
       vis, dot,
       h('span', { class: 'card-title' }, label, sub),
+      m.coordWarning && !m.coordWarning.dismissed ? h('button', {
+        class: 'icon-btn coord-warn',
+        text: '⚠',
+        title: `${t('coord.far', { name: m.alias || m.name, km: m.coordWarning.km.toFixed(1) })} ${causeText(m.coordWarning.cause)} ${t('coord.dismiss')}`,
+        onclick: () => { m.coordWarning.dismissed = true; renderModels(); },
+      }) : null,
       h('button', { class: 'icon-btn', title: t('models.aliasTitle'), text: '✎', onclick: editAlias })),
     open ? h('div', { class: 'card-body' },
       h('div', { class: 'card-meta', text: `${fmtBytes(m.fileSize)}` }),
@@ -1733,14 +1946,6 @@ function setStationPlane(entry, al, s, sign = null) {
   entry.anchor = P.clone();
   entry.station = { al, s, T };
   viewer.updatePlane(entry);
-}
-
-/** Text → station in metres: "1+234.5", "1+234,5", "1234.5" (null if not a number). */
-function parseStation(text) {
-  const v = String(text).trim().replace(/\s+/g, '').replace(',', '.').replace(/^km/i, '');
-  const m = /^(-?)(\d+)\+(\d+(?:\.\d*)?)$/.exec(v);
-  if (m) return (m[1] ? -1 : 1) * (+m[2] * 1000 + +m[3]);
-  return v !== '' && Number.isFinite(+v) ? +v : null;
 }
 
 function addStationPlane() {
@@ -2396,7 +2601,33 @@ measure.addEventListener('change', renderMeasure);
 for (const b of $$('#measure-modes [data-measure]')) b.addEventListener('click', () => setMeasureMode(measure.mode === b.dataset.measure ? null : b.dataset.measure));
 $('#measure-snap').addEventListener('change', (e) => { measure.snapOn = e.target.checked; });
 $('#measure-unit').addEventListener('change', (e) => { measure.unit = e.target.value; measure.refresh(); });
-$('#station-format').addEventListener('change', (e) => { alignmentLayer.format = e.target.value; alignmentLayer.rebuild(); measure.refresh(); });
+{
+  const inp = $('#coord-warn-m');
+  inp.value = String(coordWarnM);
+  inp.addEventListener('change', () => {
+    const v = +inp.value;
+    if (!(v > 0)) { inp.value = String(coordWarnM); return; }
+    coordWarnM = v;
+    try { localStorage.setItem('onlineifc.coordWarnM', String(v)); } catch { /* ignore */ }
+    checkCoordinates();
+  });
+}
+// stationing format (#29): one setting for labels, fields, the section window, profiles, series and drawings
+function applyStationFormat(fmt, { save = true } = {}) {
+  if (save) setStationFormat(fmt); else stationFormat.value = fmt in STATION_FORMATS ? fmt : 'km';
+  for (const sel of $$('.station-format')) sel.value = stationFormat.value;
+  for (const p of viewer.planes) if (p.station) p.stationLabel = `${t('st.axis')} ${formatStation(p.station.al.station0 + p.station.s)}`;
+  alignmentLayer.rebuild();
+  measure.refresh();
+  renderPlanes();
+  secViewer?.planesChanged?.();
+  projects.touch?.();
+}
+for (const sel of $$('.station-format')) {
+  sel.replaceChildren(...Object.entries(STATION_FORMATS).map(([k, ex]) => h('option', { value: k, text: ex })));
+  sel.value = stationFormat.value;
+  sel.addEventListener('change', (e) => applyStationFormat(e.target.value));
+}
 
 // Station marks of alignments: automatic, a fixed interval, or off (only the line)
 function applyStationInterval() {
@@ -2482,6 +2713,8 @@ const projects = new ProjectManager({
     lines: drawnPaths.map((p) => ({ name: p.name, pts: p.poly.map((q, k) => [q[0], q[1], p.zs[k]]) })),
     groups: state.modelGroups.map(({ id, name, visible, open }) => ({ id, name, visible, open })),
     models: viewer.models.map((m) => ({ key: projects.keys.get(m) || null, name: m.name, alias: m.alias || null, group: m.groupId || null, color: m.overrideColor ? `#${m.overrideColor.getHexString()}` : null })),
+    stationFormat: stationFormat.value, // the client's stationing format stays with the project (#29)
+    corridor: corridor.def ? { path: corridor.def.al.name, drawn: !!corridor.def.al.drawn, offsets: corridor.def.offsets, from: corridor.def.from, to: corridor.def.to } : null, // (#26)
   }),
   setExtra: (x) => {
     drawnPaths.length = 0;
@@ -2495,7 +2728,10 @@ const projects = new ProjectManager({
       const g = groupOf(m);
       m.setGroupHidden(g ? !g.visible : false);
     }
+    if (x?.stationFormat) applyStationFormat(x.stationFormat);
     updateAlignments();
+    const cd = x?.corridor, cal = cd && allAlignments().find((a) => a.name === cd.path && !!a.drawn === cd.drawn);
+    if (cal) corridor.set({ al: cal, offsets: cd.offsets, from: cd.from, to: cd.to }); else corridor.clear();
     renderModels();
   },
 });
