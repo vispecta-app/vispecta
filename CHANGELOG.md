@@ -6,6 +6,15 @@ https://github.com/vispecta-app/vispecta/releases
 ## Unreleased
 
 ### Added
+- **Stationing format.** Five formats – `12+345.678`, `123+45.68` (100 m stations), `12.346`,
+  `km 12,346`, `12345.678 m` – one setting for the whole app, remembered and saved in projects;
+  typing accepts every format. ([#29](https://github.com/vispecta-app/vispecta/issues/29))
+- **Warning when models lie far apart** (default > 1000 m, adjustable), compared in map
+  coordinates when georeferenced, with the likely cause and ⚠ on the model card.
+  ([#28](https://github.com/vispecta-app/vispecta/issues/28))
+- **Offset lines and corridors** along alignments and drawn lines: lines in 3D and in station
+  sections/drawings, and the elements inside or crossing the band – colour, select, isolate,
+  CSV. ([#26](https://github.com/vispecta-app/vispecta/issues/26))
 - **Point clouds (steps 1–2).** Load LAS, LAZ, XYZ/CSV/TXT/PTS and PLY next to the IFC models,
   thinned in a worker to a point budget and placed by the models' coordinates or map coordinates
   (IfcMapConversion). Colour by RGB, classification, intensity or elevation, filter by class,
