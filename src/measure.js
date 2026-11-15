@@ -170,6 +170,28 @@ export class MeasureTool extends EventTarget {
 
   // ------------------------------------------------------------------ snapping
   #snap(clientX, clientY) {
+    const s = this.#snapModels(clientX, clientY);
+    if (s?.kind === 'vertex' || !this.viewer.clouds?.length) return s;
+    // point clouds (#27): a point under the cursor wins over a surface or edge behind it
+    const cp = this.#cloudPoint(clientX, clientY);
+    if (!cp) return s;
+    if (!s) return cp;
+    const cam = this.viewer.camera.position;
+    return cp.point.distanceTo(cam) <= s.point.distanceTo(cam) + 0.05 ? cp : s;
+  }
+
+  #cloudPoint(clientX, clientY) {
+    const v = this.viewer, canvas = v.renderer.domElement, rect = canvas.getBoundingClientRect();
+    const planes = v.planes.filter((p) => p.enabled).map((p) => p.plane);
+    let best = null;
+    for (const c of v.clouds) {
+      const hit = c.pick(v.camera, canvas, clientX - rect.left, clientY - rect.top, SNAP_VERTEX_PX, planes);
+      if (hit && (!best || hit.depth < best.depth)) best = hit;
+    }
+    return best ? { point: best.point, kind: 'point', depth: best.depth } : null;
+  }
+
+  #snapModels(clientX, clientY) {
     const center = this.viewer.pick(clientX, clientY);
     if (!this.snapOn) return center ? { point: center.point, kind: 'face', hit: center } : null;
     // Also look at the surfaces just around the cursor, so corners can be caught from either side.

@@ -33,6 +33,7 @@ import { SectionViewer } from './secview.js';
 import { FilterPanel, keyLabel } from './filters.js';
 import { IssuesPanel } from './issues.js';
 import { readAlignments, AlignmentLayer, SectionMarks, pointAt, heightAt, project, formatStation } from './alignment.js';
+import { loadPointCloud, LAS_CLASSES, classColor as lasClassColor } from './pointcloud.js';
 import { computeSection, computeProfile, planeAxes, layout, toSvg, toPdf, toPdfPages, toDxf, renderBackground, SCALES, AXIS_COLOR } from './drawing.js';
 import { runIdsCheck, colorIdsResult, idsCsv, specSummary, setIdsColors, IDS_EXAMPLES } from './ids.js';
 import { compareModels, showComparison, clearComparison, comparisonCsv, geomText, summaryText, CMP_COLORS, setCompareColors } from './compare.js';
@@ -146,10 +147,12 @@ async function openFiles(files) {
   const workspaces = all.filter((f) => /\.json$/i.test(f.name));
   const bcfs = all.filter((f) => /\.(bcf|bcfzip)$/i.test(f.name));
   const idss = all.filter((f) => /\.ids$/i.test(f.name) || (/\.xml$/i.test(f.name) && $('#ids-dialog').open));
-  const rest = all.filter((f) => ![list, workspaces, bcfs, idss].some((g) => g.includes(f)));
+  const clouds = all.filter((f) => CLOUD_FILE.test(f.name)); // point clouds (#27)
+  const rest = all.filter((f) => ![list, workspaces, bcfs, idss, clouds].some((g) => g.includes(f)));
   if (rest.length) toast(t('msg.unknownFiles', { names: rest.map((f) => f.name).join(', ') }));
-  if (!list.length && !workspaces.length && !bcfs.length && !idss.length) return;
+  if (!list.length && !workspaces.length && !bcfs.length && !idss.length && !clouds.length) return;
   if (list.length) await openIfcFiles(list);
+  if (clouds.length) await openCloudFiles(clouds);
   for (const w of workspaces) await views.openWorkspace(w);
   for (const b of bcfs) {
     await issues.importFile(b);
@@ -221,6 +224,87 @@ async function openSamples(key = 'scene') {
     viewer.flyTo(eye, at); // replaces the zoom to everything that loading started
   }
   projects.touch?.();
+}
+
+// ------------------------------------------------------------- point clouds (#27)
+const CLOUD_FILE = /\.(las|laz|ply|xyz|pts|csv|txt)$/i;
+viewer.cloudSlab = 0.1; // half thickness (m) of the slab of points shown in sections
+async function openCloudFiles(list) {
+  for (const file of list) {
+    let cloud;
+    try {
+      cloud = await withLoading((progress) => loadPointCloud(file, { onProgress: (f) => progress(t('pc.loading', { name: file.name }), f) }));
+    } catch (err) {
+      console.error(err);
+      toast(t('pc.failed', { name: file.name, error: err.message || err }));
+      continue;
+    }
+    const first = !viewer.models.length && viewer.clouds.length === 0;
+    viewer.addCloud(cloud);
+    const far = viewer.models.length ? viewer.placeCloud(cloud) : null;
+    toast(t('pc.loaded', { name: file.name, n: fmtNum(cloud.count), total: fmtNum(cloud.total) }), true);
+    if (far !== null && far > 1000) toast(t('pc.far', { name: file.name, km: (far / 1000).toFixed(1) }));
+    if (first) viewer.fitBox(cloud.getBox(), { keepDirection: false });
+  }
+  afterModelsChanged();
+  secViewer?.planesChanged?.();
+}
+
+/** Is anything loaded – IFC models or point clouds (#27)? Sections, measuring and profiles work on both. */
+function hasScene() { return viewer.models.length + viewer.clouds.length > 0; }
+
+/** A card for a point cloud in the model browser. */
+function cloudCard(c) {
+  const open = c.cardOpen ?? true;
+  const vis = h('input', { type: 'checkbox', title: t('models.visible'), checked: c.visible });
+  vis.addEventListener('change', () => { c.setVisible(vis.checked); renderModels(); cloudsChanged(); });
+  const label = h('span', { class: 'card-name', title: c.name }, breakableName(c.alias || c.name));
+  const editAlias = () => inlineEdit(label, c.alias, c.name, (v) => { c.alias = v || null; renderModels(); });
+  label.addEventListener('dblclick', editAlias);
+  const sub = h('span', { class: 'card-file' }, c.alias ? breakableName(c.name) : null,
+    h('span', { class: 'muted', text: `${c.alias ? ' · ' : ''}${c.format} · ${t('pc.points', { n: fmtNum(c.count) })}` }));
+  const modes = [['rgb', !!c.rgb], ['class', !!c.classes && c.classCounts.size > 0], ['intensity', !!c.intensity], ['elevation', true], ['single', true]].filter((m) => m[1]);
+  const modeSel = h('select', {}, modes.map(([m]) => h('option', { value: m, text: t(`pc.mode.${m}`), selected: m === c.mode })));
+  modeSel.addEventListener('change', () => { c.setMode(modeSel.value); renderModels(); cloudsChanged(); });
+  const size = h('input', { type: 'range', min: '1', max: '8', step: '0.5', value: String(c.pointSize) });
+  const sizeVal = h('span', { class: 'muted', text: `${c.pointSize} px` });
+  size.addEventListener('input', () => { c.setPointSize(+size.value, viewer.renderer.getPixelRatio()); sizeVal.textContent = `${size.value} px`; viewer.invalidate(); });
+  const slab = h('input', { type: 'number', min: '0.01', max: '5', step: '0.05', value: String(viewer.cloudSlab), class: 'num-sm', title: t('pc.slabTitle') });
+  slab.addEventListener('change', () => { const v = +slab.value; if (v > 0) { viewer.cloudSlab = v; cloudsChanged(); } });
+  // classification: show/hide per class
+  const classes = c.classCounts.size > 1 ? h('div', { class: 'pc-classes' }, [...c.classCounts].sort((a, b) => a[0] - b[0]).map(([k, n]) => {
+    const cb = h('input', { type: 'checkbox', checked: !c.hiddenClasses.has(k) });
+    cb.addEventListener('change', () => { c.setClassHidden(k, !cb.checked); viewer.invalidate(); cloudsChanged(); });
+    const sw = h('span', { class: 'pc-swatch' }); sw.style.background = lasClassColor(k);
+    return h('label', { class: 'pc-class', title: `${k}` }, cb, sw, h('span', { text: lasClassName(k) }), h('span', { class: 'muted', text: fmtNum(n) }));
+  })) : null;
+  return h('div', { class: `card model-card cloud-card${open ? ' open' : ''}${c.visible ? '' : ' off'}` },
+    h('div', { class: 'card-head' },
+      h('button', { class: 'mg-caret', text: open ? '▾' : '▸', 'aria-label': t('models.details'), onclick: () => { c.cardOpen = !open; renderModels(); } }),
+      vis, h('span', { class: 'pc-icon', 'aria-hidden': 'true', text: '⁘' }),
+      h('span', { class: 'card-title' }, label, sub),
+      h('button', { class: 'icon-btn', title: t('models.aliasTitle'), text: '✎', onclick: editAlias })),
+    open ? h('div', { class: 'card-body' },
+      h('div', { class: 'card-meta', text: t('pc.meta', { kept: fmtNum(c.count), total: fmtNum(c.total), placement: t(`pc.place.${c.placement}`) }) }),
+      h('div', { class: 'card-row' }, h('label', { text: t('pc.colour') }), modeSel),
+      h('div', { class: 'card-row' }, h('label', { text: t('pc.size') }), size, sizeVal),
+      h('div', { class: 'card-row' }, h('label', { text: t('pc.slab') }), slab, h('span', { class: 'muted', text: 'm' })),
+      classes,
+      h('div', { class: 'card-btns' },
+        h('button', { class: 'btn sm', onclick: () => viewer.fitBox(c.getBox()), text: t('models.zoom') }),
+        h('button', { class: 'btn sm danger', onclick: () => { if (!confirm(t('pc.removeConfirm', { name: c.name }))) return; viewer.removeCloud(c); afterModelsChanged(); cloudsChanged(); }, text: t('models.remove') }))) : null);
+}
+
+/** Name of a LAS class in the current language (ASPRS names in English as fallback). */
+function lasClassName(k) {
+  const key = `pc.class.${k}`, v = t(key);
+  return v !== key ? v : (LAS_CLASSES[k] || [`Class ${k}`])[0];
+}
+
+/** Point clouds changed (colours, classes, slab, visibility): sections and profiles follow. */
+function cloudsChanged() {
+  viewer.invalidate();
+  secViewer?.planesChanged?.();
 }
 
 async function openIfcFiles(list, keys = null) {
@@ -348,8 +432,8 @@ function afterModelsChanged() {
   updateAlignments();
   if (idsResults && idsResults.some((e) => !viewer.models.includes(e.model))) { idsResults = null; renderIds(); }
   if (comparison && (!viewer.models.includes(comparison.oldM) || !viewer.models.includes(comparison.newM))) { comparison = null; renderComparison(); }
-  $('#welcome').hidden = viewer.models.length > 0;
-  if (!viewer.models.length) renderRecentProjects();
+  $('#welcome').hidden = viewer.models.length + viewer.clouds.length > 0;
+  if (!viewer.models.length && !viewer.clouds.length) renderRecentProjects();
   renderProjectBar();
   if (state.storey && !viewer.models.includes(state.storey.model)) state.storey = null;
   updateStoreyMenu();
@@ -562,7 +646,7 @@ document.addEventListener('click', (e) => {
   if (btn.closest('.menu-pop')) closeMenus();
   if (btn.dataset.view) return viewer.setView(btn.dataset.view);
   if (btn.dataset.plane) {
-    if (!viewer.models.length) return toast(t('msg.loadFirst'));
+    if (!hasScene()) return toast(t('msg.loadFirst'));
     const p = viewer.addPlane(btn.dataset.plane);
     renderPlanes();
     return autoSecView(p);
@@ -920,13 +1004,19 @@ function inlineEdit(span, value, placeholder, save) {
 function renderModels() {
   const list = $('#model-list');
   list.replaceChildren();
-  $('#models-empty').hidden = viewer.models.length > 0;
+  $('#models-empty').hidden = viewer.models.length + viewer.clouds.length > 0;
   $('#model-actions').hidden = viewer.models.length === 0;
   // groups whose models are all gone stay until removed; models of a removed group are loose
   const loose = viewer.models.filter((m) => !groupOf(m));
   for (const g of state.modelGroups) list.append(groupSection(g, viewer.models.filter((m) => m.groupId === g.id)));
   if (state.modelGroups.length) list.append(groupSection(null, loose));
   else for (const m of loose) list.append(modelCard(m));
+  // point clouds (#27)
+  if (viewer.clouds.length) {
+    list.append(h('section', { class: 'mgroup clouds' },
+      h('div', { class: 'mg-head' }, h('span', { class: 'mg-name muted', text: t('pc.title') }), h('span', { class: 'mg-count', text: String(viewer.clouds.length) })),
+      h('div', { class: 'mg-body' }, viewer.clouds.map(cloudCard))));
+  }
 }
 
 /** A group in the model browser (null: the models without a group). Models can be dropped on it. */
@@ -1654,7 +1744,7 @@ function parseStation(text) {
 }
 
 function addStationPlane() {
-  if (!viewer.models.length) return toast(t('msg.loadFirst'));
+  if (!hasScene()) return toast(t('msg.loadFirst'));
   const list = allAlignments();
   if (!list.length) return toast(t('aln.none'));
   // start at the alignment point nearest to the centre of the view
@@ -1933,7 +2023,7 @@ const lineTool = { active: false, pts: [], onDone: null };
 function showHint(text) { const el = $('#tool-hint'); el.textContent = text || ''; el.hidden = !text; }
 
 function startLineTool(onDone = null) {
-  if (!viewer.models.length) return toast(t('msg.loadFirst'));
+  if (!hasScene()) return toast(t('msg.loadFirst'));
   if (measure.mode) setMeasureMode(null);
   lineTool.active = true;
   lineTool.pts = [];
@@ -1998,7 +2088,7 @@ const fmtSt = (st) => formatStation(st);
 
 function openProfileDialog(select = null) {
   const list = allAlignments();
-  if (!viewer.models.length) return toast(t('msg.loadFirst'));
+  if (!hasScene()) return toast(t('msg.loadFirst'));
   const sel = $('#prof-path');
   const prev = select || list[+sel.value] || null;
   sel.replaceChildren(...list.map((a, i) => h('option', { value: String(i), text: a.drawn ? `✎ ${a.name}` : a.name })));
@@ -2275,7 +2365,7 @@ let lastMeasureMode = 'distance';
 let measurePanelClosed = false;
 
 function setMeasureMode(mode) {
-  if (mode && !viewer.models.length) return toast(t('msg.loadFirst'));
+  if (mode && !hasScene()) return toast(t('msg.loadFirst'));
   if (mode) { lastMeasureMode = mode; measurePanelClosed = false; }
   if (mode && state.pickPlaneMode) setPickPlaneMode(false);
   measure.setMode(mode);
@@ -3057,13 +3147,16 @@ const python = new PythonPanel({
 function renderStatus() {
   viewer.invalidate(); // the status changes with almost every change of the scene
   const models = viewer.models.length;
-  if (!models) { $('#statusbar').textContent = t('status.ready'); return; }
+  const cloudPts = viewer.clouds.reduce((n, c) => n + c.count, 0);
+  if (!models && !cloudPts) { $('#statusbar').textContent = t('status.ready'); return; }
+  if (!models) { $('#statusbar').textContent = t('status.clouds', { n: viewer.clouds.length, pts: fmtNum(cloudPts) }); return; }
   let elements = 0, hidden = 0;
   for (const m of viewer.models) { elements += m.elementIds.size; hidden += m.hidden.size; }
   const sel = selectionCount();
   $('#statusbar').textContent = [
     t('status.models', { n: models }),
     t('status.elements', { n: fmtNum(elements) }),
+    cloudPts ? t('status.clouds', { n: viewer.clouds.length, pts: fmtNum(cloudPts) }) : null,
     hidden ? t('status.hidden', { n: fmtNum(hidden) }) : null,
     sel ? t('status.selected', { n: fmtNum(sel) }) : null,
     viewer.planes.length ? t('status.sections', { n: viewer.planes.length }) : null,

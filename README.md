@@ -100,6 +100,19 @@ Cross sections get letters (A–A, B–B …). In 3D and on plan drawings each o
 
 **Section window:** the ▣ button of a section plane opens a window with the live 2D cut of that plane, next to the 3D view. There you step through the sections with ‹ ›, the arrow keys or a typed station, and set the step length. The model shows the section mark of the current cut at the same time. The window has a grid (offset from the axis and height), zoom (wheel), pan (drag), *Fit* (`F`), and shows the coordinates under the cursor. ⧉ pops it out into a browser window of its own, e.g. on a second screen, and closing that window puts it back. With *Section → Sections in a window of their own*, every new section opens there straight away (the browser must allow pop-ups for the page). A key plan in the corner (▦) shows the visible models, the alignments and the cut line with its view direction, and the plane of the window is drawn in the accent colour in the 3D view. Cut faces are hatched here too.
 
+### Point clouds
+Surveys and laser scans can be loaded next to the IFC models (#27) – drop the file like an IFC file:
+
+- **Formats:** LAS and LAZ (LAZ is decompressed with [laz-perf](https://github.com/hobuinc/laz-perf), served by the site), XYZ / CSV / TXT / PTS, and PLY (ASCII and binary).
+- **Thinned while reading** in a worker: an even voxel grid down to a point budget (about 5 million points on a computer, 1.5–3 million on phones and small devices), so the view stays fluid. The card shows how many points of the file are kept.
+- **Placement:** the points are taken as IFC coordinates, or as map coordinates through the models' `IfcMapConversion` (e.g. UTM or DKS) – whichever lands nearer the models. Without models, the first cloud defines the coordinate system. A warning appears when a cloud lies more than 1 km from the models.
+- **Display:** colour by RGB, classification (ASPRS colours), intensity, elevation or one colour; show/hide by classification (e.g. only ground and rail); point size.
+- **In sections and drawings:** section planes clip the cloud, and the points within ±0.1 m of the plane (adjustable on the card) are shown as dots in the section window and in PDF/SVG/DXF drawings (DXF layer `POINTCLOUD`) – so the existing terrain or track can be compared with the design at every station.
+- **In longitudinal profiles:** the points within the same distance of the path, unrolled by station.
+- **Measuring** snaps to points.
+
+Point clouds are not saved in projects or workspaces yet; open the file again.
+
 ### Longitudinal profile
 **Alignment → Longitudinal profile** unrolls the model along an alignment or along a **line you draw**. Choose *Draw a new line*, click points in the view (on elements, or at the height of the last point), then press Enter or double click. Backspace removes the last point and Esc cancels. The visible elements are cut with the vertical surface that follows the path, so the drawing has the station along and the height up. You set the range (from–to station) and the height exaggeration (1–50×). The red line is the vertical profile of the alignment, or the heights of the clicked points of a drawn line. Station and height grid lines are chosen for the paper scale, and the profile heights are written under the stations. The profile is previewed in the dialog and exported as PDF, SVG or DXF (DXF heights are exaggerated like the drawing). Drawn lines also work for cross sections at a station and for driving, and projects remember them.
 
@@ -239,8 +252,8 @@ The built site has a web app manifest and a service worker (`public/sw.js`). In 
 
 Vispecta is a static website without a backend, cookies, analytics or tracking.
 
-- **Your files are never uploaded.** IFC, BCF and IDS files are read and processed in your browser (WebAssembly). Projects and settings are saved only in this browser (IndexedDB, localStorage).
-- **What the site loads:** everything – the app, fonts, web-ifc and the Python runtime (Pyodide, IfcOpenShell, ifctester) – comes from vispecta.com itself (hosted on GitHub Pages, which, like any web host, sees the visitor's IP address).
+- **Your files are never uploaded.** IFC, BCF, IDS and point cloud files are read and processed in your browser (WebAssembly). Projects and settings are saved only in this browser (IndexedDB, localStorage).
+- **What the site loads:** everything – the app, fonts, web-ifc, laz-perf and the Python runtime (Pyodide, IfcOpenShell, ifctester) – comes from vispecta.com itself (hosted on GitHub Pages, which, like any web host, sees the visitor's IP address).
 - **Other servers are contacted only when you ask for it:**
   - *Check for updates* in the About dialog asks the GitHub API for the latest release;
   - a Python script of your own that imports a package which is not hosted (e.g. pandas) fetches it from jsDelivr, and `micropip.install` in your script fetches from PyPI.

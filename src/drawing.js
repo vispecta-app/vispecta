@@ -92,6 +92,8 @@ export function computeSection(viewer, entry, { marks = [], annot = null } = {})
       }
     }
   }
+  // point clouds (#27): the points within ±slab of the plane, as dots (colour as shown, grouped)
+  const cloud = cloudSlab(viewer, entry, others, to2d, bounds);
   // cross section at a station: the alignment axis (offset 0) is part of the drawing
   // marks may depend on the extent of the cut (e.g. the part of an alignment inside the plan)
   if (typeof marks === 'function') marks = Number.isFinite(bounds.minX) ? marks({ ...bounds }) : [];
@@ -109,7 +111,7 @@ export function computeSection(viewer, entry, { marks = [], annot = null } = {})
       bounds.minY = Math.min(bounds.minY, p[1]); bounds.maxY = Math.max(bounds.maxY, p[1]);
     }
   }
-  const section = { layers, bounds, axes: ax, marks: out };
+  const section = { layers, bounds, axes: ax, marks: out, cloud };
   if (annot && !ax.horizontal && Number.isFinite(bounds.minX)) {
     section.annot = { ...annot, runs: breakPoints(layers, { classes: annot.classes }), originX: entry.station ? 0 : bounds.minX, station: !!entry.station };
     section.padTopMm = annot.mode !== 'band' ? 30 : 0;
@@ -117,6 +119,35 @@ export function computeSection(viewer, entry, { marks = [], annot = null } = {})
     section.marksFor = (lay) => annotationMarks(section, lay);
   }
   return section;
+}
+
+/**
+ * Points of the visible point clouds within ±viewer.cloudSlab (m) of a plane (#27), in drawing
+ * coordinates. Returns [{hex, xy: [x0, y0, x1, y1 …]}] grouped by colour (16 tones per channel),
+ * or null. Widens `bounds`.
+ */
+export function cloudSlab(viewer, entry, others, to2d, bounds) {
+  if (!viewer.clouds?.length) return null;
+  const half = viewer.cloudSlab ?? 0.1;
+  const groups = new Map();
+  const v = new THREE.Vector3();
+  for (const c of viewer.clouds) {
+    if (!c.visible) continue;
+    const col = c.colorAttr.array;
+    for (const i of c.slab(entry.plane, half, others)) {
+      c.worldPoint(i, v);
+      const [x, y] = to2d(v);
+      const q = (k) => Math.min(255, Math.round(col[i * 3 + k] / 17) * 17);
+      const hex = `#${((1 << 24) | (q(0) << 16) | (q(1) << 8) | q(2)).toString(16).slice(1)}`;
+      let g = groups.get(hex);
+      if (!g) groups.set(hex, (g = []));
+      g.push(x, y);
+      if (x < bounds.minX) bounds.minX = x; if (x > bounds.maxX) bounds.maxX = x;
+      if (y < bounds.minY) bounds.minY = y; if (y > bounds.maxY) bounds.maxY = y;
+    }
+  }
+  if (!groups.size) return null;
+  return [...groups].map(([hex, xy]) => ({ hex, xy }));
 }
 
 // ------------------------------------------------- break points of the top outline
@@ -426,6 +457,51 @@ export function computeProfile(viewer, path, heightOf, { from = 0, to = path.len
     }
   }
 
+  // point clouds (#27): points within ±viewer.cloudSlab of the path, unrolled by station
+  let cloud = null;
+  if (viewer.clouds?.length && segs.length) {
+    const half = viewer.cloudSlab ?? 0.1, LIMIT = 60000;
+    const groups = new Map();
+    let hits = [];
+    for (const c of viewer.clouds) {
+      if (!c.visible) continue;
+      c.points.updateMatrixWorld(true);
+      const e = inv.clone().multiply(c.points.matrixWorld).elements; // cloud -> viewer axes at the IFC origin
+      const P = c.positions, col = c.colorAttr.array;
+      for (let i = 0; i < c.count; i++) {
+        const px = P[i * 3], py = P[i * 3 + 1], pz = P[i * 3 + 2];
+        const vx = e[0] * px + e[4] * py + e[8] * pz + e[12], vy = e[1] * px + e[5] * py + e[9] * pz + e[13], vz = e[2] * px + e[6] * py + e[10] * pz + e[14];
+        const x = vx, y = -vz, z = vy; // three -> IFC
+        if (x < gx0 - half || x > gx1 + half || y < gy0 - half || y > gy1 + half) continue;
+        const list = grid.get(ckey(Math.floor((x - gx0) / cell), Math.floor((y - gy0) / cell)));
+        if (!list || !c.shown(i)) continue;
+        for (const si of list) {
+          const g = segs[si];
+          const t = (x - g.a[0]) * g.ux + (y - g.a[1]) * g.uy;
+          if (t < 0 || t > g.L) continue;
+          const d = (x - g.a[0]) * g.nx + (y - g.a[1]) * g.ny;
+          if (d > half || d < -half) continue;
+          const s = g.c0 + t;
+          if (s < s0 || s > s1) break;
+          hits.push(s, z * exag, (col[i * 3] << 16) | (col[i * 3 + 1] << 8) | col[i * 3 + 2]);
+          break;
+        }
+      }
+    }
+    const n = hits.length / 3, step = Math.max(1, n / LIMIT);
+    for (let k = 0; k < n; k += step) {
+      const q = Math.floor(k) * 3, rgb = hits[q + 2];
+      const r = Math.min(255, Math.round(((rgb >> 16) & 255) / 17) * 17), gg = Math.min(255, Math.round(((rgb >> 8) & 255) / 17) * 17), bb = Math.min(255, Math.round((rgb & 255) / 17) * 17);
+      const hex = `#${((1 << 24) | (r << 16) | (gg << 8) | bb).toString(16).slice(1)}`;
+      let arr = groups.get(hex);
+      if (!arr) groups.set(hex, (arr = []));
+      arr.push(hits[q], hits[q + 1]);
+      bounds.minY = Math.min(bounds.minY, hits[q + 1]); bounds.maxY = Math.max(bounds.maxY, hits[q + 1]);
+    }
+    hits = null;
+    if (groups.size) cloud = [...groups].map(([hex, xy]) => ({ hex, xy }));
+  }
+
   // profile line of the path
   const marks = [];
   const line = [];
@@ -468,7 +544,7 @@ export function computeProfile(viewer, path, heightOf, { from = 0, to = path.len
     out.push({ line: [[s0, y0 - band], [s1, y0 - band]], color: '#333333', w: 0.25, layer });
     return out;
   };
-  return { layers, bounds, axes: null, marks, marksFor, profile: true };
+  return { layers, bounds, axes: null, marks, marksFor, profile: true, cloud };
 }
 const DASH = { dashdot: [6, 1.5, 1, 1.5], dash: [3, 2], dot: [0.6, 1.2] };
 const dashOf = (d) => (Array.isArray(d) ? d : DASH[d]) || null;
@@ -744,6 +820,17 @@ export function toSvg(section, lay, info, opts) {
     if (L.open.length) out.push(`<path d="${L.open.map((l) => path(l, false)).join('')}" fill="none"/>`);
     out.push('</g>');
   }
+  if (section.cloud) {
+    // point cloud dots (#27): small squares, 0.3 mm
+    const d = 0.3;
+    out.push('<g id="POINTCLOUD" stroke="none">');
+    for (const g of section.cloud) {
+      const parts = [];
+      for (let k = 0; k < g.xy.length; k += 2) { const [x, y] = lay.map([g.xy[k], g.xy[k + 1]]); parts.push(`M${f2(x - d / 2)} ${f2(y - d / 2)}h${d}v${d}h-${d}z`); }
+      out.push(`<path fill="${opts.mono ? '#000' : g.hex}" d="${parts.join('')}"/>`);
+    }
+    out.push('</g>');
+  }
   out.push(marksSvg(section, lay));
   // frame, title and scale bar
   const m = lay.margin;
@@ -857,6 +944,16 @@ function pdfPage(section, lay, info, opts) {
       c.push(`${P(...pts[0])} m ${pts.slice(1).map((p) => `${P(...p)} l`).join(' ')} S`);
     }
   }
+  if (section.cloud) {
+    // point cloud dots (#27): small filled squares, 0.3 mm
+    const d = 0.3 * k;
+    for (const g of section.cloud) {
+      const parts = [`${rgb(opts.mono ? '#000000' : g.hex)} rg`];
+      for (let q = 0; q < g.xy.length; q += 2) { const [x, y] = lay.map([g.xy[q], g.xy[q + 1]]); parts.push(`${(x * k - d / 2).toFixed(2)} ${(Hpt - y * k - d / 2).toFixed(2)} ${d.toFixed(2)} ${d.toFixed(2)} re`); }
+      parts.push('f');
+      c.push(parts.join(' '));
+    }
+  }
   c.push(...marksPdf(section, lay, P, k, rgb));
   const m = lay.margin;
   const ty = lay.H - m / 2 - lay.title;
@@ -935,7 +1032,8 @@ export function toDxf(section, info) {
   g(9, '$EXTMIN'); g(10, section.bounds.minX); g(20, section.bounds.minY);
   g(9, '$EXTMAX'); g(10, section.bounds.maxX); g(20, section.bounds.maxY);
   g(0, 'ENDSEC');
-  g(0, 'SECTION'); g(2, 'TABLES'); g(0, 'TABLE'); g(2, 'LAYER'); g(70, section.layers.size + 1 + markLayers.length);
+  g(0, 'SECTION'); g(2, 'TABLES'); g(0, 'TABLE'); g(2, 'LAYER'); g(70, section.layers.size + 1 + markLayers.length + (section.cloud ? 1 : 0));
+  if (section.cloud) { g(0, 'LAYER'); g(2, 'POINTCLOUD'); g(70, 0); g(62, 8); g(6, 'CONTINUOUS'); }
   g(0, 'LAYER'); g(2, '0'); g(70, 0); g(62, 7); g(6, 'CONTINUOUS');
   for (const ml of markLayers) { g(0, 'LAYER'); g(2, ml); g(70, 0); g(62, 1); g(6, 'CONTINUOUS'); }
   let i = 0;
@@ -953,6 +1051,8 @@ export function toDxf(section, info) {
     for (const l of layer.open) poly(ln, l, false);
   }
   const ascii = (x) => String(x).replace(/[–—]/g, '-').replace(/[^\x20-\x7E]/g, '?');
+  // point cloud dots (#27)
+  for (const pg of section.cloud || []) for (let q = 0; q < pg.xy.length; q += 2) { g(0, 'POINT'); g(8, 'POINTCLOUD'); g(10, pg.xy[q].toFixed(4)); g(20, pg.xy[q + 1].toFixed(4)); g(30, 0); }
   for (const mk of dxfMarks) {
     const ln = mk.layer || 'ANNOTATION';
     if (mk.line) poly(ln, mk.line, !!mk.closed);

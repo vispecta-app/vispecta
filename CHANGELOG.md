@@ -6,6 +6,12 @@ https://github.com/vispecta-app/vispecta/releases
 ## Unreleased
 
 ### Added
+- **Point clouds (steps 1–2).** Load LAS, LAZ, XYZ/CSV/TXT/PTS and PLY next to the IFC models,
+  thinned in a worker to a point budget and placed by the models' coordinates or map coordinates
+  (IfcMapConversion). Colour by RGB, classification, intensity or elevation, filter by class,
+  point size. Section planes clip the cloud; the points near a plane show as dots in the section
+  window and in PDF/SVG/DXF drawings, and along the path in longitudinal profiles; measuring
+  snaps to points. ([#27](https://github.com/vispecta-app/vispecta/issues/27))
 - **A second sample: Chesapeake Bay Bridge-Tunnel.** The start screen now offers two samples.
   The new one is a synthetic 31 km bridge–tunnel corridor from buildingSMART's community samples
   (MIT; geometry from OpenStreetMap, ODbL) with two alignments and 17,553 elements – 26 MB,
