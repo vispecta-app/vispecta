@@ -12,11 +12,12 @@ https://github.com/vispecta-app/vispecta/releases
 - **IDS colours could not be cleared from the main view.** *Original colours* in the model
   browser now also removes colours given to single elements – IDS results, filters, smart views
   and BCF viewpoints – and ends a comparison. ([#40](https://github.com/vispecta-app/vispecta/issues/40))
-- **Hatching of cut faces crawled over the faces while navigating.** It was drawn in screen
-  space; it is now computed in the section plane itself and sticks to the cut face, in
-  perspective and orthographic view and with several planes.
-  ([#37](https://github.com/vispecta-app/vispecta/issues/37), part 1 – z-fighting where cut
-  solids touch other solids is still open, see the issue)
+- **Cut faces flickered while navigating.** They were the back faces of the cut solids, drawn at
+  their own depth with a hatch in screen space: the hatch crawled over them, and where a cut solid
+  touched another one the two z-fought. Cut faces are now real caps, drawn with the stencil buffer
+  exactly in the section plane (`src/caps.js`), in a darker tone of the element colour, with the
+  hatch fixed in the plane's own axes – also with several planes and in orthographic view.
+  ([#37](https://github.com/vispecta-app/vispecta/issues/37))
 
 ### Added
 - **Reset view** in the *View* menu (Shift+R): original colours, no element transparency,

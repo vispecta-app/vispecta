@@ -34,7 +34,7 @@ export class ViewsPanel {
     const c = document.createElement('canvas');
     c.width = THUMB_W;
     c.height = Math.round((src.height / src.width) * THUMB_W) || 135;
-    v.renderer.render(v.scene, v.camera);
+    v.renderFrame();
     const g = c.getContext('2d');
     // the canvas is transparent (the page background shows through), JPEG needs a solid one
     const bg = getComputedStyle(v.container).backgroundColor;
