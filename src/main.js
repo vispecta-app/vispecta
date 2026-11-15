@@ -34,6 +34,7 @@ import { FilterPanel, keyLabel } from './filters.js';
 import { IssuesPanel } from './issues.js';
 import { readAlignments, AlignmentLayer, SectionMarks, pointAt, heightAt, project, formatStation, parseStation, setStationFormat, stationFormat, STATION_FORMATS } from './alignment.js';
 import { loadPointCloud, LAS_CLASSES, classColor as lasClassColor } from './pointcloud.js';
+import { Corridor } from './corridor.js';
 import { computeSection, computeProfile, planeAxes, layout, toSvg, toPdf, toPdfPages, toDxf, renderBackground, SCALES, AXIS_COLOR } from './drawing.js';
 import { runIdsCheck, colorIdsResult, idsCsv, specSummary, setIdsColors, IDS_EXAMPLES } from './ids.js';
 import { compareModels, showComparison, clearComparison, comparisonCsv, geomText, summaryText, CMP_COLORS, setCompareColors } from './compare.js';
@@ -224,6 +225,116 @@ async function openSamples(key = 'scene') {
     viewer.flyTo(eye, at); // replaces the zoom to everything that loading started
   }
   projects.touch?.();
+}
+
+// ------------------------------------------------------------- offset lines and corridors (#26)
+const corridor = new Corridor(viewer, $('#viewport'));
+viewer.corridor = corridor; // computeSection draws the offsets in station sections
+let corridorHits = null;
+
+function openCorridorDialog() {
+  const list = allAlignments();
+  if (!list.length) return toast(t('aln.none'));
+  const sel = $('#cor-path');
+  const cur = corridor.def?.al;
+  sel.replaceChildren(...list.map((a, i) => h('option', { value: String(i), text: a.drawn ? `✎ ${a.name}` : a.name, selected: a === cur })));
+  const al = cur && list.includes(cur) ? cur : list[+sel.value];
+  if (!corridor.def || corridor.def.al !== al) {
+    $('#cor-from').value = formatStation(al.station0);
+    $('#cor-to').value = formatStation(al.station0 + al.length);
+  }
+  renderCorridorHits();
+  $('#corridor-dialog').showModal();
+}
+$('#cor-path').addEventListener('change', () => {
+  const al = allAlignments()[+$('#cor-path').value];
+  if (al) { $('#cor-from').value = formatStation(al.station0); $('#cor-to').value = formatStation(al.station0 + al.length); }
+});
+
+/** The definition in the dialog, or null (with a message). */
+function corridorFromDialog() {
+  const al = allAlignments()[+$('#cor-path').value];
+  if (!al) { toast(t('aln.none')); return null; }
+  const offsets = [...new Set($('#cor-offsets').value.split(/[;\s]+|,(?=\s)|,(?=-)/).map((x) => +x.replace(',', '.')).filter(Number.isFinite))].sort((a, b) => a - b);
+  if (!offsets.length) { toast(t('cor.noOffsets')); return null; }
+  const from = parseStation($('#cor-from').value), to = parseStation($('#cor-to').value);
+  if (from === null || to === null) { toast(t('st.bad', { v: from === null ? $('#cor-from').value : $('#cor-to').value })); return null; }
+  return { al, offsets, from: from - al.station0, to: to - al.station0 };
+}
+
+function showCorridor() {
+  const def = corridorFromDialog();
+  if (!def) return false;
+  corridor.set(def);
+  corridorHits = null;
+  renderCorridorHits();
+  secViewer?.planesChanged?.();
+  projects.touch?.();
+  return true;
+}
+
+async function findInCorridor() {
+  if (!showCorridor()) return;
+  if (corridor.def.offsets.length < 2) return toast(t('cor.needTwo'));
+  corridorHits = await withLoading(async (progress) => { progress(t('cor.finding'), 0.3); await new Promise((r) => setTimeout(r, 30)); return corridor.find(); });
+  renderCorridorHits();
+}
+
+function renderCorridorHits() {
+  const box = $('#cor-results');
+  if (!corridorHits) { box.replaceChildren(h('p', { class: 'muted small', text: t('cor.hint') })); return; }
+  if (!corridorHits.length) { box.replaceChildren(h('p', { class: 'muted small', text: t('cor.none') })); return; }
+  const byClass = new Map();
+  for (const r of corridorHits) {
+    const cls = r.model.typeName(r.id) || 'IfcElement';
+    const c = byClass.get(cls) || { inside: 0, crosses: 0 };
+    c[r.status]++;
+    byClass.set(cls, c);
+  }
+  const inside = corridorHits.filter((r) => r.status === 'inside').length;
+  box.replaceChildren(
+    h('p', { class: 'small', text: t('cor.summary', { inside: fmtNum(inside), crosses: fmtNum(corridorHits.length - inside) }) }),
+    h('table', { class: 'cor-table' },
+      h('tr', {}, h('th', { text: t('cor.class') }), h('th', { text: t('cor.inside') }), h('th', { text: t('cor.crosses') })),
+      [...byClass].sort((a, b) => (b[1].inside + b[1].crosses) - (a[1].inside + a[1].crosses)).map(([cls, c]) => h('tr', {}, h('td', { text: cls }), h('td', { text: fmtNum(c.inside) }), h('td', { text: fmtNum(c.crosses) })))),
+    h('div', { class: 'card-btns' },
+      h('button', { class: 'btn sm', text: t('cor.colour'), onclick: () => colourCorridorHits() }),
+      h('button', { class: 'btn sm', text: t('cor.select'), onclick: () => selectCorridorHits(false) }),
+      h('button', { class: 'btn sm', text: t('cor.isolate'), onclick: () => selectCorridorHits(true) }),
+      h('button', { class: 'btn sm', text: 'CSV', onclick: () => corridorCsv() })));
+}
+
+function colourCorridorHits() {
+  const per = new Map();
+  for (const r of corridorHits || []) {
+    if (!per.has(r.model)) per.set(r.model, new Map());
+    per.get(r.model).set(r.id, r.status === 'inside' ? 0x8e44ad : 0xf08a24);
+  }
+  for (const m of viewer.models) m.setElementColors(per.get(m) || new Map());
+  viewer.invalidate();
+}
+
+function selectCorridorHits(isolate) {
+  state.selection.clear();
+  for (const r of corridorHits || []) {
+    if (!state.selection.has(r.model)) state.selection.set(r.model, new Set());
+    state.selection.get(r.model).add(r.id);
+  }
+  applySelection();
+  if (isolate) isolateSelected();
+  $('#corridor-dialog').close();
+}
+
+function corridorCsv() {
+  const al = corridor.def.al;
+  const q = (x) => `"${String(x ?? '').replace(/"/g, '""')}"`;
+  const rows = [['Model', 'GlobalId', 'Class', 'Name', 'Status', 'Station', 'Offset (m)'].map(q).join(';')];
+  for (const r of corridorHits || []) {
+    let guid = '';
+    try { guid = r.model.api.GetLine(r.model.modelID, r.id, false)?.GlobalId?.value || ''; } catch { /* ignore */ }
+    rows.push([r.model.name, guid, r.model.typeName(r.id), r.model.nameOf?.(r.id) || r.model.label(r.id), r.status, formatStation(al.station0 + r.s), r.offset.toFixed(3)].map(q).join(';'));
+  }
+  download(`corridor-${al.name.replace(/[^\w.-]+/g, '_')}.csv`, `﻿${rows.join('\r\n')}`, 'text/csv');
 }
 
 // ------------------------------------------------------------- point clouds (#27)
@@ -846,6 +957,10 @@ document.addEventListener('click', (e) => {
     'reset-all': () => resetView({ all: true }),
     'sv-auto': () => setSvAuto(!svAuto),
     'open-samples': () => openSamples(btn.dataset.sample),
+    corridor: () => openCorridorDialog(),
+    'cor-show': () => showCorridor(),
+    'cor-find': () => findInCorridor(),
+    'cor-clear': () => { corridor.clear(); corridorHits = null; renderCorridorHits(); secViewer?.planesChanged?.(); projects.touch?.(); },
   };
   actions[btn.dataset.action]?.();
 });
@@ -2599,6 +2714,7 @@ const projects = new ProjectManager({
     groups: state.modelGroups.map(({ id, name, visible, open }) => ({ id, name, visible, open })),
     models: viewer.models.map((m) => ({ key: projects.keys.get(m) || null, name: m.name, alias: m.alias || null, group: m.groupId || null, color: m.overrideColor ? `#${m.overrideColor.getHexString()}` : null })),
     stationFormat: stationFormat.value, // the client's stationing format stays with the project (#29)
+    corridor: corridor.def ? { path: corridor.def.al.name, drawn: !!corridor.def.al.drawn, offsets: corridor.def.offsets, from: corridor.def.from, to: corridor.def.to } : null, // (#26)
   }),
   setExtra: (x) => {
     drawnPaths.length = 0;
@@ -2614,6 +2730,8 @@ const projects = new ProjectManager({
     }
     if (x?.stationFormat) applyStationFormat(x.stationFormat);
     updateAlignments();
+    const cd = x?.corridor, cal = cd && allAlignments().find((a) => a.name === cd.path && !!a.drawn === cd.drawn);
+    if (cal) corridor.set({ al: cal, offsets: cd.offsets, from: cd.from, to: cd.to }); else corridor.clear();
     renderModels();
   },
 });

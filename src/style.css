@@ -798,3 +798,10 @@ fieldset.annot .annot-row .chk { margin-bottom: 6px; color: var(--text); }
 /* coordinates far apart (#28) */
 .coord-warn { color: #b25e00; font-size: 15px; }
 .coord-warn-set { display: inline-flex; align-items: center; gap: 4px; }
+
+/* offset lines and corridors (#26) */
+.offset-label { background: #8E44AD; color: #fff; }
+.cor-table { width: 100%; border-collapse: collapse; font-size: 12px; margin: 6px 0; }
+.cor-table th, .cor-table td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--border); }
+.cor-table td:not(:first-child), .cor-table th:not(:first-child) { text-align: right; }
+#cor-results { max-height: 40vh; overflow: auto; margin-top: 8px; }
