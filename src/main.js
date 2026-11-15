@@ -164,20 +164,37 @@ async function openFiles(files) {
   }
 }
 
-// "Try it with sample models": buildingSMART's IFC 4.3 sample scene (CC BY 4.0), served by the site
-// itself (public/samples), opened like local files and grouped into infrastructure and building.
-const SAMPLES = { dir: 'samples/simple-scene/', files: ['Infra-Bridge', 'Infra-Electrical', 'Infra-Landscaping', 'Infra-Plumbing', 'Infra-Rail', 'Infra-Alignment', 'Infra-Road', 'Building-Architecture', 'Building-Hvac', 'Building-Landscaping', 'Building-Structural'] };
-async function openSamples() {
+// "Try it with sample models": the site serves the sample files itself (public/samples) and they are
+// opened like local files.
+// - scene: buildingSMART's IFC 4.3 sample scene (CC BY 4.0) with Vispecta's alignments Track and
+//   Road, grouped into infrastructure and building
+// - cbbt: the Chesapeake Bay Bridge-Tunnel test model from buildingSMART's community samples (MIT,
+//   synthetic, geometry from OpenStreetMap) – 26 MB, two alignments of 31 km (#41)
+const SAMPLES = {
+  scene: {
+    dir: 'samples/simple-scene/',
+    files: ['Infra-Bridge', 'Infra-Electrical', 'Infra-Landscaping', 'Infra-Plumbing', 'Infra-Rail', 'Infra-Alignment', 'Infra-Road', 'Building-Architecture', 'Building-Hvac', 'Building-Landscaping', 'Building-Structural'],
+    groups: [['samples.infra', /^Infra-/], ['samples.building', /^Building-/]],
+  },
+  cbbt: {
+    dir: 'samples/chesapeake/',
+    files: ['chesapeake_bay_bridge_tunnel_4x3'],
+    // the corridor is 31 km long: start at Island #1 (station 6+083 on the northbound alignment)
+    focus: { station: 6083, back: 120, side: 90, up: 70 },
+  },
+};
+async function openSamples(key = 'scene') {
+  const set = SAMPLES[key] || SAMPLES.scene;
   let files;
   try {
     files = await withLoading(async (progress) => {
       let done = 0;
       progress(t('samples.loading'), 0);
-      return Promise.all(SAMPLES.files.map(async (name) => {
-        const res = await fetch(`${SAMPLES.dir}${name}.ifc`);
+      return Promise.all(set.files.map(async (name) => {
+        const res = await fetch(`${set.dir}${name}.ifc`);
         if (!res.ok) throw new Error(`${name}.ifc: ${res.status}`);
         const file = new File([await res.blob()], `${name}.ifc`, { type: 'application/x-step' });
-        progress(t('samples.loading'), ++done / SAMPLES.files.length);
+        progress(t('samples.loading'), ++done / set.files.length);
         return file;
       }));
     });
@@ -185,14 +202,24 @@ async function openSamples() {
   const before = new Set(viewer.models);
   await openIfcFiles(files);
   const added = viewer.models.filter((m) => !before.has(m));
-  for (const [key, re] of [['samples.infra', /^Infra-/], ['samples.building', /^Building-/]]) {
+  for (const [name, re] of set.groups || []) {
     const models = added.filter((m) => re.test(m.name));
     if (!models.length) continue;
-    const g = { id: `g${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, name: t(key), visible: true, open: true };
+    const g = { id: `g${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, name: t(name), visible: true, open: true };
     state.modelGroups.push(g);
     for (const m of models) { m.groupId = g.id; m.setGroupHidden(false); }
   }
   afterModelsChanged();
+  const al = set.focus && added.flatMap((m) => m.alignments || [])[0];
+  if (al) {
+    // look at a point of the alignment from behind, to the side and above
+    const { station, back, side, up } = set.focus;
+    const p = pointAt(al, station - al.station0);
+    const z = heightAt(al, station - al.station0) ?? 0;
+    const at = viewer.fromIfc(p.x, p.y, z);
+    const eye = viewer.fromIfc(p.x - p.dx * back - p.dy * side, p.y - p.dy * back + p.dx * side, z + up);
+    viewer.flyTo(eye, at); // replaces the zoom to everything that loading started
+  }
   projects.touch?.();
 }
 
@@ -642,7 +669,7 @@ document.addEventListener('click', (e) => {
     'reset-view': () => resetView(),
     'reset-all': () => resetView({ all: true }),
     'sv-auto': () => setSvAuto(!svAuto),
-    'open-samples': () => openSamples(),
+    'open-samples': () => openSamples(btn.dataset.sample),
   };
   actions[btn.dataset.action]?.();
 });

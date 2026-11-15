@@ -463,7 +463,10 @@ details.batch[open] > summary { margin-bottom: 6px; }
 .drop-zone p { margin: 2px 0; }
 .welcome-text { max-width: 560px; margin: 14px 0 0; }
 .samples-credit a { color: inherit; }
-.samples { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-top: 12px; }
+.samples { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-top: 12px; max-width: 560px; }
+.sample-btns { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 2px 0 4px; }
+.btn.sample { flex-direction: column; align-items: flex-start; gap: 1px; height: auto; padding: 7px 12px; text-align: left; }
+.btn.sample small { color: var(--muted); font-weight: 400; font-size: 11px; }
 .drop-overlay {
   position: fixed; inset: 0; z-index: 1000; display: none; align-items: center; justify-content: center; pointer-events: none;
   background: color-mix(in srgb, var(--accent) 14%, rgba(0, 0, 0, 0.25));
