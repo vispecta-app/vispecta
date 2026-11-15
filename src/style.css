@@ -794,3 +794,7 @@ fieldset.annot .annot-row .chk { margin-bottom: 6px; color: var(--text); }
 .pc-class { display: grid; grid-template-columns: auto 10px 1fr auto; gap: 6px; align-items: center; font-size: 12px; }
 .pc-swatch { width: 10px; height: 10px; border-radius: 2px; }
 .num-sm { width: 64px; }
+
+/* coordinates far apart (#28) */
+.coord-warn { color: #b25e00; font-size: 15px; }
+.coord-warn-set { display: inline-flex; align-items: center; gap: 4px; }

@@ -333,6 +333,7 @@ async function openIfcFiles(list, keys = null) {
   });
   afterModelsChanged();
   viewer.fitBox(viewer.sceneBox(), { keepDirection: before > 0 });
+  checkCoordinates();
 }
 
 // ------------------------------------------------------------- length units
@@ -350,6 +351,97 @@ function modelOrigin(m, f = m.unitFix) {
 function unitCandidates(m) {
   const s = m.declaredLengthScale ?? 1;
   return UNIT_SCALES.filter((r) => Math.abs(r - s) / r > 1e-6).map((r) => r / s);
+}
+
+// ------------------------------------------------------------- coordinates far apart (#28)
+// Models of one project overlap or touch, even long track models. After loading, the models are
+// grouped by the gap between their boxes (not their centres); a group more than `coordWarnM` from
+// the main group probably uses another coordinate system or project base point.
+let coordWarnM = 1000;
+try { const v = +localStorage.getItem('onlineifc.coordWarnM'); if (v > 0) coordWarnM = v; } catch { /* ignore */ }
+
+function boxGap(a, b) {
+  const dx = Math.max(0, a.min.x - b.max.x, b.min.x - a.max.x);
+  const dy = Math.max(0, a.min.y - b.max.y, b.min.y - a.max.y);
+  const dz = Math.max(0, a.min.z - b.max.z, b.min.z - a.max.z);
+  return Math.hypot(dx, dy, dz);
+}
+
+/** Why a model may lie apart from the others (an i18n key), from its georeferencing and the offset. */
+function farCause(m, others) {
+  const mine = !!m.georef?.map, theirs = others.some((o) => o.georef?.map);
+  if (mine && !theirs) return 'coord.causeMapThis';
+  if (!mine && theirs) return 'coord.causeMapOthers';
+  if (mine && others.every((o) => o.georef?.map)) {
+    // all georeferenced: in different map coordinate systems (CRS), or far apart in the same one
+    const crs = (x) => x.georef.map.crs || '';
+    const theirsCrs = [...new Set(others.map(crs).filter(Boolean))];
+    if (crs(m) && theirsCrs.length && !theirsCrs.includes(crs(m))) return { key: 'coord.causeCrs', vars: { mine: crs(m), theirs: theirsCrs.join(', ') } };
+    return 'coord.causeMapApart';
+  }
+  // the offset between the models is about the eastings/northings of a map conversion: one model is
+  // in map coordinates, the other in local coordinates
+  const c = (x) => viewer.toIfc(x.getBox().getCenter(new THREE.Vector3())); // IFC coordinates, as placed
+  const a = c(m), d = Math.hypot(...['x', 'y'].map((k) => a[k] - (others.reduce((s, o) => s + c(o)[k], 0) / others.length)));
+  for (const g of [m, ...others].map((x) => x.georef?.map).filter(Boolean)) {
+    const en = Math.hypot(g.eastings * g.mapScale, g.northings * g.mapScale);
+    if (en > 0 && Math.abs(d - en) < en * 0.02) return 'coord.causeMapLocal';
+  }
+  return 'coord.causeBase';
+}
+
+/**
+ * The box of a model in the coordinates it claims: map coordinates (easting, northing, height)
+ * when it has an IfcMapConversion, else its IFC coordinates. Two georeferenced models with local
+ * IFC coordinates around 0,0 can lie far apart on the map; a model without a map conversion next
+ * to one with it shows as far apart when it is placed in local coordinates. null: no geometry.
+ */
+function claimedBox(m) {
+  const b = m.getBox();
+  if (b.isEmpty()) return null;
+  const out = new THREE.Box3();
+  for (const x of [b.min.x, b.max.x]) for (const y of [b.min.y, b.max.y]) for (const z of [b.min.z, b.max.z]) {
+    const q = viewer.toIfc(new THREE.Vector3(x, y, z));
+    const mp = m.georef?.map ? m.toMap(q) : null;
+    out.expandByPoint(mp ? new THREE.Vector3(mp.e, mp.n, mp.h) : new THREE.Vector3(q.x, q.y, q.z));
+  }
+  return out;
+}
+
+const causeText = (c) => (typeof c === 'string' ? t(c) : t(c.key, c.vars));
+
+function checkCoordinates({ announce = true } = {}) {
+  const boxes = new Map();
+  for (const m of viewer.models) { const b = m.visible ? claimedBox(m) : null; if (b) boxes.set(m, b); }
+  const ms = [...boxes.keys()];
+  for (const m of viewer.models) if (!boxes.has(m)) m.coordWarning = null;
+  // groups: models whose boxes are within coordWarnM of each other (single linkage)
+  const groups = [];
+  for (const m of ms) {
+    const near = groups.filter((g) => g.some((o) => boxGap(boxes.get(m), boxes.get(o)) <= coordWarnM));
+    const merged = [m, ...near.flat()];
+    for (const g of near) groups.splice(groups.indexOf(g), 1);
+    groups.push(merged);
+  }
+  const prev = new Map(viewer.models.map((m) => [m, m.coordWarning]));
+  for (const m of ms) m.coordWarning = null;
+  if (groups.length > 1) {
+    // the main group: the most models, then the largest extent
+    const size = (g) => g.reduce((b, m) => b.union(boxes.get(m)), new THREE.Box3()).getSize(new THREE.Vector3()).length();
+    groups.sort((a, b) => b.length - a.length || size(b) - size(a));
+    const main = groups[0];
+    for (const g of groups.slice(1)) {
+      for (const m of g) {
+        const d = Math.min(...main.map((o) => boxGap(boxes.get(m), boxes.get(o))));
+        m.coordWarning = { km: d / 1000, cause: farCause(m, main), dismissed: prev.get(m)?.dismissed || false };
+      }
+    }
+  }
+  if (announce) {
+    const fresh = ms.filter((m) => m.coordWarning && !prev.get(m));
+    for (const m of fresh.slice(0, 3)) toast(`${t('coord.far', { name: m.alias || m.name, km: m.coordWarning.km.toFixed(1) })} ${causeText(m.coordWarning.cause)}`);
+  }
+  renderModels();
 }
 
 function checkUnits(model) {
@@ -1108,6 +1200,12 @@ function modelCard(m) {
       h('button', { class: 'mg-caret', text: open ? '▾' : '▸', 'aria-label': t('models.details'), onclick: () => { m.cardOpen = !open; renderModels(); } }),
       vis, dot,
       h('span', { class: 'card-title' }, label, sub),
+      m.coordWarning && !m.coordWarning.dismissed ? h('button', {
+        class: 'icon-btn coord-warn',
+        text: '⚠',
+        title: `${t('coord.far', { name: m.alias || m.name, km: m.coordWarning.km.toFixed(1) })} ${causeText(m.coordWarning.cause)} ${t('coord.dismiss')}`,
+        onclick: () => { m.coordWarning.dismissed = true; renderModels(); },
+      }) : null,
       h('button', { class: 'icon-btn', title: t('models.aliasTitle'), text: '✎', onclick: editAlias })),
     open ? h('div', { class: 'card-body' },
       h('div', { class: 'card-meta', text: `${fmtBytes(m.fileSize)}` }),
@@ -2388,6 +2486,17 @@ measure.addEventListener('change', renderMeasure);
 for (const b of $$('#measure-modes [data-measure]')) b.addEventListener('click', () => setMeasureMode(measure.mode === b.dataset.measure ? null : b.dataset.measure));
 $('#measure-snap').addEventListener('change', (e) => { measure.snapOn = e.target.checked; });
 $('#measure-unit').addEventListener('change', (e) => { measure.unit = e.target.value; measure.refresh(); });
+{
+  const inp = $('#coord-warn-m');
+  inp.value = String(coordWarnM);
+  inp.addEventListener('change', () => {
+    const v = +inp.value;
+    if (!(v > 0)) { inp.value = String(coordWarnM); return; }
+    coordWarnM = v;
+    try { localStorage.setItem('onlineifc.coordWarnM', String(v)); } catch { /* ignore */ }
+    checkCoordinates();
+  });
+}
 // stationing format (#29): one setting for labels, fields, the section window, profiles, series and drawings
 function applyStationFormat(fmt, { save = true } = {}) {
   if (save) setStationFormat(fmt); else stationFormat.value = fmt in STATION_FORMATS ? fmt : 'km';
