@@ -178,13 +178,60 @@ export function project(al, p) {
   return { ...best, station: al.station0 + best.s, dz: h !== null && p.z !== undefined ? p.z - h : null, profile: h };
 }
 
-export function formatStation(station, fmt = 'km') {
-  if (fmt === 'm') return `${station.toFixed(3)} m`;
+/*
+ * Stationing formats (#29). One setting for the whole app (Alignment menu), remembered in the
+ * browser and saved in projects:
+ *   km    12+345.678   kilometres + metres (default)
+ *   hm    123+45.68    stations of 100 m
+ *   kmdot 12.346       kilometres with decimals
+ *   kmtxt km 12,346    kilometres with a decimal comma and the prefix "km"
+ *   m     12345.678 m  metres
+ */
+export const STATION_FORMATS = {
+  km: '12+345.678', hm: '123+45.68', kmdot: '12.346', kmtxt: 'km 12,346', m: '12345.678 m',
+};
+export const stationFormat = { value: 'km' };
+try { const v = localStorage.getItem('onlineifc.stationFormat'); if (v && v in STATION_FORMATS) stationFormat.value = v; } catch { /* ignore */ }
+
+export function setStationFormat(fmt) {
+  stationFormat.value = fmt in STATION_FORMATS ? fmt : 'km';
+  try { localStorage.setItem('onlineifc.stationFormat', stationFormat.value); } catch { /* ignore */ }
+}
+
+export function formatStation(station, fmt = stationFormat.value) {
+  fmt ||= stationFormat.value;
   const sign = station < 0 ? '-' : '';
   const a = Math.abs(station);
+  if (fmt === 'm') return `${station.toFixed(3)} m`;
+  if (fmt === 'kmdot') return `${sign}${(a / 1000).toFixed(3)}`;
+  if (fmt === 'kmtxt') return `km ${sign}${(a / 1000).toFixed(3).replace('.', ',')}`;
+  if (fmt === 'hm') {
+    const h = Math.floor(a / 100);
+    return `${sign}${h}+${(a - h * 100).toFixed(2).padStart(5, '0')}`;
+  }
   const km = Math.floor(a / 1000);
   const m = a - km * 1000;
   return `${sign}${km}+${m.toFixed(3).padStart(7, '0')}`;
+}
+
+/**
+ * Text -> station in metres (#29), whatever the setting:
+ *   "12+345.678"  km + m – or 100 m stations + m when the setting is "123+45.68"
+ *   "km 12,345" / "12,345 km"  always kilometres
+ *   "12345 m" / "12345.5m"     always metres
+ *   "12.345" (no unit)          kilometres when the setting is km with decimals, else metres
+ * A decimal comma is accepted everywhere. Returns null when the text is not a station.
+ */
+export function parseStation(text, fmt = stationFormat.value) {
+  const v = String(text).trim().replace(/\s+/g, '').replace(',', '.').toLowerCase();
+  if (!v) return null;
+  const plus = /^(-?)(\d+)\+(\d+(?:\.\d*)?)$/.exec(v.replace(/^km/, ''));
+  if (plus) return (plus[1] ? -1 : 1) * (+plus[2] * (fmt === 'hm' ? 100 : 1000) + +plus[3]);
+  if (/^km/.test(v) || /km$/.test(v)) { const n = +v.replace(/km/g, ''); return Number.isFinite(n) ? n * 1000 : null; }
+  if (/m$/.test(v)) { const n = +v.slice(0, -1); return Number.isFinite(n) ? n : null; }
+  const n = +v;
+  if (!Number.isFinite(n)) return null;
+  return fmt === 'kmdot' || fmt === 'kmtxt' ? n * 1000 : n;
 }
 
 /** 3D display of alignments: the line (following the vertical profile) and station marks. */
@@ -199,7 +246,7 @@ export class AlignmentLayer {
     this.labels = [];
     this.visible = true;
     this.alignments = [];
-    this.format = 'km';
+    this.format = null; // null: the app's stationing format (#29)
     this.interval = 'auto'; // station marks: 'auto', a distance in metres, or 0 = line only
     viewer.renderHooks.push(() => this.#place());
   }
@@ -244,7 +291,7 @@ export class AlignmentLayer {
         if (i % labelEvery) continue;
         const el = document.createElement('div');
         el.className = 'm-label align';
-        el.textContent = formatStation(st, this.format);
+        el.textContent = formatStation(st, this.format || stationFormat.value);
         this.layer.append(el);
         this.labels.push({ el, at: this.viewer.fromIfc(p.x + nx * half * 1.5, p.y + ny * half * 1.5, z) });
       }

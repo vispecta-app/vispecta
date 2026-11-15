@@ -175,6 +175,10 @@
               </select></label>
             <label id="station-custom-wrap" hidden><input type="number" id="station-custom" min="0.1" step="any" value="15" class="sm" /> m</label>
           </div>
+          <div class="menu-sub">
+            <label><span data-i18n="aln.formatTitle"></span>
+              <select id="station-format-menu" class="sm station-format"></select></label>
+          </div>
           <div class="menu-sep"></div>
           <button class="menu-item" data-action="plane-station"><span class="mi-icon"><svg viewBox="0 0 24 24"><path d="M3 18c5-1 8-6 18-12M12 5v14M9 12h6"/></svg></span><span class="mi-text"><b data-i18n="st.menu"></b><small data-i18n="st.menuDesc"></small></span></button>
           <button class="menu-item" data-action="profile"><span class="mi-icon"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 3 4-7 5 5M3 21h18"/></svg></span><span class="mi-text"><b data-i18n="prof.menu"></b><small data-i18n="prof.menuDesc"></small></span></button>
@@ -375,7 +379,7 @@
             <div class="measure-opts">
               <label class="chk"><input type="checkbox" id="measure-snap" checked /> <span data-i18n="measure.snapLabel"></span></label>
               <select id="measure-unit" class="sm"><option value="m">m</option><option value="mm">mm</option></select>
-              <select id="station-format" class="sm" data-i18n-title="aln.formatTitle"><option value="km">0+000.000</option><option value="m">0.000 m</option></select>
+              <select id="station-format" class="sm station-format" data-i18n-title="aln.formatTitle"></select>
             </div>
             <div class="measure-opts lock-opts">
               <label class="chk" data-i18n-title="measure.lockXYTitle"><input type="checkbox" id="measure-lock-xy" /> <span data-i18n="measure.lockXY"></span></label>

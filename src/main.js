@@ -32,7 +32,7 @@ import { ProjectManager } from './projects.js';
 import { SectionViewer } from './secview.js';
 import { FilterPanel, keyLabel } from './filters.js';
 import { IssuesPanel } from './issues.js';
-import { readAlignments, AlignmentLayer, SectionMarks, pointAt, heightAt, project, formatStation } from './alignment.js';
+import { readAlignments, AlignmentLayer, SectionMarks, pointAt, heightAt, project, formatStation, parseStation, setStationFormat, stationFormat, STATION_FORMATS } from './alignment.js';
 import { loadPointCloud, LAS_CLASSES, classColor as lasClassColor } from './pointcloud.js';
 import { computeSection, computeProfile, planeAxes, layout, toSvg, toPdf, toPdfPages, toDxf, renderBackground, SCALES, AXIS_COLOR } from './drawing.js';
 import { runIdsCheck, colorIdsResult, idsCsv, specSummary, setIdsColors, IDS_EXAMPLES } from './ids.js';
@@ -1735,14 +1735,6 @@ function setStationPlane(entry, al, s, sign = null) {
   viewer.updatePlane(entry);
 }
 
-/** Text → station in metres: "1+234.5", "1+234,5", "1234.5" (null if not a number). */
-function parseStation(text) {
-  const v = String(text).trim().replace(/\s+/g, '').replace(',', '.').replace(/^km/i, '');
-  const m = /^(-?)(\d+)\+(\d+(?:\.\d*)?)$/.exec(v);
-  if (m) return (m[1] ? -1 : 1) * (+m[2] * 1000 + +m[3]);
-  return v !== '' && Number.isFinite(+v) ? +v : null;
-}
-
 function addStationPlane() {
   if (!hasScene()) return toast(t('msg.loadFirst'));
   const list = allAlignments();
@@ -2396,7 +2388,22 @@ measure.addEventListener('change', renderMeasure);
 for (const b of $$('#measure-modes [data-measure]')) b.addEventListener('click', () => setMeasureMode(measure.mode === b.dataset.measure ? null : b.dataset.measure));
 $('#measure-snap').addEventListener('change', (e) => { measure.snapOn = e.target.checked; });
 $('#measure-unit').addEventListener('change', (e) => { measure.unit = e.target.value; measure.refresh(); });
-$('#station-format').addEventListener('change', (e) => { alignmentLayer.format = e.target.value; alignmentLayer.rebuild(); measure.refresh(); });
+// stationing format (#29): one setting for labels, fields, the section window, profiles, series and drawings
+function applyStationFormat(fmt, { save = true } = {}) {
+  if (save) setStationFormat(fmt); else stationFormat.value = fmt in STATION_FORMATS ? fmt : 'km';
+  for (const sel of $$('.station-format')) sel.value = stationFormat.value;
+  for (const p of viewer.planes) if (p.station) p.stationLabel = `${t('st.axis')} ${formatStation(p.station.al.station0 + p.station.s)}`;
+  alignmentLayer.rebuild();
+  measure.refresh();
+  renderPlanes();
+  secViewer?.planesChanged?.();
+  projects.touch?.();
+}
+for (const sel of $$('.station-format')) {
+  sel.replaceChildren(...Object.entries(STATION_FORMATS).map(([k, ex]) => h('option', { value: k, text: ex })));
+  sel.value = stationFormat.value;
+  sel.addEventListener('change', (e) => applyStationFormat(e.target.value));
+}
 
 // Station marks of alignments: automatic, a fixed interval, or off (only the line)
 function applyStationInterval() {
@@ -2482,6 +2489,7 @@ const projects = new ProjectManager({
     lines: drawnPaths.map((p) => ({ name: p.name, pts: p.poly.map((q, k) => [q[0], q[1], p.zs[k]]) })),
     groups: state.modelGroups.map(({ id, name, visible, open }) => ({ id, name, visible, open })),
     models: viewer.models.map((m) => ({ key: projects.keys.get(m) || null, name: m.name, alias: m.alias || null, group: m.groupId || null, color: m.overrideColor ? `#${m.overrideColor.getHexString()}` : null })),
+    stationFormat: stationFormat.value, // the client's stationing format stays with the project (#29)
   }),
   setExtra: (x) => {
     drawnPaths.length = 0;
@@ -2495,6 +2503,7 @@ const projects = new ProjectManager({
       const g = groupOf(m);
       m.setGroupHidden(g ? !g.visible : false);
     }
+    if (x?.stationFormat) applyStationFormat(x.stationFormat);
     updateAlignments();
     renderModels();
   },
