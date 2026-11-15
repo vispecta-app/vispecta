@@ -16,6 +16,13 @@ export const LAS_CLASSES = {
 };
 export const classColor = (c) => (LAS_CLASSES[c] || [null, '#cccccc'])[1];
 
+/** Points drawn while the camera moves (all are drawn again when it stops). */
+export function movingBudget() {
+  const mem = navigator.deviceMemory || 8;
+  const coarse = matchMedia?.('(pointer: coarse)').matches;
+  return coarse || mem <= 2 ? 3e5 : mem <= 4 ? 6e5 : 1.2e6;
+}
+
 /** A point budget that fits the device: fewer points on phones and small devices. */
 export function pointBudget() {
   const mem = navigator.deviceMemory || 8;
@@ -62,6 +69,8 @@ export class PointCloud {
     this.visible = true;
     this.mode = this.rgb ? 'rgb' : this.classCounts.size > 1 ? 'class' : 'elevation';
     this.pointSize = 2;
+    this.share = 1;                  // share of the kept points drawn (1, 0.5, 0.25, 0.1)
+    this.movingMax = movingBudget(); // points drawn while the camera moves
     this.placement = 'raw';          // 'raw' or 'map' – set by the viewer
 
     const g = new THREE.BufferGeometry();
@@ -102,12 +111,27 @@ export class PointCloud {
   /** Is point i shown (class filter)? */
   shown(i) { return !this.classes || !this.hiddenClasses.size || !this.hiddenClasses.has(this.classes[i]); }
 
+  setShare(f) { this.share = f; this.updateLod(false); }
+
+  /**
+   * How many points to draw: the chosen share, and at most `movingMax` while the camera moves. The
+   * points are in random order (see the worker), so the first k are an even sample of the cloud.
+   */
+  updateLod(moving) {
+    const g = this.geometry;
+    const all = g.index ? g.index.count : this.count;
+    let k = Math.ceil(all * this.share);
+    if (moving) k = Math.min(k, this.movingMax);
+    if (g.drawRange.count !== k || g.drawRange.start !== 0) g.setDrawRange(0, k);
+  }
+
   #applyFilter() {
     const g = this.geometry;
-    if (!this.hiddenClasses.size) { g.setIndex(null); return; }
+    if (!this.hiddenClasses.size) { g.setIndex(null); this.updateLod(false); return; }
     const idx = [];
     for (let i = 0; i < this.count; i++) if (this.shown(i)) idx.push(i);
     g.setIndex(new THREE.BufferAttribute(Uint32Array.from(idx), 1));
+    this.updateLod(false);
   }
 
   /** Fills the colour attribute for the current mode. */

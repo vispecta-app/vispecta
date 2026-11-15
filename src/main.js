@@ -380,6 +380,8 @@ function cloudCard(c) {
   const size = h('input', { type: 'range', min: '1', max: '8', step: '0.5', value: String(c.pointSize) });
   const sizeVal = h('span', { class: 'muted', text: `${c.pointSize} px` });
   size.addEventListener('input', () => { c.setPointSize(+size.value, viewer.renderer.getPixelRatio()); sizeVal.textContent = `${size.value} px`; viewer.invalidate(); });
+  const share = h('select', { title: t('pc.shareTitle') }, [1, 0.5, 0.25, 0.1].map((f) => h('option', { value: String(f), text: `${f * 100} % · ${fmtNum(Math.round(c.count * f))}`, selected: f === c.share })));
+  share.addEventListener('change', () => { c.setShare(+share.value); viewer.invalidate(); });
   const slab = h('input', { type: 'number', min: '0.01', max: '5', step: '0.05', value: String(viewer.cloudSlab), class: 'num-sm', title: t('pc.slabTitle') });
   slab.addEventListener('change', () => { const v = +slab.value; if (v > 0) { viewer.cloudSlab = v; cloudsChanged(); } });
   // classification: show/hide per class
@@ -399,6 +401,7 @@ function cloudCard(c) {
       h('div', { class: 'card-meta', text: t('pc.meta', { kept: fmtNum(c.count), total: fmtNum(c.total), placement: t(`pc.place.${c.placement}`) }) }),
       h('div', { class: 'card-row' }, h('label', { text: t('pc.colour') }), modeSel),
       h('div', { class: 'card-row' }, h('label', { text: t('pc.size') }), size, sizeVal),
+      h('div', { class: 'card-row' }, h('label', { text: t('pc.share') }), share),
       h('div', { class: 'card-row' }, h('label', { text: t('pc.slab') }), slab, h('span', { class: 'muted', text: 'm' })),
       classes,
       h('div', { class: 'card-btns' },

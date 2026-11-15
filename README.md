@@ -110,6 +110,7 @@ Surveys and laser scans can be loaded next to the IFC models (#27) – drop the 
 - **Thinned while reading** in a worker: an even voxel grid down to a point budget (about 5 million points on a computer, 1.5–3 million on phones and small devices), so the view stays fluid. The card shows how many points of the file are kept.
 - **Placement:** the points are taken as IFC coordinates, or as map coordinates through the models' `IfcMapConversion` (e.g. UTM or DKS) – whichever lands nearer the models. Without models, the first cloud defines the coordinate system. A warning appears when a cloud lies more than 1 km from the models.
 - **Display:** colour by RGB, classification (ASPRS colours), intensity, elevation or one colour; show/hide by classification (e.g. only ground and rail); point size.
+- **Light to navigate:** while the camera moves, only an even sample of the points is drawn (about 1.2 million on a computer, fewer on phones); all are drawn again when it stops. *Points shown* on the card draws 50, 25 or 10 % of the points for weaker graphics cards.
 - **In sections and drawings:** section planes clip the cloud, and the points within ±0.1 m of the plane (adjustable on the card) are shown as dots in the section window and in PDF/SVG/DXF drawings (DXF layer `POINTCLOUD`) – so the existing terrain or track can be compared with the design at every station.
 - **In longitudinal profiles:** the points within the same distance of the path, unrolled by station.
 - **Measuring** snaps to points.

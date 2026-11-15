@@ -769,13 +769,28 @@ export class Viewer extends EventTarget {
   }
 
   /** Renders the scene once (with the section caps, #37). Used by the loop and for snapshots. */
-  renderFrame() {
+  renderFrame({ still = false } = {}) {
     this.caps.update();
+    // point clouds: fewer points while the camera moves; 200 ms after the last movement one more
+    // frame is rendered with all points
+    if (this.clouds.length) {
+      const c0 = this.camera, pm = c0.projectionMatrix.elements;
+      // rounded: the damping of the controls keeps nudging the camera by tiny amounts long after it seems to stand
+      const key = `${c0.position.toArray().map((x) => x.toFixed(3)).join(',')}|${c0.quaternion.toArray().map((x) => x.toFixed(5)).join(',')}|${pm[0].toFixed(5)},${pm[5].toFixed(5)}`;
+      const changed = key !== this._camKey;
+      const moving = !still && changed;
+      if (changed) {
+        this._camKey = key;
+        clearTimeout(this._lodTimer);
+        this._lodTimer = setTimeout(() => this.invalidate(), 200); // the camera stays: a frame with all points
+      }
+      for (const c of this.clouds) c.updateLod(moving);
+    }
     this.renderer.render(this.scene, this.camera);
   }
 
   screenshot() {
-    this.renderFrame();
+    this.renderFrame({ still: true });
     return this.renderer.domElement.toDataURL('image/png');
   }
 }
