@@ -134,6 +134,8 @@ details p { margin: 0 0 18px; color: var(--muted); }
 .contribute-in { display: flex; align-items: center; justify-content: space-between; gap: 32px; flex-wrap: wrap; padding: 44px 48px; border-radius: 20px; color: #E6F1F0; background: linear-gradient(120deg, var(--ink) 0%, #0E4A4C 100%); box-shadow: var(--shadow); }
 .contribute h2 { font-size: clamp(24px, 2.6vw, 32px); }
 .contribute p { color: #B9D3D1; margin: 8px 0 0; max-width: 32em; }
+.con-mark { display: block; width: 64px; height: 64px; margin: -6px 0 10px -4px; overflow: visible; color: #EEF5F4; }
+.mark .mark-ring { fill: none; stroke: var(--accent-2); stroke-width: 0.8; opacity: 0; }
 
 /* footer */
 .foot { border-top: 1px solid var(--line); padding: 32px 0 48px; color: var(--muted); font-size: 14px; }
