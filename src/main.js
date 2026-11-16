@@ -436,6 +436,9 @@ async function openIfcFiles(list, keys = null) {
         checkUnits(model);
         if (key) projects.modelAdded(model, file, key);
         try { model.alignments = await readAlignments(model); } catch (e) { console.warn('alignments', e); model.alignments = []; }
+        // tell when the file is cut off or has nothing to show, instead of silently showing less
+        if (model.truncated) toast(t('msg.truncated', { name: file.name, n: fmtNum(model.elementIds.size) }));
+        else if (!model.elementIds.size && !model.alignments.length) toast(t('msg.noGeometry', { name: file.name }));
         // Build the picking index (BVH) in the background so the first click is instant
         setTimeout(() => { try { model.pickTargets(); } catch { /* built on first pick instead */ } }, 300);
         if (state.spacesVisible) model.show(model.spaceIds);

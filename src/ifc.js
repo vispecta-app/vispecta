@@ -58,6 +58,12 @@ export async function loadIfcFile(file, opts = {}) {
   const fileSize = data.byteLength;
   await nextFrame();
 
+  // Is it an IFC (STEP) file at all, and is it complete? web-ifc opens anything: text gives a
+  // cryptic error, and a file cut off halfway loads as a smaller model without a word.
+  const ascii = (bytes) => String.fromCharCode(...bytes);
+  if (!fileSize || !/ISO-10303-21\s*;/.test(ascii(data.subarray(0, 2048)))) throw new Error(t('err.notIfc'));
+  const truncated = !/END-ISO-10303-21\s*;/.test(ascii(data.subarray(Math.max(0, fileSize - 2048))));
+
   onProgress(t('load.parsing', { name }), 0.15);
   await nextFrame();
   // MEMORY_LIMIT: web-ifc's default is 2 GB; large models (300 MB+ files) need more. 32-bit wasm allows up to 4 GB.
@@ -197,6 +203,7 @@ export async function loadIfcFile(file, opts = {}) {
 
   const model = new IfcModel({ name, api, modelID, buckets: merged, schema, fileSize, coordMatrix, spaceIds, sourceBlob });
   model.fromCache = !!cached;
+  model.truncated = truncated; // the file has no END-ISO-10303-21: it was cut off, the model is incomplete
 
   onProgress(t('load.structure', { name }), 0.9);
   await nextFrame();
