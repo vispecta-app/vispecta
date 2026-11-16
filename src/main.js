@@ -1902,10 +1902,20 @@ function planeRow(p, { name, slider, posInput, unit, step, cls = '' }) {
       enabled,
       typeof name === 'string' ? h('span', { class: 'pl-name', text: name, title: name }) : name,
       act('⇄', t('planes.flip'), () => { viewer.flipPlane(p); renderPlanes(); }),
+      // station sections: cut the 3D view or show the whole model (the section stays, #39)
+      p.station ? h('button', { class: `btn xs${p.cut3d !== false ? ' on' : ''}`, text: '✂', title: t('planes.cut3d'), 'aria-pressed': String(p.cut3d !== false), onclick: () => togglePlaneCut(p) }) : null,
       p.boxPart ? null : act('▣', t('sv.open'), () => openSecView(p)),
       p.boxPart ? null : act('2D', t('drw.title'), () => openDrawingDialog(p)),
       act('✕', t('planes.remove'), () => { viewer.removePlane(p); renderPlanes(); })),
     h('div', { class: 'pl-pos' }, stepBtn(-1), slider, stepBtn(1), h('span', { class: 'val' }, posInput, h('span', { text: unit }))));
+}
+
+/** Turns the 3D cut of a station section on or off (#39); the section window keeps its cut. */
+function togglePlaneCut(p) {
+  viewer.setPlaneCut(p, p.cut3d === false);
+  renderPlanes();
+  secViewer?.renderCut?.();
+  toast(t(p.cut3d === false ? 'planes.cut3dOff' : 'planes.cut3dOn'));
 }
 
 /** Row of a plan / X / Y / face section or a side of the section box. */
@@ -2056,6 +2066,8 @@ function openSecView(p, { popOut = svAuto } = {}) {
     colors: () => ({ colors: 'shown', fill: true }),
     keyPlan: (pl) => keyPlan(pl),
     hatch: () => $('#plane-hatch').checked,
+    cut3d: (pl) => (pl.station ? pl.cut3d !== false : null),
+    toggleCut: (pl) => togglePlaneCut(pl),
     onClose: () => viewer.setPlaneHighlight(null),
     onPlane: (pl) => viewer.setPlaneHighlight(pl),
   });

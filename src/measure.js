@@ -182,7 +182,7 @@ export class MeasureTool extends EventTarget {
 
   #cloudPoint(clientX, clientY) {
     const v = this.viewer, canvas = v.renderer.domElement, rect = canvas.getBoundingClientRect();
-    const planes = v.planes.filter((p) => p.enabled).map((p) => p.plane);
+    const planes = v.cuttingPlanes().map((p) => p.plane);
     let best = null;
     for (const c of v.clouds) {
       const hit = c.pick(v.camera, canvas, clientX - rect.left, clientY - rect.top, SNAP_VERTEX_PX, planes);

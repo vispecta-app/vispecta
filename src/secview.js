@@ -44,6 +44,7 @@ export class SectionViewer {
         btn('+', t('sv.zoomIn'), () => this.zoom(1 / 1.4)),
         btn('⤢', t('sv.fit'), () => { this.fit(); this.render(); }),
         btn('⟳', t('sv.refresh'), () => this.update()),
+        this.cutBtn = btn('✂', t('planes.cut3d'), () => this.plane && this.ctx.toggleCut?.(this.plane)),
         this.ptsBtn = btn('⌖', t('sv.points'), () => { this.showPoints = !this.showPoints; try { localStorage.setItem('onlineifc.sv.points', this.showPoints ? '1' : ''); } catch { /* ignore */ } this.update(); }),
         this.keyBtn = btn('▦', t('sv.keyPlan'), () => { this.showKey = !this.showKey; try { localStorage.setItem('onlineifc.sv.key', this.showKey ? '1' : '0'); } catch { /* ignore */ } this.renderKey(); }),
         this.popBtn,
@@ -171,9 +172,18 @@ export class SectionViewer {
     this.update();
   }
 
+  /** The ✂ button: whether the shown station section cuts the 3D view (#39); hidden for other planes. */
+  renderCut() {
+    const on = this.plane ? this.ctx.cut3d?.(this.plane) : null;
+    this.cutBtn.hidden = on === null || on === undefined;
+    this.cutBtn.classList.toggle('on', !!on);
+    this.cutBtn.setAttribute('aria-pressed', String(!!on));
+  }
+
   update() {
     if (!this.plane) return;
     this.#updateHead();
+    this.renderCut();
     this.renderKey();
     if (this.busy) { this.pending = true; return; }
     this.busy = true;

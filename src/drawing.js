@@ -24,7 +24,8 @@ export function computeSection(viewer, entry, { marks = [], annot = null } = {})
   const plane = entry.plane.clone();
   plane.constant += 1e-7; // avoid vertices exactly on the plane
   // in plans, cross sections at stations are shown as section marks, they do not clip the plan
-  const others = viewer.planes.filter((p) => p.enabled && p !== entry && !(ax.horizontal && p.station)).map((p) => p.plane);
+  // (a plane with its 3D cut turned off, #39, doesn't cut the others either)
+  const others = viewer.cuttingPlanes().filter((p) => p !== entry && !(ax.horizontal && p.station)).map((p) => p.plane);
   const to2d = (p) => {
     if (ax.horizontal) { const q = viewer.toIfc(p); return [q.x, q.y]; }
     const q = viewer.toIfc(p);
