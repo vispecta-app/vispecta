@@ -662,6 +662,11 @@ dialog td:first-child { color: var(--muted); }
 dialog > .chk, .merge-models .chk { color: var(--text); font-size: var(--fs); display: flex; margin: 5px 0; }
 dialog fieldset { border: 1px solid var(--border); border-radius: var(--r); padding: 6px 10px; margin: 8px 0; }
 dialog fieldset > .chk { color: var(--text); font-size: var(--fs); display: flex; margin: 3px 0; }
+dialog { position: relative; }
+.dlg-x { position: absolute; top: 10px; right: 10px; margin: 0; z-index: 1; }
+dialog > h2 { padding-right: 36px; }
+.cor-grid { gap: 8px 12px; margin-top: 4px; }
+.cor-grid input { width: 100%; min-width: 0; box-sizing: border-box; }
 .dialog-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
 .dialog-btns form { display: contents; }
 .merge-models { display: flex; flex-direction: column; gap: 4px; margin: 8px 0 12px; max-height: 220px; overflow: auto; }
