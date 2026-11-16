@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { sectionFill } from './model.js';
 import { SectionCaps } from './caps.js';
+import { CutOutline } from './cutlines.js';
 
 const AXES = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
 
@@ -70,6 +71,7 @@ export class Viewer extends EventTarget {
     // Snitplaner
     this.planes = []; // {id, plane, axis, helper, enabled}
     this.caps = new SectionCaps(this, { on: sectionFill.hatch, size: sectionFill.hatchSize }); // cut faces (#37)
+    this.cutlines = new CutOutline(this); // outline of the cut faces (#68)
     this.planeSeq = 1;
     this.showPlaneHelpers = true;
 
@@ -801,6 +803,7 @@ export class Viewer extends EventTarget {
   /** Renders the scene once (with the section caps, #37). Used by the loop and for snapshots. */
   renderFrame({ still = false } = {}) {
     this.caps.update();
+    this.cutlines.update({ still });
     // point clouds: fewer points while the camera moves; 200 ms after the last movement one more
     // frame is rendered with all points
     if (this.clouds.length) {
