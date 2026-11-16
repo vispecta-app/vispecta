@@ -91,6 +91,16 @@ function installSectionFill(material) {
   material.customProgramCacheKey = () => 'ifc-section-4';
 }
 
+/** Index of the last entry of the sorted array `starts` that is <= pos (binary search): the element an index position belongs to. */
+function lastStartAtOrBefore(starts, pos) {
+  let lo = 0, hi = starts.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (starts[mid] <= pos) lo = mid; else hi = mid - 1;
+  }
+  return lo;
+}
+
 export class IfcModel {
   constructor({ name, api, modelID, buckets, schema, fileSize, coordMatrix, spaceIds, sourceBlob }) {
     this.uid = nextUid++;
@@ -401,39 +411,14 @@ export class IfcModel {
 
   /** expressID for a raycast hit on one of this model's meshes. */
   idFromHit(object, faceIndex) {
-    if (object.userData.pick) {
-      const b = object.userData.bucket;
-      const pos = faceIndex * 3;
-      const s = b.itemStarts;
-      let lo = 0, hi = s.length - 1;
-      while (lo < hi) {
-        const mid = (lo + hi + 1) >> 1;
-        if (s[mid] <= pos) lo = mid; else hi = mid - 1;
-      }
-      return b.items[lo].id;
-    }
-    if (object.userData.fade) {
-      const pos = faceIndex * 3;
-      const s = object.userData.starts;
-      let lo = 0, hi = s.length - 1;
-      while (lo < hi) {
-        const mid = (lo + hi + 1) >> 1;
-        if (s[mid] <= pos) lo = mid; else hi = mid - 1;
-      }
-      return object.userData.ids[lo];
-    }
-    return this.idFromFace(object.userData.bucket, faceIndex);
+    const u = object.userData, pos = faceIndex * 3;
+    if (u.pick) return u.bucket.items[lastStartAtOrBefore(u.bucket.itemStarts, pos)].id;
+    if (u.fade) return u.ids[lastStartAtOrBefore(u.starts, pos)];
+    return this.idFromFace(u.bucket, faceIndex);
   }
 
   idFromFace(bucket, faceIndex) {
-    const pos = faceIndex * 3;
-    const s = bucket.curStarts;
-    let lo = 0, hi = s.length - 1;
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >> 1;
-      if (s[mid] <= pos) lo = mid; else hi = mid - 1;
-    }
-    return bucket.curIds[lo];
+    return bucket.curIds[lastStartAtOrBefore(bucket.curStarts, faceIndex * 3)];
   }
 
   // ---------------------------------------------------------------- markering
