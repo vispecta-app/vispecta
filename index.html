@@ -135,8 +135,6 @@
           <button class="menu-item" data-action="section-box"><span class="mi-icon"><svg viewBox="0 0 24 24"><path d="M4 8l8-4 8 4v8l-8 4-8-4zM4 8l8 4 8-4M12 12v8"/></svg></span><span class="mi-text"><b data-i18n="mi.box"></b><small data-i18n="mi.boxDesc"></small></span></button>
           <button class="menu-item" data-action="plane-station"><span class="mi-icon"><svg viewBox="0 0 24 24"><path d="M3 18c5-1 8-6 18-12M12 5v14M9 12h6"/></svg></span><span class="mi-text"><b data-i18n="st.menu"></b><small data-i18n="st.menuDesc"></small></span></button>
           <div class="menu-sep"></div>
-          <button class="menu-item" data-action="sv-auto"><span class="mi-icon mi-check" id="sv-auto-check">☐</span><span class="mi-text"><b data-i18n="sv.auto"></b><small data-i18n="sv.autoDesc"></small></span></button>
-          <div class="menu-sep"></div>
           <button class="menu-item" data-action="drawing"><span class="mi-icon"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM4 15h16M9 15v5"/></svg></span><span class="mi-text"><b data-i18n="mi.drawing"></b><small data-i18n="mi.drawingDesc"></small></span></button>
           <div class="menu-sep"></div>
           <button class="menu-item" data-action="clear-planes"><span class="mi-icon">✕</span><span class="mi-text"><b data-i18n="mi.clearSections"></b></span></button>
@@ -193,9 +191,6 @@
 
       <button data-action="toggle-measure" data-i18n-title="tb.measureTitle">
         <svg viewBox="0 0 24 24"><path d="M3 17 17 3l4 4L7 21zM7 13l2 2M10 10l2 2M13 7l2 2"/></svg><span data-i18n="tb.measure"></span>
-      </button>
-      <button data-action="toggle-edit" data-i18n-title="tb.editTitle">
-        <svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4"/></svg><span data-i18n="tb.edit"></span>
       </button>
       <div class="menu">
         <button class="menu-btn" data-menu="tools" data-i18n-title="tb.toolsTitle">
@@ -465,7 +460,6 @@
       <label class="chk"><input type="checkbox" id="merge-download" checked /> <span data-i18n="merge.download"></span></label>
       <p class="muted small" data-i18n="merge.note"></p>
       <div class="dialog-btns">
-        <button class="btn" data-action="merge-cancel" data-i18n="common.cancel"></button>
         <button class="btn primary" data-action="merge-run" data-i18n="merge.run"></button>
       </div>
     </dialog>
@@ -518,7 +512,6 @@
       </fieldset>
       <p class="muted small" data-i18n="drw.note"></p>
       <div class="dialog-btns">
-        <button class="btn" data-action="drawing-cancel" data-i18n="common.cancel"></button>
         <button class="btn primary" data-action="drawing-run" data-i18n="drw.export"></button>
       </div>
     </dialog>
@@ -544,7 +537,6 @@
       </div>
       <div class="prof-preview" id="prof-preview"><p class="muted small" data-i18n="prof.previewHint"></p></div>
       <div class="dialog-btns">
-        <form method="dialog"><button class="btn" data-i18n="common.close"></button></form>
         <button class="btn" data-action="prof-export" data-fmt="dxf">DXF</button>
         <button class="btn" data-action="prof-export" data-fmt="svg">SVG</button>
         <button class="btn" data-action="prof-export" data-fmt="pdf">PDF</button>
@@ -552,18 +544,18 @@
       </div>
     </dialog>
 
-    <dialog id="corridor-dialog">
+    <dialog id="corridor-dialog" class="wide">
       <h2 data-i18n="cor.title"></h2>
       <p class="muted small" data-i18n="cor.intro"></p>
       <label class="field"><span data-i18n="prof.path"></span><select id="cor-path"></select></label>
-      <div class="grid3">
-        <label class="field"><span data-i18n="cor.offsets"></span><input id="cor-offsets" type="text" value="-5 5" data-i18n-title="cor.offsetsTitle" /></label>
+      <div class="grid2 cor-grid">
+        <label class="field"><span data-i18n="cor.left"></span><input id="cor-left" type="text" inputmode="decimal" value="5" data-i18n-title="cor.sideTitle" /></label>
+        <label class="field"><span data-i18n="cor.right"></span><input id="cor-right" type="text" inputmode="decimal" value="5" data-i18n-title="cor.sideTitle" /></label>
         <label class="field"><span data-i18n="prof.from"></span><input id="cor-from" type="text" inputmode="decimal" /></label>
         <label class="field"><span data-i18n="prof.to"></span><input id="cor-to" type="text" inputmode="decimal" /></label>
       </div>
       <div id="cor-results"></div>
       <div class="dialog-btns">
-        <form method="dialog"><button class="btn" data-i18n="common.close"></button></form>
         <button class="btn" data-action="cor-clear" data-i18n="cor.clear"></button>
         <button class="btn" data-action="cor-show" data-i18n="cor.show"></button>
         <button class="btn primary" data-action="cor-find" data-i18n="cor.find"></button>
@@ -581,7 +573,6 @@
       <div class="field"><span data-i18n="ids.models"></span><div id="ids-models" class="merge-models"></div></div>
       <p class="muted small" data-i18n="ids.note"></p>
       <div class="dialog-btns">
-        <button class="btn" data-action="ids-cancel" data-i18n="common.cancel"></button>
         <button class="btn primary" data-action="ids-run" data-i18n="ids.run"></button>
       </div>
     </dialog>
@@ -593,7 +584,6 @@
       <label class="field"><span data-i18n="cmp.newModel"></span><select id="cmp-new"></select></label>
       <label class="chk"><input type="checkbox" id="cmp-unchanged" checked /> <span data-i18n="cmp.showUnchanged"></span></label>
       <div class="dialog-btns">
-        <button class="btn" data-action="compare-cancel" data-i18n="common.cancel"></button>
         <button class="btn primary" data-action="compare-run" data-i18n="cmp.run"></button>
       </div>
     </dialog>
@@ -610,7 +600,6 @@
       <div class="dialog-btns">
         <button class="btn" data-action="proj-clear-cache" data-i18n="proj.clearCache" data-i18n-title="proj.clearCacheTitle"></button>
         <button class="btn" data-action="project-new" data-i18n="proj.new"></button>
-        <form method="dialog"><button class="btn primary" data-i18n="common.close"></button></form>
       </div>
     </dialog>
 
@@ -627,7 +616,6 @@
       <p class="muted small" data-i18n="about.license"></p>
       <p class="muted small" data-i18n-html="about.repo"></p>
       <p class="muted small" data-i18n="about.privacy"></p>
-      <form method="dialog" class="dialog-btns"><button class="btn primary" data-i18n="common.close"></button></form>
     </dialog>
 
     <dialog id="help-dialog">
@@ -656,7 +644,6 @@
         <tr><td>Ctrl+Enter</td><td data-i18n="help.ctrlEnter"></td></tr>
       </table>
       <p class="muted" data-i18n="help.note"></p>
-      <form method="dialog" class="dialog-btns"><button class="btn primary" data-i18n="common.close"></button></form>
     </dialog>
 
     <script type="module" src="/src/main.js"></script>

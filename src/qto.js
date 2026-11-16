@@ -153,7 +153,8 @@ export class QtoTable {
       controls, table,
       h('div', { class: 'dialog-btns' },
         h('button', { class: 'btn', text: t('qto.csv'), onclick: () => this.ctx.download('quantities.csv', this.csv(), 'text/csv;charset=utf-8') }),
-        h('button', { class: 'btn primary', text: t('common.close'), onclick: () => this.dialog.close() })));
+      ));
+    this.ctx.addCloseX?.(this.dialog);
   }
 
   csv() {

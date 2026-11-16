@@ -41,6 +41,25 @@ import { compareModels, showComparison, clearComparison, comparisonCsv, geomText
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+
+/**
+ * Every dialog closes with ✕ in its top right corner (no Cancel / Close buttons). Esc closes too.
+ * Called for all dialogs at start and by dialogs that rebuild their content (quantities).
+ */
+function addCloseX(d) {
+  if (d.querySelector(':scope > .dlg-x')) return;
+  const b = document.createElement('button');
+  b.className = 'icon-btn';
+  b.textContent = '✕';
+  b.dataset.i18nTitle = 'common.close';
+  b.title = typeof t === 'function' ? t('common.close') : 'Close';
+  b.setAttribute('aria-label', b.title);
+  const f = document.createElement('form');
+  f.method = 'dialog';
+  f.className = 'dlg-x';
+  f.append(b);
+  d.prepend(f);
+}
 export const h = (tag, props = {}, ...children) => {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(props)) {
@@ -92,6 +111,7 @@ $('#lang-select').addEventListener('change', (e) => {
   measure.refresh();
   renderAll();
 });
+for (const d of $$('dialog')) addCloseX(d);
 applyStaticTranslations();
 
 // ======================================================================== theme
@@ -243,6 +263,12 @@ function openCorridorDialog() {
     $('#cor-from').value = formatStation(al.station0);
     $('#cor-to').value = formatStation(al.station0 + al.length);
   }
+  // the current corridor, split into left (negative) and right of the alignment
+  if (corridor.def) {
+    const fmt = (v) => fmtNum(Math.abs(v));
+    $('#cor-left').value = corridor.def.offsets.filter((o) => o < 0).reverse().map(fmt).join('; ');
+    $('#cor-right').value = corridor.def.offsets.filter((o) => o >= 0).map(fmt).join('; ');
+  }
   renderCorridorHits();
   $('#corridor-dialog').showModal();
 }
@@ -255,7 +281,9 @@ $('#cor-path').addEventListener('change', () => {
 function corridorFromDialog() {
   const al = allAlignments()[+$('#cor-path').value];
   if (!al) { toast(t('aln.none')); return null; }
-  const offsets = [...new Set($('#cor-offsets').value.split(/[;\s]+|,(?=\s)|,(?=-)/).map((x) => +x.replace(',', '.')).filter(Number.isFinite))].sort((a, b) => a - b);
+  // left and right of the alignment: one or more distances per side (e.g. "2.5; 5"); left becomes negative
+  const side = (id, sign) => $(id).value.split(/[;\s]+/).filter((x) => x.trim() !== '').map((x) => sign * Math.abs(+x.replace(',', '.'))).filter(Number.isFinite);
+  const offsets = [...new Set([...side('#cor-left', -1), ...side('#cor-right', 1)].map((x) => (Object.is(x, -0) ? 0 : x)))].sort((a, b) => a - b);
   if (!offsets.length) { toast(t('cor.noOffsets')); return null; }
   const from = parseStation($('#cor-from').value), to = parseStation($('#cor-to').value);
   if (from === null || to === null) { toast(t('st.bad', { v: from === null ? $('#cor-from').value : $('#cor-to').value })); return null; }
@@ -908,11 +936,8 @@ document.addEventListener('click', (e) => {
     compare: () => openCompareDialog(),
     ids: () => openIdsDialog(),
     drawing: () => openDrawingDialog(),
-    'drawing-cancel': () => $('#drawing-dialog').close(),
     'drawing-run': () => exportDrawing(),
-    'ids-cancel': () => $('#ids-dialog').close(),
     'ids-run': () => runIds(),
-    'compare-cancel': () => $('#compare-dialog').close(),
     'compare-run': () => runCompare(),
     'plane-face': () => {
       if (!viewer.models.length) return toast(t('msg.loadFirst'));
@@ -941,7 +966,6 @@ document.addEventListener('click', (e) => {
     },
     'toggle-edit': () => setEditMode(!state.editMode),
     merge: () => openMergeDialog(),
-    'merge-cancel': () => $('#merge-dialog').close(),
     'merge-run': () => runMerge(),
     'toggle-python': () => python.toggle(),
     'toggle-measure': () => setMeasureMode(measure.mode ? null : lastMeasureMode),
@@ -961,7 +985,6 @@ document.addEventListener('click', (e) => {
     'reset-colors': () => resetColors(),
     'reset-view': () => resetView(),
     'reset-all': () => resetView({ all: true }),
-    'sv-auto': () => setSvAuto(!svAuto),
     'open-samples': () => openSamples(btn.dataset.sample),
     corridor: () => openCorridorDialog(),
     'cor-show': () => showCorridor(),
@@ -2034,7 +2057,7 @@ viewer.addEventListener('planeschanged', () => {
 
 // window with the live cut of one plane, to step through the sections next to the 3D view
 let secViewer = null;
-function openSecView(p, { popOut = svAuto } = {}) {
+function openSecView(p, { popOut = false } = {}) {
   secViewer ||= new SectionViewer({
     t, h, toast,
     container: $('#viewport'),
@@ -2117,17 +2140,13 @@ function keyPlan(pl) {
   return { boxes, lines, cut, note };
 }
 
-/** "Open sections in a window of their own": new section planes open the section window, popped out. */
-let svAuto = false;
-try { svAuto = localStorage.getItem('onlineifc.svAuto') === '1'; } catch { /* ignore */ }
-function setSvAuto(on) {
-  svAuto = on;
-  try { localStorage.setItem('onlineifc.svAuto', on ? '1' : ''); } catch { /* ignore */ }
-  $('#sv-auto-check').textContent = on ? '☑' : '☐';
-  if (on) toast(t('sv.autoOn'), true);
-}
-$('#sv-auto-check').textContent = svAuto ? '☑' : '☐';
-function autoSecView(p) { if (svAuto && p && !p.boxPart) openSecView(p, { popOut: true }); }
+/**
+ * A new cross section at a station opens the section window in the app (docked, not as a browser
+ * window of its own – ⧉ in the window pops it out). Plan, X/Y and face sections just cut the model.
+ */
+function autoSecView(p) { if (p?.station) openSecView(p); }
+// the former setting "Sections in a window of their own" is gone
+try { localStorage.removeItem('onlineifc.svAuto'); } catch { /* ignore */ }
 
 /** Drawing marks of the station planes for a plan drawing (classic section marks A–A). */
 function planSectionMarks() {
@@ -2715,7 +2734,7 @@ const filters = new FilterPanel({
 });
 
 const qto = new QtoTable({
-  viewer, h, toast, download, state,
+  viewer, h, toast, download, state, addCloseX,
   ensureIndex: () => filters.ensureIndex(),
   setSelection: (map) => filters.ctx.setSelection(new Map([...map].map(([m, ids]) => [m, ids]))),
 }, $('#qto-dialog'));

@@ -6,6 +6,19 @@ https://github.com/vispecta-app/vispecta/releases
 ## Unreleased
 
 ### Changed
+- **Dialogs close with ✕ in the top right corner** (or Esc) – no more Cancel / Close buttons.
+- **A new cross section at a station opens the section window in the app**, next to the 3D view.
+  Plan, X/Y and face sections just cut the model. The setting *Sections in a window of their own*
+  is gone (it opened every new section as a separate browser window); ⧉ in the section window
+  still pops it out.
+- **Offset lines and corridor:** separate fields for *Left* and *Right* of the alignment (more
+  than one distance per side with `;`), a wider dialog, and the stations fit their fields.
+- **Edit** is no longer in the toolbar; it stays in the properties panel (and the `E` key).
+
+### Fixed
+- **The section box could not be seen.** It is now drawn as a wireframe, also where it doesn't
+  cut anything yet.
+
 - **Faster sections: cut faces are computed once, not drawn in every frame.** The coloured cut
   faces (stencil caps) drew every model mesh two more times per plane in every frame, which made
   large models slow with a section. They are replaced by hatched faces in a light, neutral tone

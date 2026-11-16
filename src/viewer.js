@@ -655,6 +655,7 @@ export class Viewer extends EventTarget {
   setPlanePos(entry, pos) {
     entry.plane.constant = -pos / entry.plane.normal.dot(entry.axisVec);
     this.#updateHelper(entry);
+    if (entry.boxPart) this.#updateBoxHelper();
     this.invalidate();
     this.dispatchEvent(new Event('planeschanged'));
   }
@@ -737,6 +738,29 @@ export class Viewer extends EventTarget {
     this.dispatchEvent(new Event('planeschanged'));
     this.renderer.clippingPlanes = this.cuttingPlanes().map((p) => p.plane);
     for (const p of this.planes) this.#updateHelper(p);
+    this.#updateBoxHelper();
+  }
+
+  /** The section box as a wireframe, so it can be seen where it doesn't cut anything (yet). */
+  #updateBoxHelper() {
+    const parts = this.planes.filter((p) => p.boxPart && p.enabled);
+    if (!this.boxHelper) {
+      this.boxHelper = new THREE.Box3Helper(new THREE.Box3(), 0x3aa0ff);
+      this.boxHelper.material.transparent = true;
+      this.boxHelper.material.opacity = 0.9;
+      this.boxHelper.raycast = () => {};
+      this.helpers.add(this.boxHelper);
+    }
+    const b = this.boxHelper.box.makeEmpty();
+    // a box side keeps what lies on its inner side: n·p + c ≥ 0, so the side lies at −c along n
+    for (const p of parts) {
+      const n = p.plane.normal, k = ['x', 'y', 'z'].find((a) => Math.abs(n[a]) > 0.999);
+      if (!k) continue;
+      const at = -p.plane.constant / n[k];
+      if (n[k] > 0) b.min[k] = at; else b.max[k] = at;
+    }
+    const ok = parts.length === 6 && b.min.x < b.max.x && b.min.y < b.max.y && b.min.z < b.max.z;
+    this.boxHelper.visible = ok && this.showPlaneHelpers !== false;
   }
 
   #updateHelper(entry) {
