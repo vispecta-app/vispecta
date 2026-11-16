@@ -775,7 +775,9 @@ export class Viewer extends EventTarget {
       const at = entry.plane.projectPoint(entry.anchor, new THREE.Vector3());
       at.y = pt.y; // keep the height of the scene centre
       h.position.copy(at).addScaledVector(right, (lo + hi) / 2);
-      h.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, n));
+      // right × up is the third axis: a right-handed basis (with n as the third axis it would be a
+      // mirror, and the rotation taken from it is wrong – the plane stood askew next to the cut)
+      h.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, new THREE.Vector3().crossVectors(right, up)));
       h.scale.set(hi - lo, size, 1);
     }
   }
