@@ -40,6 +40,8 @@ export class SectionViewer {
         this.stationIn,
         btn('›', t('sv.next'), () => this.step(1), 'step'),
         h('label', { class: 'sv-steplbl' }, h('span', { text: t('sv.step') }), this.stepIn, h('span', { text: 'm' })),
+        btn('−', t('sv.zoomOut'), () => this.zoom(1.4)),
+        btn('+', t('sv.zoomIn'), () => this.zoom(1 / 1.4)),
         btn('⤢', t('sv.fit'), () => { this.fit(); this.render(); }),
         btn('⟳', t('sv.refresh'), () => this.update()),
         this.ptsBtn = btn('⌖', t('sv.points'), () => { this.showPoints = !this.showPoints; try { localStorage.setItem('onlineifc.sv.points', this.showPoints ? '1' : ''); } catch { /* ignore */ } this.update(); }),
@@ -66,31 +68,56 @@ export class SectionViewer {
       if (e.key === 'ArrowRight' || e.key === 'PageDown') { e.preventDefault(); this.step(1); }
       else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); this.step(-1); }
       else if (e.key === 'f' || e.key === 'F') { this.fit(); this.render(); }
+      else if (e.key === '+' || e.key === '=') { e.preventDefault(); this.zoom(1 / 1.4); }
+      else if (e.key === '-' || e.key === '_') { e.preventDefault(); this.zoom(1.4); }
     };
     // popped out, the window itself listens (see popOut), otherwise the floating window
     this.el.addEventListener('keydown', (e) => { if (!this.win) this.onKey(e); });
-    // zoom (wheel, at the cursor) and pan (drag)
+    // zoom (#65): wheel / trackpad pinch at the cursor, two-finger pinch on touch screens, the
+    // − + buttons and the + − keys; pan by dragging; double-click (or ⤢, F) fits the whole section.
+    // The zoom is kept while stepping through the stations.
     this.body.addEventListener('wheel', (e) => {
       e.preventDefault();
       if (!this.view) return;
-      const p = this.#toModel(e);
-      const f = Math.pow(1.0015, e.deltaY);
-      const v = this.view;
-      this.view = { x: p.x - (p.x - v.x) * f, y: p.y - (p.y - v.y) * f, w: v.w * f, h: v.h * f };
-      this.render();
+      this.#zoomAt(this.#toModel(e), Math.pow(1.0015, e.deltaY));
     }, { passive: false });
-    let drag = null;
-    this.body.addEventListener('pointerdown', (e) => { if (!this.view) return; drag = { x: e.clientX, y: e.clientY, v: { ...this.view } }; this.body.setPointerCapture(e.pointerId); this.el.focus({ preventScroll: true }); });
+    this.body.addEventListener('dblclick', (e) => { e.preventDefault(); this.fit(); this.render(); });
+    const ptrs = new Map(); // pointerId -> {x, y}
+    let drag = null, pinch = null;
+    const startDrag = () => {
+      const [a, b] = [...ptrs.values()];
+      drag = null; pinch = null;
+      if (a && b) pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, v: { ...this.view } };
+      else if (a) drag = { x: a.x, y: a.y, v: { ...this.view } };
+    };
+    this.body.addEventListener('pointerdown', (e) => {
+      if (!this.view) return;
+      ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      this.body.setPointerCapture(e.pointerId);
+      startDrag();
+      this.el.focus({ preventScroll: true });
+    });
     this.body.addEventListener('pointermove', (e) => {
       const p = this.#toModel(e);
       if (p) this.coord.textContent = this.ctx.t('sv.coord', { x: p.x.toFixed(3), z: (-p.y).toFixed(3) });
-      if (!drag) return;
+      if (!ptrs.has(e.pointerId)) return;
+      ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
       const r = this.body.getBoundingClientRect();
-      const k = this.#scale(r);
-      this.view = { ...drag.v, x: drag.v.x - (e.clientX - drag.x) / k, y: drag.v.y - (e.clientY - drag.y) / k };
-      this.render();
+      if (pinch) {
+        const [a, b] = [...ptrs.values()];
+        const d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+        this.view = pinch.v;
+        this.#zoomAt(this.#toModel({ clientX: (a.x + b.x) / 2, clientY: (a.y + b.y) / 2 }), pinch.d / d, false);
+        this.render();
+      } else if (drag) {
+        const k = this.#scale(r);
+        this.view = { ...drag.v, x: drag.v.x - (e.clientX - drag.x) / k, y: drag.v.y - (e.clientY - drag.y) / k };
+        this.render();
+      }
     });
-    this.body.addEventListener('pointerup', () => { drag = null; });
+    const lift = (e) => { if (ptrs.delete(e.pointerId)) startDrag(); };
+    this.body.addEventListener('pointerup', lift);
+    this.body.addEventListener('pointercancel', lift);
     this.body.addEventListener('pointerleave', () => { this.coord.textContent = ''; });
     // move the floating window by its header
     let mv = null;
@@ -187,6 +214,22 @@ export class SectionViewer {
     if (w / hh < aspect) w = hh * aspect; else hh = w / aspect;
     const cx = (b.minX + b.maxX) / 2, cy = -(b.minY + b.maxY) / 2;
     this.view = { x: cx - w / 2, y: cy - hh / 2, w, h: hh };
+  }
+
+  /** Zooms by factor f (> 1 out, < 1 in) around a point in drawing coordinates (default: the centre). */
+  zoom(f) {
+    if (!this.view) return;
+    const v = this.view;
+    this.#zoomAt({ x: v.x + v.w / 2, y: v.y + v.h / 2 }, f);
+  }
+
+  #zoomAt(p, f, render = true) {
+    const v = this.view;
+    if (!v || !p) return;
+    // not further in than about 1 mm across the window, not further out than 100 km
+    f = Math.min(Math.max(f, 0.002 / v.w), 1e5 / v.w);
+    this.view = { x: p.x - (p.x - v.x) * f, y: p.y - (p.y - v.y) * f, w: v.w * f, h: v.h * f };
+    if (render) this.render();
   }
 
   #scale(r) { return Math.min(r.width / this.view.w, r.height / this.view.h); }
