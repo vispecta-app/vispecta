@@ -30,6 +30,7 @@ import { ContextMenu } from './contextmenu.js';
 import { renderVersion } from './version.js';
 import { ProjectManager } from './projects.js';
 import { SectionViewer } from './secview.js';
+import { LineEditor } from './lineedit.js';
 import { FilterPanel, keyLabel } from './filters.js';
 import { IssuesPanel } from './issues.js';
 import { readAlignments, AlignmentLayer, SectionMarks, pointAt, heightAt, project, formatStation, parseStation, setStationFormat, stationFormat, STATION_FORMATS } from './alignment.js';
@@ -658,7 +659,7 @@ async function loadBytes(name, data, { replace = null } = {}) {
 }
 
 function updateAlignments() {
-  const all = allAlignments();
+  const all = allAlignments().filter((a) => !a.hidden); // a drawn line can be hidden (#74)
   // the line being drawn
   if (lineTool.active && lineTool.pts.length >= 2) all.push(makePath('…', lineTool.pts));
   alignmentLayer.set(all);
@@ -894,7 +895,7 @@ document.addEventListener('click', (e) => {
     'prof-show': () => showProfile(),
     'prof-export': () => exportProfile(btn.dataset.fmt),
     'prof-draw': () => { $('#profile-dialog').close(); startLineTool((path) => openProfileDialog(path)); },
-    'prof-remove-line': () => { const al = profilePath(); if (al?.drawn && confirm(t('line.removeConfirm', { name: al.name }))) { removeDrawnPath(al); openProfileDialog(); } },
+    'prof-remove-line': () => { const al = profilePath(); if (al?.drawn && confirmRemoveLine(al)) { removeDrawnPath(al); openProfileDialog(); } },
     drive: () => openDrive(),
     'draw-line': () => startLineTool((path) => { if (path) toast(t('line.done', { name: path.name }), true); }),
     'drive-play': () => setDrivePlaying(!drive.playing),
@@ -1240,13 +1241,19 @@ function inlineEdit(span, value, placeholder, save) {
 function renderModels() {
   const list = $('#model-list');
   list.replaceChildren();
-  $('#models-empty').hidden = viewer.models.length + viewer.clouds.length > 0;
+  $('#models-empty').hidden = viewer.models.length + viewer.clouds.length + drawnPaths.length > 0;
   $('#model-actions').hidden = viewer.models.length === 0;
   // groups whose models are all gone stay until removed; models of a removed group are loose
   const loose = viewer.models.filter((m) => !groupOf(m));
   for (const g of state.modelGroups) list.append(groupSection(g, viewer.models.filter((m) => m.groupId === g.id)));
   if (state.modelGroups.length) list.append(groupSection(null, loose));
   else for (const m of loose) list.append(modelCard(m));
+  // drawn lines (#74)
+  if (drawnPaths.length) {
+    list.append(h('section', { class: 'mgroup lines' },
+      h('div', { class: 'mg-head' }, h('span', { class: 'mg-name muted', text: t('line.title') }), h('span', { class: 'mg-count', text: String(drawnPaths.length) })),
+      h('div', { class: 'mg-body' }, drawnPaths.map(drawnLineRow))));
+  }
   // point clouds (#27)
   if (viewer.clouds.length) {
     list.append(h('section', { class: 'mgroup clouds' },
@@ -2310,6 +2317,7 @@ function finishLineTool(ok) {
     path = makePath(t('line.name', { n: drawnPaths.length + 1 }), pts);
     drawnPaths.push(path);
     projects.touch?.();
+    renderModels();
   } else if (ok) toast(t('line.tooFew'));
   updateAlignments();
   done?.(path);
@@ -2318,11 +2326,77 @@ function finishLineTool(ok) {
 function removeDrawnPath(path) {
   const i = drawnPaths.indexOf(path);
   if (i < 0) return;
+  if (lineEditor.path === path) lineEditor.end(false);
   drawnPaths.splice(i, 1);
   for (const p of viewer.planes.filter((x) => x.station?.al === path)) viewer.removePlane(p);
+  if (corridor.def?.al === path) { corridor.clear(); corridorHits = null; }
   renderPlanes();
   updateAlignments();
+  renderModels();
+  secViewer?.planesChanged?.();
   projects.touch?.();
+}
+
+/** Asks before a drawn line is removed, naming what uses it (sections, the corridor). */
+function confirmRemoveLine(path) {
+  const n = viewer.planes.filter((x) => x.station?.al === path).length;
+  const uses = [n ? t('line.usesSections', { n }) : '', corridor.def?.al === path ? t('line.usesCorridor') : ''].filter(Boolean).join(', ');
+  return confirm(t('line.removeConfirm', { name: path.name }) + (uses ? `\n${t('line.alsoRemoved', { what: uses })}` : ''));
+}
+
+/**
+ * New points for a drawn line (#74). The path object is kept, so what uses it follows: station
+ * sections stay at their distance along the line (or its new end), the corridor is rebuilt.
+ */
+function setPathPoints(path, pts) {
+  const p2 = makePath(path.name, pts);
+  Object.assign(path, { poly: p2.poly, cum: p2.cum, length: p2.length, zs: p2.zs });
+  for (const pl of viewer.planes.filter((x) => x.station?.al === path)) setStationPlane(pl, path, Math.min(pl.station.s, path.length));
+  if (corridor.def?.al === path) { corridor.set({ ...corridor.def, to: Math.min(corridor.def.to, path.length) }); corridorHits = null; }
+  updateAlignments();
+  secViewer?.planesChanged?.();
+}
+
+const lineEditor = new LineEditor({
+  viewer, t, container: $('#viewport'),
+  onChange: (path, pts) => setPathPoints(path, pts),
+  onEnd: () => { renderPlanes(); renderModels(); projects.touch?.(); },
+});
+
+/** The points of a drawn line as [x, y, z] (IFC). */
+const pathPoints = (p) => p.poly.map((q, k) => [q[0], q[1], p.zs[k]]);
+
+/** Zooms to a drawn line (its points, with a little room). */
+function zoomToPath(p) {
+  const b = new THREE.Box3();
+  for (const q of pathPoints(p)) b.expandByPoint(viewer.fromIfc(q[0], q[1], q[2]));
+  b.expandByScalar(Math.max(5, b.getSize(new THREE.Vector3()).length() * 0.1));
+  viewer.fitBox(b);
+}
+
+/** A drawn line in the model browser: show/hide, name (rename), length, zoom, edit points, remove. */
+function drawnLineRow(p) {
+  const vis = h('input', { type: 'checkbox', checked: !p.hidden, title: t('line.show') });
+  vis.addEventListener('change', () => { p.hidden = !vis.checked; updateAlignments(); renderModels(); projects.touch?.(); });
+  const name = h('span', { class: 'mg-name', text: p.name, title: t('line.renameTitle') });
+  const rename = () => inlineEdit(name, p.name, p.name, (v) => {
+    if (v) p.name = v;
+    updateAlignments(); renderModels(); renderPlanes(); projects.touch?.();
+  });
+  name.addEventListener('dblclick', rename);
+  const editing = lineEditor.path === p;
+  return h('div', { class: `line-row${p.hidden ? ' off' : ''}${editing ? ' editing' : ''}` },
+    vis, name,
+    h('span', { class: 'line-len', text: `${fmtNum(Math.round(p.length * 10) / 10)} m` }),
+    h('button', { class: 'icon-btn', title: t('line.zoom'), text: '⤢', onclick: () => zoomToPath(p) }),
+    h('button', { class: 'icon-btn', title: t('mg.rename'), text: '✎', onclick: rename }),
+    h('button', { class: `icon-btn${editing ? ' on' : ''}`, title: t('line.editPoints'), text: '◇', onclick: () => {
+      if (editing) { lineEditor.end(true); return; }
+      if (p.hidden) { p.hidden = false; updateAlignments(); }
+      lineEditor.start(p, pathPoints(p));
+      renderModels();
+    } }),
+    h('button', { class: 'icon-btn', title: t('line.remove'), text: '✕', onclick: () => { if (confirmRemoveLine(p)) removeDrawnPath(p); } }));
 }
 
 viewer.container.addEventListener('dblclick', () => { if (lineTool.active) finishLineTool(true); });
@@ -2767,6 +2841,7 @@ const views = new ViewsPanel({
 const projects = new ProjectManager({
   viewer, views, issues, state, h, toast,
   clearModels: () => {
+    lineEditor.end(false);
     drawnPaths.length = 0;
     state.modelGroups = [];
     for (const m of [...viewer.models]) viewer.removeModel(m);
@@ -2778,7 +2853,7 @@ const projects = new ProjectManager({
   openFiles: (files, keys) => openIfcFiles(files, keys),
   afterRestore: () => { updateSpacesUi(); afterModelsChanged(); },
   getExtra: () => ({
-    lines: drawnPaths.map((p) => ({ name: p.name, pts: p.poly.map((q, k) => [q[0], q[1], p.zs[k]]) })),
+    lines: drawnPaths.map((p) => ({ name: p.name, pts: pathPoints(p), ...(p.hidden ? { hidden: true } : {}) })),
     groups: state.modelGroups.map(({ id, name, visible, open }) => ({ id, name, visible, open })),
     models: viewer.models.map((m) => ({ key: projects.keys.get(m) || null, name: m.name, alias: m.alias || null, group: m.groupId || null, color: m.overrideColor ? `#${m.overrideColor.getHexString()}` : null })),
     stationFormat: stationFormat.value, // the client's stationing format stays with the project (#29)
@@ -2786,7 +2861,7 @@ const projects = new ProjectManager({
   }),
   setExtra: (x) => {
     drawnPaths.length = 0;
-    for (const l of x?.lines || []) drawnPaths.push(makePath(l.name, l.pts));
+    for (const l of x?.lines || []) drawnPaths.push(Object.assign(makePath(l.name, l.pts), l.hidden ? { hidden: true } : {}));
     state.modelGroups = (x?.groups || []).map((g) => ({ ...g }));
     for (const m of viewer.models) {
       const info = (x?.models || []).find((i) => (i.key && i.key === projects.keys.get(m)) || i.name === m.name);
