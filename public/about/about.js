@@ -168,6 +168,74 @@
     for (const v of clips) vo.observe(v);
   }
 
+  // the logo unfolds: the line is drawn flat, folds down into the cross section, and the dot drops in.
+  // Plays in the header on load (and again on hover) and on the big mark in the closing card when it
+  // comes into view. The SVG in the HTML is the finished logo, so without JS or with reduced motion
+  // nothing changes.
+  const clamp = (x) => Math.max(0, Math.min(1, x));
+  const span = (t, a, b) => clamp((t - a) / (b - a));
+  const inOut = (k) => (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);
+  const out = (k) => 1 - Math.pow(1 - k, 3);
+  const back = (k, s) => 1 + (s + 1) * Math.pow(k - 1, 3) + s * Math.pow(k - 1, 2);
+  const bounce = (k) => {
+    const n = 7.5625, d = 2.75;
+    if (k < 1 / d) return n * k * k;
+    if (k < 2 / d) return n * (k -= 1.5 / d) * k + 0.75;
+    if (k < 2.5 / d) return n * (k -= 2.25 / d) * k + 0.9375;
+    return n * (k -= 2.625 / d) * k + 0.984375;
+  };
+  const playing = new WeakMap();
+  function unfold(svg, speed = 1, wait = null) {
+    const line = svg.querySelector('.mark-line'), dot = svg.querySelector('.mark-dot'), ring = svg.querySelector('.mark-ring');
+    if (!line || !dot || playing.get(svg)) return;
+    playing.set(svg, true);
+    const frame = (t) => {
+      const d = inOut(span(t, 0, 0.8)), f = span(t, 0.65, 1.3), fx = inOut(f);
+      const fy = 30 + 18 * (f ? back(f, 1.6) : 0);
+      line.setAttribute('d', `M6 30H19L${24 + 4 * fx} ${fy.toFixed(2)}H${40 - 4 * fx}L45 30H58`);
+      const len = line.getTotalLength();
+      line.style.strokeDasharray = `${len} ${len}`;
+      line.style.strokeDashoffset = (len * (1 - d)).toFixed(2);
+      const p = span(t, 1.1, 1.7);
+      dot.setAttribute('cy', (-40 + 54 * bounce(p)).toFixed(2));
+      dot.style.opacity = Math.min(1, p * 4).toFixed(2);
+      if (ring) {
+        const r = span(t, 1.62, 2.4);
+        ring.setAttribute('r', (6 + 16 * out(r)).toFixed(2));
+        ring.style.opacity = r > 0 && r < 1 ? (0.9 * (1 - r)).toFixed(2) : 0;
+      }
+    };
+    const end = ring ? 2.4 : 1.7;
+    let t0 = null;
+    const step = (now) => {
+      if (t0 === null) t0 = now;
+      const t = ((now - t0) / 1000) * speed;
+      frame(Math.min(t, end));
+      if (t < end) requestAnimationFrame(step);
+      else { line.style.strokeDasharray = line.style.strokeDashoffset = ''; playing.set(svg, false); }
+    };
+    frame(0);
+    if (wait) wait.then(() => requestAnimationFrame(step)); else requestAnimationFrame(step);
+  }
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const head = document.querySelector('.top .brand');
+    const headMark = head?.querySelector('.mark');
+    if (headMark) {
+      unfold(headMark, 1.2);
+      head.addEventListener('pointerenter', () => unfold(headMark, 1.4));
+    }
+    const conMark = document.querySelector('.con-mark');
+    if (conMark && 'IntersectionObserver' in window) {
+      // drawn empty until it comes into view, then it unfolds
+      unfold(conMark, 1, new Promise((go) => {
+        const mo = new IntersectionObserver((entries) => {
+          if (entries.some((en) => en.isIntersecting)) { mo.disconnect(); setTimeout(go, 250); }
+        }, { threshold: 0.6 });
+        mo.observe(conMark);
+      }));
+    }
+  }
+
   // reveal sections when they scroll into view
   if ('IntersectionObserver' in window && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
     const io = new IntersectionObserver((entries) => {
