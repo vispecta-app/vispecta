@@ -2605,7 +2605,6 @@ $('#plane-outline').addEventListener('change', (e) => {
   viewer.cutlines.setStyle(e.target.value);
   try { localStorage.setItem('onlineifc.cutOutline', e.target.value); } catch { /* ignore */ }
 });
-$('#plane-fill').addEventListener('change', (e) => viewer.setSectionFill(e.target.checked));
 // hatching of the cut faces: on by default, remembered
 try { if (localStorage.getItem('onlineifc.hatch') === '0') $('#plane-hatch').checked = false; } catch { /* ignore */ }
 viewer.setSectionHatch($('#plane-hatch').checked);

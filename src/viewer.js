@@ -2,7 +2,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { sectionFill } from './model.js';
-import { SectionCaps } from './caps.js';
 import { CutOutline } from './cutlines.js';
 
 const AXES = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
@@ -16,7 +15,7 @@ export class Viewer extends EventTarget {
 
     // No preserveDrawingBuffer (it costs on many GPUs, most on phones): everything that reads the
     // canvas – screenshot, issue snapshots, view thumbnails – renders a frame right before reading.
-    const renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true }); // stencil: section caps (#37)
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.localClippingEnabled = false;
     renderer.setClearColor(0x000000, 0);
@@ -70,8 +69,7 @@ export class Viewer extends EventTarget {
 
     // Snitplaner
     this.planes = []; // {id, plane, axis, helper, enabled}
-    this.caps = new SectionCaps(this, { on: sectionFill.hatch, size: sectionFill.hatchSize }); // cut faces (#37)
-    this.cutlines = new CutOutline(this); // outline of the cut faces (#68)
+    this.cutlines = new CutOutline(this); // hatched cut faces and their outline (#37, #68)
     this.planeSeq = 1;
     this.showPlaneHelpers = true;
 
@@ -715,18 +713,18 @@ export class Viewer extends EventTarget {
     return out;
   }
 
-  setSectionFill(v) { this.sectionFillOn = v; this.#updateClipping(); }
+  /** Shows or hides the cut faces and their outline (e.g. while a drawing background is rendered). */
+  setSectionFill(v) { this.sectionFillOn = v; this.cutlines.setShown(v); this.invalidate(); }
 
   /** Width of cross sections at a station (#66): {left, right} in metres (0 = no limit), or null. */
   setSectionWidth(w) { this.sectionWidth = w; this.#updateClipping(); }
 
-  /** Hatching of the cut faces (on by default). */
+  /** Hatched cut faces (on by default); off: only the outline, the inside of the cut solids shows. */
   setSectionHatch(v) {
     this.sectionHatchOn = v;
-    sectionFill.hatch.value = v ? 1 : 0;
     const r = this.renderer.getPixelRatio();
     sectionFill.hatchSize.value.set(Math.round(8 * r), Math.max(1, Math.round(1.6 * r)));
-    this.invalidate();
+    this.cutlines.setFaces(v);
   }
 
   /** The plane shown in the section window: its helper is drawn stronger, in the accent colour. */
@@ -738,8 +736,6 @@ export class Viewer extends EventTarget {
     this.invalidate();
     this.dispatchEvent(new Event('planeschanged'));
     this.renderer.clippingPlanes = this.cuttingPlanes().map((p) => p.plane);
-    sectionFill.active.value = this.renderer.clippingPlanes.length && this.sectionFillOn !== false ? 1 : 0;
-    this.caps.on = sectionFill.active.value === 1;
     for (const p of this.planes) this.#updateHelper(p);
   }
 
@@ -800,9 +796,8 @@ export class Viewer extends EventTarget {
     return { x: ((v.x + 1) / 2) * w, y: ((1 - v.y) / 2) * hgt };
   }
 
-  /** Renders the scene once (with the section caps, #37). Used by the loop and for snapshots. */
+  /** Renders the scene once (with the cut faces, #37). Used by the loop and for snapshots. */
   renderFrame({ still = false } = {}) {
-    this.caps.update();
     this.cutlines.update({ still });
     // point clouds: fewer points while the camera moves; 200 ms after the last movement one more
     // frame is rendered with all points

@@ -2,7 +2,7 @@
 // from IfcAlignmentVerticalSegment, stationing from IfcReferent / Pset_Stationing.
 // Used to draw the alignment with station marks and to give station + offset for points.
 import * as THREE from 'three';
-import { OVERLAY_ORDER } from './caps.js';
+import { OVERLAY_ORDER } from './cutlines.js';
 import * as WebIFC from 'web-ifc';
 import { fmtValue } from './ifc.js';
 
@@ -267,7 +267,7 @@ export class AlignmentLayer {
       const pts = al.poly.map((p, k) => this.viewer.fromIfc(p[0], p[1], zOf(al.cum[k])));
       const g = new THREE.BufferGeometry().setFromPoints(pts);
       const line = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xf08a24, depthTest: false, transparent: true, opacity: 0.95 }));
-      line.renderOrder = OVERLAY_ORDER + 25; // over the section caps (#37)
+      line.renderOrder = OVERLAY_ORDER + 25; // over the cut faces (#37)
       line.frustumCulled = false;
       this.group.add(line);
       // station marks (none when the interval is 0: only the line)
@@ -299,7 +299,7 @@ export class AlignmentLayer {
       if (ticks.length) {
         const tg = new THREE.BufferGeometry().setFromPoints(ticks);
         const tl = new THREE.LineSegments(tg, new THREE.LineBasicMaterial({ color: 0xf08a24, depthTest: false }));
-        tl.renderOrder = OVERLAY_ORDER + 25; // over the section caps (#37)
+        tl.renderOrder = OVERLAY_ORDER + 25; // over the cut faces (#37)
         tl.frustumCulled = false;
         this.group.add(tl);
       }
