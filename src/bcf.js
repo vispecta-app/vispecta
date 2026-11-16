@@ -89,7 +89,8 @@ export function captureViewpoint({ viewer, selection, spacesVisible }) {
     if (!p.enabled) continue;
     const loc = viewer.toIfc(p.plane.coplanarPoint(new THREE.Vector3()));
     const d = dirToIfc(viewer, p.plane.normal.clone().negate()).normalize();
-    vp.clipping.push({ loc: loc.toArray(), dir: d.toArray() });
+    // a section with its 3D cut turned off (#39) is kept in saved views, not in BCF files
+    vp.clipping.push({ loc: loc.toArray(), dir: d.toArray(), ...(p.cut3d === false ? { cut3d: false } : {}) });
   }
   return vp;
 }
@@ -138,10 +139,12 @@ export function applyViewpoint(vp, ctx) {
     const n = dirFromIfc(viewer, ...cp.dir).normalize();
     // planes along an axis come back as plan / X / Y sections (they keep their name and slider)
     const axis = ['x', 'y', 'z'].find((k) => Math.abs(n.getComponent('xyz'.indexOf(k))) > 0.9999);
+    let e;
     if (axis) {
-      const e = viewer.addPlane(axis, { point });
+      e = viewer.addPlane(axis, { point });
       if (e.plane.normal.dot(n) > 0) viewer.flipPlane(e); // BCF direction points to the removed side
-    } else viewer.addPlane('custom', { normal: n, point });
+    } else e = viewer.addPlane('custom', { normal: n, point });
+    if (cp.cut3d === false) viewer.setPlaneCut(e, false);
   }
   // selection
   ctx.setSelection(resolve(vp.selection || []));
@@ -184,7 +187,8 @@ function viewpointXml(vp, version) {
   const camera = c.ortho
     ? `<OrthogonalCamera>${camBody}<ViewToWorldScale>${c.scale}</ViewToWorldScale>${aspect}</OrthogonalCamera>`
     : `<PerspectiveCamera>${camBody}<FieldOfView>${c.fov}</FieldOfView>${aspect}</PerspectiveCamera>`;
-  const clip = vp.clipping.length ? `<ClippingPlanes>${vp.clipping.map((p) => `<ClippingPlane>${xyz('Location', p.loc)}${xyz('Direction', p.dir)}</ClippingPlane>`).join('')}</ClippingPlanes>` : '';
+  const clipping = vp.clipping.filter((p) => p.cut3d !== false);
+  const clip = clipping.length ? `<ClippingPlanes>${clipping.map((p) => `<ClippingPlane>${xyz('Location', p.loc)}${xyz('Direction', p.dir)}</ClippingPlane>`).join('')}</ClippingPlanes>` : '';
   return `${XML_HEAD}<VisualizationInfo Guid="${vp.guid}">${components}${camera}${clip}</VisualizationInfo>`;
 }
 

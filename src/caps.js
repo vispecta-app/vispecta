@@ -128,7 +128,7 @@ export class SectionCaps {
   /** Called before every render: keeps the helpers in step with meshes, planes and colours. */
   update() {
     const v = this.viewer;
-    const planes = this.on ? v.planes.filter((p) => p.enabled).slice(0, MAX_PLANES) : [];
+    const planes = this.on ? v.cuttingPlanes().slice(0, MAX_PLANES) : [];
     const seen = new Set();
     if (planes.length) {
       const R = Math.max(v.sceneRadius * 4, 50);

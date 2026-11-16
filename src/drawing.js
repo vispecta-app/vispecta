@@ -24,7 +24,8 @@ export function computeSection(viewer, entry, { marks = [], annot = null } = {})
   const plane = entry.plane.clone();
   plane.constant += 1e-7; // avoid vertices exactly on the plane
   // in plans, cross sections at stations are shown as section marks, they do not clip the plan
-  const others = viewer.planes.filter((p) => p.enabled && p !== entry && !(ax.horizontal && p.station)).map((p) => p.plane);
+  // (a plane with its 3D cut turned off, #39, doesn't cut the others either)
+  const others = viewer.cuttingPlanes().filter((p) => p !== entry && !(ax.horizontal && p.station)).map((p) => p.plane);
   const to2d = (p) => {
     if (ax.horizontal) { const q = viewer.toIfc(p); return [q.x, q.y]; }
     const q = viewer.toIfc(p);
@@ -33,6 +34,12 @@ export function computeSection(viewer, entry, { marks = [], annot = null } = {})
   };
   const layers = new Map();
   const bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+  const grow = (p) => {
+    if (p[0] < bounds.minX) bounds.minX = p[0]; if (p[0] > bounds.maxX) bounds.maxX = p[0];
+    if (p[1] < bounds.minY) bounds.minY = p[1]; if (p[1] > bounds.maxY) bounds.maxY = p[1];
+  };
+  // cross sections at a station can be limited to a width left/right of the alignment (#66)
+  const lim = sectionLimit(viewer, entry);
   const va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3();
   const pts = [va, vb, vc];
   for (const m of viewer.models) {
@@ -66,20 +73,22 @@ export function computeSection(viewer, entry, { marks = [], annot = null } = {})
           if (others.some((o) => o.distanceToPoint(cut[0]) < 0 && o.distanceToPoint(cut[1]) < 0)) continue;
           const a = to2d(cut[0]), c = to2d(cut[1]);
           if (Math.hypot(a[0] - c[0], a[1] - c[1]) < 1e-6) continue;
-          if (!segs) {
-            if (!layers.has(cls)) layers.set(cls, { segments: [], elements: 0 });
-            segs = [];
-          }
-          segs.push([a, c]);
-          for (const p of [a, c]) {
-            bounds.minX = Math.min(bounds.minX, p[0]); bounds.maxX = Math.max(bounds.maxX, p[0]);
-            bounds.minY = Math.min(bounds.minY, p[1]); bounds.maxY = Math.max(bounds.maxY, p[1]);
-          }
+          (segs ||= []).push([a, c]);
         }
         if (segs) {
+          let { loops, open } = stitch(segs);
+          if (lim) {
+            // cut cleanly at the limits: faces stay closed (the limit becomes their edge)
+            loops = loops.map((l) => clipPolygonX(l, lim.lo, lim.hi)).filter((l) => l.length >= 3);
+            open = open.flatMap((l) => clipPolylineX(l, lim.lo, lim.hi));
+            segs = segs.flatMap((sg) => clipPolylineX(sg, lim.lo, lim.hi)).filter((sg) => sg.length === 2);
+            if (!loops.length && !open.length) continue;
+          }
+          for (const l of loops) for (const p of l) grow(p);
+          for (const l of open) for (const p of l) grow(p);
+          if (!layers.has(cls)) layers.set(cls, { segments: [], elements: 0 });
           const L = layers.get(cls);
           L.elements++;
-          const { loops, open } = stitch(segs);
           // colours of the element: as in the IFC file, and as currently shown in the viewer
           const own = m.elementColor.get(it.id);
           const col = { original: origCol, shown: own !== undefined ? `#${own.toString(16).padStart(6, '0')}` : modelCol || origCol };
@@ -93,7 +102,7 @@ export function computeSection(viewer, entry, { marks = [], annot = null } = {})
     }
   }
   // point clouds (#27): the points within ±slab of the plane, as dots (colour as shown, grouped)
-  const cloud = cloudSlab(viewer, entry, others, to2d, bounds);
+  const cloud = cloudSlab(viewer, entry, others, to2d, bounds, lim);
   // cross section at a station: the alignment axis (offset 0) is part of the drawing
   // marks may depend on the extent of the cut (e.g. the part of an alignment inside the plan)
   if (typeof marks === 'function') marks = Number.isFinite(bounds.minX) ? marks({ ...bounds }) : [];
@@ -109,6 +118,7 @@ export function computeSection(viewer, entry, { marks = [], annot = null } = {})
     const offs = viewer.corridor?.sectionOffsets(entry) || [];
     const pad = 0.06 * (bounds.maxY - bounds.minY || 1);
     for (const o of offs) {
+      if (lim && (o < lim.lo || o > lim.hi)) continue;
       bounds.minX = Math.min(bounds.minX, o); bounds.maxX = Math.max(bounds.maxX, o);
       out.push({ line: [[o, bounds.minY - pad], [o, bounds.maxY + pad]], color: OFFSET_LINE_COLOR, dash: 'dash', layer: 'OFFSET_LINES' });
       out.push({ text: `${o > 0 ? '+' : ''}${o.toFixed(2)}`, at: [o, bounds.minY - pad], dx: 0, dy: 3, size: 2.5, anchor: 'middle', color: OFFSET_LINE_COLOR, layer: 'OFFSET_LINES' });
@@ -121,7 +131,7 @@ export function computeSection(viewer, entry, { marks = [], annot = null } = {})
       bounds.minY = Math.min(bounds.minY, p[1]); bounds.maxY = Math.max(bounds.maxY, p[1]);
     }
   }
-  const section = { layers, bounds, axes: ax, marks: out, cloud };
+  const section = { layers, bounds, axes: ax, marks: out, cloud, limit: lim };
   if (annot && !ax.horizontal && Number.isFinite(bounds.minX)) {
     section.annot = { ...annot, runs: breakPoints(layers, { classes: annot.classes }), originX: entry.station ? 0 : bounds.minX, station: !!entry.station };
     section.padTopMm = annot.mode !== 'band' ? 30 : 0;
@@ -136,7 +146,7 @@ export function computeSection(viewer, entry, { marks = [], annot = null } = {})
  * coordinates. Returns [{hex, xy: [x0, y0, x1, y1 …]}] grouped by colour (16 tones per channel),
  * or null. Widens `bounds`.
  */
-export function cloudSlab(viewer, entry, others, to2d, bounds) {
+export function cloudSlab(viewer, entry, others, to2d, bounds, lim = null) {
   if (!viewer.clouds?.length) return null;
   const half = viewer.cloudSlab ?? 0.1;
   const groups = new Map();
@@ -147,6 +157,7 @@ export function cloudSlab(viewer, entry, others, to2d, bounds) {
     for (const i of c.slab(entry.plane, half, others)) {
       c.worldPoint(i, v);
       const [x, y] = to2d(v);
+      if (lim && (x < lim.lo || x > lim.hi)) continue;
       const q = (k) => Math.min(255, Math.round(col[i * 3 + k] / 17) * 17);
       const hex = `#${((1 << 24) | (q(0) << 16) | (q(1) << 8) | q(2)).toString(16).slice(1)}`;
       let g = groups.get(hex);
@@ -639,6 +650,52 @@ function titleMark(info, lay, opts) {
   const x0 = lay.margin + textW(l.text, l.size) * 0.92 + 1, y0 = ty + l.y - size * 0.72; // textW is generous
   const P = (x, y) => [x0 + x * k, y0 + y * k];
   return { line: [P(6, 30), P(19, 30), P(28, 48), P(36, 48), P(45, 30), P(58, 30)], dot: [...P(32, 14), 6 * k], w: 4.8 * k };
+}
+
+/**
+ * Width of a cross section at a station (#66): {lo, hi} offsets from the alignment (right +), from
+ * viewer.sectionWidth = {left, right} in metres (null or 0 on a side: no limit there). Null for other
+ * planes or when no width is set.
+ */
+export function sectionLimit(viewer, entry) {
+  const w = viewer.sectionWidth;
+  if (!entry.station || !w || !(w.left > 0 || w.right > 0)) return null;
+  return { lo: w.left > 0 ? -w.left : -Infinity, hi: w.right > 0 ? w.right : Infinity };
+}
+
+/** A closed outline clipped to lo ≤ x ≤ hi (Sutherland–Hodgman, one side at a time). */
+export function clipPolygonX(poly, lo, hi) {
+  const side = (pts, inside, cut) => {
+    const out = [];
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i], b = pts[(i + 1) % pts.length];
+      const ia = inside(a), ib = inside(b);
+      if (ia) out.push(a);
+      if (ia !== ib) out.push(cut(a, b));
+    }
+    return out;
+  };
+  const at = (X) => (a, b) => [X, a[1] + (b[1] - a[1]) * ((X - a[0]) / (b[0] - a[0]))];
+  let out = poly;
+  if (lo > -Infinity) out = side(out, (p) => p[0] >= lo, at(lo));
+  if (hi < Infinity && out.length) out = side(out, (p) => p[0] <= hi, at(hi));
+  return out;
+}
+
+/** An open line clipped to lo ≤ x ≤ hi; returns the pieces inside. */
+export function clipPolylineX(line, lo, hi) {
+  const pieces = [];
+  const atX = (a, b, X) => [X, a[1] + (b[1] - a[1]) * ((X - a[0]) / (b[0] - a[0]))];
+  const clamp = (p, a, b) => (p[0] < lo ? atX(a, b, lo) : p[0] > hi ? atX(a, b, hi) : p);
+  let cur = null;
+  for (let i = 0; i + 1 < line.length; i++) {
+    const a = line[i], b = line[i + 1];
+    if ((a[0] < lo && b[0] < lo) || (a[0] > hi && b[0] > hi)) { cur = null; continue; }
+    const p = clamp(a, a, b), q = clamp(b, a, b);
+    if (cur && p === a) cur.push(q); else { cur = [p, q]; pieces.push(cur); }
+    if (q !== b) cur = null;
+  }
+  return pieces;
 }
 
 export function stitch(segs) {

@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { sectionFill } from './model.js';
 import { SectionCaps } from './caps.js';
+import { CutOutline } from './cutlines.js';
 
 const AXES = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
 
@@ -70,6 +71,7 @@ export class Viewer extends EventTarget {
     // Snitplaner
     this.planes = []; // {id, plane, axis, helper, enabled}
     this.caps = new SectionCaps(this, { on: sectionFill.hatch, size: sectionFill.hatchSize }); // cut faces (#37)
+    this.cutlines = new CutOutline(this); // outline of the cut faces (#68)
     this.planeSeq = 1;
     this.showPlaneHelpers = true;
 
@@ -607,7 +609,7 @@ export class Viewer extends EventTarget {
     const targets = [];
     for (const m of this.models) if (m.visible) targets.push(...m.pickTargets());
     const hits = this.raycaster.intersectObjects(targets, false);
-    const active = this.planes.filter((p) => p.enabled).map((p) => p.plane);
+    const active = this.cuttingPlanes().map((p) => p.plane);
     for (const h of hits) {
       if (active.some((pl) => pl.distanceToPoint(h.point) < -1e-6)) continue; // cut away by a section
       const { model } = h.object.userData;
@@ -675,6 +677,15 @@ export class Viewer extends EventTarget {
 
   togglePlane(entry, on) { entry.enabled = on; this.#updateClipping(); }
 
+  /**
+   * Whether a plane cuts the 3D view (#39). Off: the model is shown whole, but the plane stays a
+   * section – the section window, the drawings and the section marks A–A keep working.
+   */
+  setPlaneCut(entry, on) { entry.cut3d = on; this.#updateClipping(); }
+
+  /** The planes that cut the 3D view: switched on, and not with the 3D cut turned off (#39). */
+  cuttingPlanes() { return this.planes.filter((p) => p.enabled && p.cut3d !== false); }
+
   removePlane(entry) {
     this.planes = this.planes.filter((p) => p !== entry);
     if (entry.helper) { this.helpers.remove(entry.helper); entry.helper.geometry.dispose(); }
@@ -706,6 +717,9 @@ export class Viewer extends EventTarget {
 
   setSectionFill(v) { this.sectionFillOn = v; this.#updateClipping(); }
 
+  /** Width of cross sections at a station (#66): {left, right} in metres (0 = no limit), or null. */
+  setSectionWidth(w) { this.sectionWidth = w; this.#updateClipping(); }
+
   /** Hatching of the cut faces (on by default). */
   setSectionHatch(v) {
     this.sectionHatchOn = v;
@@ -723,7 +737,7 @@ export class Viewer extends EventTarget {
   #updateClipping() {
     this.invalidate();
     this.dispatchEvent(new Event('planeschanged'));
-    this.renderer.clippingPlanes = this.planes.filter((p) => p.enabled).map((p) => p.plane);
+    this.renderer.clippingPlanes = this.cuttingPlanes().map((p) => p.plane);
     sectionFill.active.value = this.renderer.clippingPlanes.length && this.sectionFillOn !== false ? 1 : 0;
     this.caps.on = sectionFill.active.value === 1;
     for (const p of this.planes) this.#updateHelper(p);
@@ -747,7 +761,7 @@ export class Viewer extends EventTarget {
     h.material.opacity = hi ? 0.16 : 0.08;
     h.children[0].material.color.setHex(hi ? 0x0e8c84 : 0x3aa0ff);
     h.children[0].material.opacity = hi ? 1 : 0.6;
-    h.visible = this.showPlaneHelpers && entry.enabled && !entry.boxPart;
+    h.visible = this.showPlaneHelpers && entry.enabled && entry.cut3d !== false && !entry.boxPart;
     const box = this.sceneBox();
     const size = box.isEmpty() ? 10 : box.getSize(new THREE.Vector3()).length() * 0.8;
     const center = box.isEmpty() ? new THREE.Vector3() : box.getCenter(new THREE.Vector3());
@@ -755,6 +769,19 @@ export class Viewer extends EventTarget {
     h.position.copy(pt);
     h.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), entry.plane.normal);
     h.scale.set(size, size, 1);
+    // cross section at a station: centred on the alignment, as wide as the section width (#66)
+    if (entry.station && entry.anchor) {
+      const n = entry.plane.normal;
+      const up = new THREE.Vector3(0, 1, 0).projectOnPlane(n).normalize();
+      const right = new THREE.Vector3().crossVectors(n, up).normalize();
+      const w = this.sectionWidth;
+      const lo = w?.left > 0 ? -w.left : -size / 2, hi = w?.right > 0 ? w.right : size / 2;
+      const at = entry.plane.projectPoint(entry.anchor, new THREE.Vector3());
+      at.y = pt.y; // keep the height of the scene centre
+      h.position.copy(at).addScaledVector(right, (lo + hi) / 2);
+      h.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, n));
+      h.scale.set(hi - lo, size, 1);
+    }
   }
 
   /** Viewer (three.js) coordinates -> IFC coordinates of the first model (metres, Z up). */
@@ -776,6 +803,7 @@ export class Viewer extends EventTarget {
   /** Renders the scene once (with the section caps, #37). Used by the loop and for snapshots. */
   renderFrame({ still = false } = {}) {
     this.caps.update();
+    this.cutlines.update({ still });
     // point clouds: fewer points while the camera moves; 200 ms after the last movement one more
     // frame is rendered with all points
     if (this.clouds.length) {

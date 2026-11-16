@@ -1902,10 +1902,20 @@ function planeRow(p, { name, slider, posInput, unit, step, cls = '' }) {
       enabled,
       typeof name === 'string' ? h('span', { class: 'pl-name', text: name, title: name }) : name,
       act('⇄', t('planes.flip'), () => { viewer.flipPlane(p); renderPlanes(); }),
+      // station sections: cut the 3D view or show the whole model (the section stays, #39)
+      p.station ? h('button', { class: `btn xs${p.cut3d !== false ? ' on' : ''}`, text: '✂', title: t('planes.cut3d'), 'aria-pressed': String(p.cut3d !== false), onclick: () => togglePlaneCut(p) }) : null,
       p.boxPart ? null : act('▣', t('sv.open'), () => openSecView(p)),
       p.boxPart ? null : act('2D', t('drw.title'), () => openDrawingDialog(p)),
       act('✕', t('planes.remove'), () => { viewer.removePlane(p); renderPlanes(); })),
     h('div', { class: 'pl-pos' }, stepBtn(-1), slider, stepBtn(1), h('span', { class: 'val' }, posInput, h('span', { text: unit }))));
+}
+
+/** Turns the 3D cut of a station section on or off (#39); the section window keeps its cut. */
+function togglePlaneCut(p) {
+  viewer.setPlaneCut(p, p.cut3d === false);
+  renderPlanes();
+  secViewer?.renderCut?.();
+  toast(t(p.cut3d === false ? 'planes.cut3dOff' : 'planes.cut3dOn'));
 }
 
 /** Row of a plan / X / Y / face section or a side of the section box. */
@@ -2004,9 +2014,14 @@ function stationMark(p) {
   const sign = p.plane.normal.dot(p.station.T) >= 0 ? 1 : -1;
   const z = heightAt(al, s) ?? viewer.toIfc(p.anchor).z;
   const half = Math.min(Math.max(viewer.sceneRadius * 0.04, 5), 25);
+  // with a section width (#66) the mark spans exactly that width
+  const w = viewer.sectionWidth;
+  // (left | right as seen in the section: looking backwards, the alignment's left is on the right)
+  let left = w?.left > 0 ? w.left : half, right = w?.right > 0 ? w.right : half;
+  if (sign < 0) [left, right] = [right, left];
   const L = [-q.dy, q.dx]; // left of the alignment
   return {
-    A: [q.x + L[0] * half, q.y + L[1] * half], B: [q.x - L[0] * half, q.y - L[1] * half],
+    A: [q.x + L[0] * left, q.y + L[1] * left], B: [q.x - L[0] * right, q.y - L[1] * right],
     v: [q.dx * sign, q.dy * sign], mid: [q.x, q.y], z, half, letter: sectionLetter(p), label: `${t('st.label')} ${stationText(p)}`,
   };
 }
@@ -2051,6 +2066,8 @@ function openSecView(p, { popOut = svAuto } = {}) {
     colors: () => ({ colors: 'shown', fill: true }),
     keyPlan: (pl) => keyPlan(pl),
     hatch: () => $('#plane-hatch').checked,
+    cut3d: (pl) => (pl.station ? pl.cut3d !== false : null),
+    toggleCut: (pl) => togglePlaneCut(pl),
     onClose: () => viewer.setPlaneHighlight(null),
     onPlane: (pl) => viewer.setPlaneHighlight(pl),
   });
@@ -2560,7 +2577,34 @@ $('#plane-step').addEventListener('change', () => {
   // only the tooltips change: redrawing the rows here would swallow a click on ‹ › that blurs this field
   for (const b of $$('.plane-row .step')) b.title = t(b.textContent === '›' ? 'planes.stepFwd' : 'planes.stepBack', { step: fmtNum(planeStep()) });
 });
+// width of cross sections at a station, left | right of the alignment (#66); empty = no limit; remembered
+function readSectionWidth() {
+  const v = (id) => { const x = +$(id).value; return $(id).value !== '' && Number.isFinite(x) && x > 0 ? x : 0; };
+  const w = { left: v('#plane-wl'), right: v('#plane-wr') };
+  return w.left || w.right ? w : null;
+}
+try {
+  const w = JSON.parse(localStorage.getItem('onlineifc.secWidth') || 'null');
+  if (w) { $('#plane-wl').value = w.left || ''; $('#plane-wr').value = w.right || ''; }
+} catch { /* ignore */ }
+viewer.setSectionWidth(readSectionWidth());
+for (const id of ['#plane-wl', '#plane-wr']) {
+  $(id).addEventListener('change', () => {
+    const w = readSectionWidth();
+    viewer.setSectionWidth(w);
+    try { localStorage.setItem('onlineifc.secWidth', JSON.stringify(w)); } catch { /* ignore */ }
+    if (secViewer?.isOpen) { secViewer.view = null; secViewer.update(); }
+  });
+}
 $('#plane-helpers').addEventListener('change', (e) => viewer.setHelpersVisible(e.target.checked));
+// outline along the cut faces in 3D (#68): yellow by default, remembered
+try { const v = localStorage.getItem('onlineifc.cutOutline'); if (v) $('#plane-outline').value = v; } catch { /* ignore */ }
+if (!$('#plane-outline').value) $('#plane-outline').value = 'yellow';
+viewer.cutlines.setStyle($('#plane-outline').value);
+$('#plane-outline').addEventListener('change', (e) => {
+  viewer.cutlines.setStyle(e.target.value);
+  try { localStorage.setItem('onlineifc.cutOutline', e.target.value); } catch { /* ignore */ }
+});
 $('#plane-fill').addEventListener('change', (e) => viewer.setSectionFill(e.target.checked));
 // hatching of the cut faces: on by default, remembered
 try { if (localStorage.getItem('onlineifc.hatch') === '0') $('#plane-hatch').checked = false; } catch { /* ignore */ }
@@ -3445,4 +3489,4 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator && (location.protocol =
   window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('service worker', e)));
 }
 
-window.onlineIfc = { viewer, state, openFiles, python, measure, views, walk, drawnPaths, projects };
+window.onlineIfc = { viewer, state, openFiles, python, measure, views, walk, drawnPaths, projects, get secViewer() { return secViewer; } };

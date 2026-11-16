@@ -6,6 +6,21 @@ https://github.com/vispecta-app/vispecta/releases
 ## Unreleased
 
 ### Added
+- **Outline along the cut faces in 3D.** Every face a section plane, section box or station
+  section cuts gets a thick line along its edge – yellow by default, or black, the object colour
+  or off (*Outline* in the Sections panel). It is computed when a plane stops moving, so orbiting
+  stays as fast as before. ([#68](https://github.com/vispecta-app/vispecta/issues/68))
+- **Turn off the 3D cut of a station section, keep the section.** ✂ in the Sections panel and in
+  the section window: the whole model is shown again, while the section window, the drawings and
+  the section marks A–A keep working. Saved views remember it.
+  ([#39](https://github.com/vispecta-app/vispecta/issues/39))
+- **Width of cross sections.** *Width* left | right of the alignment in the Sections panel limits
+  station sections in the section window, drawings and series; the cut faces are cut cleanly at
+  the limit, and the plane and the marks A–A in 3D show the width.
+  ([#66](https://github.com/vispecta-app/vispecta/issues/66))
+- **Zoom in the section window** with − / + buttons and keys, pinch on touch screens and
+  double-click to fit; the zoom is kept while stepping through the stations.
+  ([#65](https://github.com/vispecta-app/vispecta/issues/65))
 - **Point clouds load faster and are lighter to navigate:** fewer points are drawn while the camera
   moves, and *Points shown* (100/50/25/10 %) on the card. ([#27](https://github.com/vispecta-app/vispecta/issues/27))
 - **Stationing format.** Five formats – `12+345.678`, `123+45.68` (100 m stations), `12.346`,
