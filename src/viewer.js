@@ -13,7 +13,9 @@ export class Viewer extends EventTarget {
     this.models = [];
     this.clouds = []; // point clouds (#27)
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, stencil: true }); // stencil: section caps (#37)
+    // No preserveDrawingBuffer (it costs on many GPUs, most on phones): everything that reads the
+    // canvas – screenshot, issue snapshots, view thumbnails – renders a frame right before reading.
+    const renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true }); // stencil: section caps (#37)
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.localClippingEnabled = false;
     renderer.setClearColor(0x000000, 0);
@@ -104,9 +106,12 @@ export class Viewer extends EventTarget {
       for (const fn of this.renderHooks) fn();
     };
     const wake = () => this.invalidate(400);
-    for (const ev of ['pointerdown', 'pointermove', 'pointerup', 'wheel', 'keydown', 'keyup', 'input', 'change', 'click']) {
+    for (const ev of ['pointerdown', 'pointerup', 'wheel', 'keydown', 'keyup', 'input', 'change', 'click']) {
       window.addEventListener(ev, wake, { capture: true, passive: true });
     }
+    // Moving the mouse redraws only over the 3D view (hover, snapping, labels) or while a button is
+    // held (dragging a slider or a window): not for every movement over the panels and menus.
+    window.addEventListener('pointermove', (e) => { if (e.buttons || container.contains(e.target)) wake(); }, { capture: true, passive: true });
     loop();
   }
 
