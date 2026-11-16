@@ -120,6 +120,8 @@ Point clouds are not saved in projects or workspaces yet; open the file again.
 ### Longitudinal profile
 **Alignment → Longitudinal profile** unrolls the model along an alignment or along a **line you draw**. Choose *Draw a new line*, click points in the view (on elements, or at the height of the last point), then press Enter or double click. Backspace removes the last point and Esc cancels. The visible elements are cut with the vertical surface that follows the path, so the drawing has the station along and the height up. You set the range (from–to station) and the height exaggeration (1–50×). The red line is the vertical profile of the alignment, or the heights of the clicked points of a drawn line. Station and height grid lines are chosen for the paper scale, and the profile heights are written under the stations. The profile is previewed in the dialog and exported as PDF, SVG or DXF (DXF heights are exaggerated like the drawing). Drawn lines also work for cross sections at a station and for driving, and projects remember them.
 
+**Drawn lines** are listed under *Drawn lines* in the Models tab (#74): show or hide them, rename (✎ or double-click), zoom to them (⤢), edit their points (◇) or remove them (✕). While editing, drag a point – it snaps to the model surface, or keeps its height where there is none – click **+** on a segment to add a point, right-click or double-click a point to remove it, and press ✓ / Enter to keep the change or ✕ / Esc to undo it. Cross sections and the corridor on the line follow the change; removing a line also removes the cross sections on it and its corridor, after a warning. Drawn lines are saved in the project, hidden or not.
+
 ### Go to station / drive along
 **Alignment → Go to station / drive along** puts the camera at eye height on an alignment (or a drawn line), looking ahead. Type a station and press Enter (↑/↓ step), or press ▶ to drive at 5–200 km/h. The camera follows the curves and the vertical profile, and ⇄ changes the direction. Dragging the view or pressing Esc pauses.
 
@@ -220,6 +222,7 @@ Built with [three.js](https://threejs.org), [three-mesh-bvh](https://github.com/
 | `src/drawing.js` | 2D drawings from section planes (PDF, SVG, DXF) |
 | `src/alignment.js` | IFC4x3 alignments and stationing |
 | `src/secview.js` | section window: live 2D cut of a plane, stepping, zoom, pop-out window |
+| `src/lineedit.js` | editing the points of a drawn line |
 | `src/cutlines.js` | outline along the cut faces in 3D |
 | `src/ifc.js`, `src/model.js` | loading IFC, metadata and metadata editing (web-ifc) |
 | `src/python.js`, `src/python-worker.js` | Pyodide/IfcOpenShell worker and merge logic |

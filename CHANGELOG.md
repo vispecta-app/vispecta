@@ -13,19 +13,22 @@ https://github.com/vispecta-app/vispecta/releases
   still pops it out.
 - **Offset lines and corridor:** separate fields for *Left* and *Right* of the alignment (more
   than one distance per side with `;`), a wider dialog, and the stations fit their fields.
+- **Faster sections: cut faces are computed once, not drawn in every frame.** The coloured cut
+  faces (stencil caps) drew every model mesh two more times per plane in every frame, which made
+  large models slow with a section. They are replaced by hatched faces in a light, neutral tone
+  with the yellow outline, computed together with the outline when a plane stops moving.
+  *Colour cut faces* is gone; *Hatch cut faces* turns the faces on and off.
 - **Edit** is no longer in the toolbar; it stays in the properties panel (and the `E` key).
 
 ### Fixed
 - **The section box could not be seen.** It is now drawn as a wireframe, also where it doesn't
   cut anything yet.
 
-- **Faster sections: cut faces are computed once, not drawn in every frame.** The coloured cut
-  faces (stencil caps) drew every model mesh two more times per plane in every frame, which made
-  large models slow with a section. They are replaced by hatched faces in a light, neutral tone
-  with the yellow outline, computed together with the outline when a plane stops moving.
-  *Colour cut faces* is gone; *Hatch cut faces* turns the faces on and off.
-
 ### Added
+- **Drawn lines in the model browser:** show/hide, rename, zoom to, edit the points and remove a
+  line you have drawn. Editing: drag a point (snaps to the model), **+** adds one, right-click
+  removes one, ✓ keeps / ✕ undoes. Cross sections and the corridor on the line follow.
+  ([#74](https://github.com/vispecta-app/vispecta/issues/74))
 - **Outline along the cut faces in 3D.** Every face a section plane, section box or station
   section cuts gets a thick line along its edge – yellow by default, or black, the object colour
   or off (*Outline* in the Sections panel). It is computed when a plane stops moving, so orbiting
