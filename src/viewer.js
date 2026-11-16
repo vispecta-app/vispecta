@@ -706,6 +706,9 @@ export class Viewer extends EventTarget {
 
   setSectionFill(v) { this.sectionFillOn = v; this.#updateClipping(); }
 
+  /** Width of cross sections at a station (#66): {left, right} in metres (0 = no limit), or null. */
+  setSectionWidth(w) { this.sectionWidth = w; this.#updateClipping(); }
+
   /** Hatching of the cut faces (on by default). */
   setSectionHatch(v) {
     this.sectionHatchOn = v;
@@ -755,6 +758,19 @@ export class Viewer extends EventTarget {
     h.position.copy(pt);
     h.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), entry.plane.normal);
     h.scale.set(size, size, 1);
+    // cross section at a station: centred on the alignment, as wide as the section width (#66)
+    if (entry.station && entry.anchor) {
+      const n = entry.plane.normal;
+      const up = new THREE.Vector3(0, 1, 0).projectOnPlane(n).normalize();
+      const right = new THREE.Vector3().crossVectors(n, up).normalize();
+      const w = this.sectionWidth;
+      const lo = w?.left > 0 ? -w.left : -size / 2, hi = w?.right > 0 ? w.right : size / 2;
+      const at = entry.plane.projectPoint(entry.anchor, new THREE.Vector3());
+      at.y = pt.y; // keep the height of the scene centre
+      h.position.copy(at).addScaledVector(right, (lo + hi) / 2);
+      h.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, n));
+      h.scale.set(hi - lo, size, 1);
+    }
   }
 
   /** Viewer (three.js) coordinates -> IFC coordinates of the first model (metres, Z up). */

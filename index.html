@@ -364,6 +364,10 @@
               <label class="chk"><input type="checkbox" id="plane-helpers" checked /> <span data-i18n="planes.helpers"></span></label>
               <label class="planes-step" data-i18n-title="planes.stepHint"><span data-i18n="planes.step"></span>
                 <input type="number" id="plane-step" min="0.001" step="any" value="1" /> m</label>
+              <label class="planes-step" data-i18n-title="planes.widthHint"><span data-i18n="planes.width"></span>
+                <input type="number" id="plane-wl" min="0" step="any" placeholder="∞" data-i18n-title="planes.widthLeft" />
+                <span aria-hidden="true">|</span>
+                <input type="number" id="plane-wr" min="0" step="any" placeholder="∞" data-i18n-title="planes.widthRight" /> m</label>
             </div>
             <div id="plane-list"></div>
           </div>
