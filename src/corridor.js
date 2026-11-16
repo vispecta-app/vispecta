@@ -8,7 +8,7 @@
 // the band – by their geometry (all vertices), not only their insertion point.
 import * as THREE from 'three';
 import { pointAt, heightAt } from './alignment.js';
-import { OVERLAY_ORDER } from './caps.js';
+import { OVERLAY_ORDER } from './cutlines.js';
 
 export const OFFSET_COLOR = '#8E44AD';
 

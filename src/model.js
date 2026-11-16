@@ -10,12 +10,11 @@ const XRAY_OPACITY = 0.12;
 const PICK_MATERIAL = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
 
 /**
- * Shared uniforms of the cut faces: `active` while section caps are shown (caps.js, #37), and the
- * hatching of the caps.
+ * Shared uniforms of the cut faces (cutlines.js): `active` while the hatched cut faces cover the
+ * cut, and the spacing of their hatching.
  */
 export const sectionFill = {
   active: { value: 0 },
-  hatch: { value: 1 },
   // spacing and line width of the hatching in device pixels
   hatchSize: { value: new THREE.Vector2(9, 2) },
 };
@@ -74,14 +73,13 @@ export function styledColor(c) {
 }
 
 /*
- * Cut faces (#37): while section caps are shown (uSectionActive), the model materials discard
- * their back faces. The inside of cut solids is then shown only by the caps, which caps.js draws
- * exactly in the section plane with the stencil buffer – so they don't z-fight with touching
- * solids and their hatching sticks to the plane. With "Colour cut faces" off, back faces are drawn
- * as usual.
+ * Cut faces (#37): while the hatched cut faces are shown (uSectionActive), the model materials
+ * discard their back faces, so the inside of cut solids is shown only by the faces that
+ * cutlines.js computes in the section plane. While they are being computed, or with "Hatch cut
+ * faces" off, back faces are drawn as usual.
  */
 function installSectionFill(material) {
-  material.userData.sectionFill = true; // caps.js draws caps for meshes with this material
+  material.userData.sectionFill = true; // cutlines.js cuts the meshes with this material
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uSectionActive = sectionFill.active;
     shader.fragmentShader = shader.fragmentShader

@@ -5,6 +5,13 @@ https://github.com/vispecta-app/vispecta/releases
 
 ## Unreleased
 
+### Changed
+- **Faster sections: cut faces are computed once, not drawn in every frame.** The coloured cut
+  faces (stencil caps) drew every model mesh two more times per plane in every frame, which made
+  large models slow with a section. They are replaced by hatched faces in a light, neutral tone
+  with the yellow outline, computed together with the outline when a plane stops moving.
+  *Colour cut faces* is gone; *Hatch cut faces* turns the faces on and off.
+
 ### Added
 - **Outline along the cut faces in 3D.** Every face a section plane, section box or station
   section cuts gets a thick line along its edge – yellow by default, or black, the object colour
