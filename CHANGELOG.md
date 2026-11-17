@@ -29,6 +29,11 @@ https://github.com/vispecta-app/vispecta/releases
   cut anything yet.
 
 ### Added
+- **Undo and redo.** Ctrl+Z (Cmd+Z) and ↶ in the toolbar undo the last change – hiding,
+  isolating, colours, models switched off, sections added, moved or removed, measurements, drawn
+  lines, the corridor; Ctrl+Y / Ctrl+Shift+Z and ↷ redo it. A message says what was undone. The
+  camera is not part of it, and opening or removing a model starts the history again.
+  ([#67](https://github.com/vispecta-app/vispecta/issues/67))
 - **Label content and number format of the annotation.** Under *Label content and number
   format* in the drawing dialog: rows offset / height / distance to the next point; zero of the
   offsets (alignment axis, left edge or a chosen offset, e.g. the track centre) and of the heights
