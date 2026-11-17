@@ -30,6 +30,11 @@ https://github.com/vispecta-app/vispecta/releases
   lines, the corridor; Ctrl+Y / Ctrl+Shift+Z and ↷ redo it. A message says what was undone. The
   camera is not part of it, and opening or removing a model starts the history again.
   ([#67](https://github.com/vispecta-app/vispecta/issues/67))
+- **Choose the annotated points of a cross section.** In the section window (⌖), click a point to
+  remove it, or click an outline to add one (on a corner when one is near, else on the edge); ↺
+  puts the computed points back. The choice is kept per station – also on that page of a series –
+  and in the project. In the drawing dialog: *Outline* top / bottom / all, *Min. bend* (°) and
+  *Min. distance* (m). ([#48](https://github.com/vispecta-app/vispecta/issues/48))
 - **Drawn lines in the model browser:** show/hide, rename, zoom to, edit the points and remove a
   line you have drawn. Editing: drag a point (snaps to the model), **+** adds one, right-click
   removes one, ✓ keeps / ✕ undoes. Cross sections and the corridor on the line follow.
