@@ -134,9 +134,18 @@ export function computeSection(viewer, entry, { marks = [], annot = null } = {})
   const section = { layers, bounds, axes: ax, marks: out, cloud, limit: lim };
   if (annot && !ax.horizontal && Number.isFinite(bounds.minX)) {
     const runs = outlinePoints(layers, { outline: annot.outline, classes: annot.classes, angle: annot.angle ?? 10 });
-    section.annot = { ...annot, runs: applyPointEdits(runs, annot.editsFor?.(entry)), originX: entry.station ? 0 : bounds.minX, station: !!entry.station };
+    // zero of the offsets (#49): the alignment axis (other sections: the left edge), the left edge,
+    // or the axis shifted by a chosen offset (e.g. the track centre); zero of the heights: absolute,
+    // the alignment's height at the station, or a chosen level
+    const ref = annot.offsetRef || 'axis';
+    const axis0 = entry.station ? 0 : bounds.minX;
+    const originX = ref === 'left' ? bounds.minX : ref === 'custom' ? axis0 + (+annot.offsetZero || 0) : axis0;
+    const zeroHeight = annot.heightZeroFor?.(entry) || 0;
+    section.annot = { ...annot, runs: applyPointEdits(runs, annot.editsFor?.(entry)), originX, zeroHeight, station: !!entry.station };
+    const f = annotFormat(section.annot);
+    const nRows = (f.rows.offset ? 1 : 0) + (f.rows.height ? 1 : 0) + (f.rows.dist ? 1 : 0);
     section.padTopMm = annot.mode !== 'band' ? 30 : 0;
-    section.padBottomMm = annot.mode !== 'point' ? 34 : 0;
+    section.padBottomMm = annot.mode !== 'point' && nRows ? nRows * 14 + 6 : 0;
     section.marksFor = (lay) => annotationMarks(section, lay);
   }
   return section;
@@ -320,6 +329,45 @@ export function applyPointEdits(runs, edits) {
   return out;
 }
 
+/**
+ * How the annotation writes its values (#49). A.fmt (all optional):
+ *   rows: {offset, height, dist} – which values are written (offset and height by default)
+ *   off / height / dist: {dec, unit: 'm' | 'mm', prefix, suffix, plus} – number format per value
+ *   slope: {fmt: 'auto' | '%' | '‰' | '1:n', min} – min: no slope below this, in the unit of fmt
+ * A.dec is the decimal sign, A.originX the zero of the offsets, A.zeroHeight the zero of the heights.
+ */
+export function annotFormat(A) {
+  const f = A.fmt || {};
+  const sep = A.dec || '.';
+  const num = (v, o = {}) => {
+    const mm = o.unit === 'mm';
+    const d = Number.isFinite(o.dec) ? o.dec : mm ? 0 : 3;
+    let n = v * (mm ? 1000 : 1);
+    if (Math.abs(n) < 0.5 * 10 ** -d) n = 0;
+    const sign = n < 0 ? '-' : o.plus && n > 0 ? '+' : '';
+    return `${o.prefix || ''}${sign}${Math.abs(n).toFixed(d).replace('.', sep)}${o.suffix || ''}`;
+  };
+  const sl = f.slope || {};
+  return {
+    rows: { offset: f.rows?.offset !== false, height: f.rows?.height !== false, dist: !!f.rows?.dist },
+    off: (x) => num(x - (A.originX || 0), f.off),
+    height: (y) => num(y - (A.zeroHeight || 0), f.height),
+    dist: (d) => num(d, f.dist || { ...(f.off || {}), plus: false, prefix: '', suffix: '' }),
+    /** The slope dy/dx as text, or null when it is below the threshold. */
+    slope: (s) => {
+      const pct = Math.abs(s * 100);
+      const fmt = sl.fmt || 'auto';
+      const min = +sl.min || 0;
+      const minPct = fmt === '‰' ? min / 10 : fmt === '1:n' ? (min > 0 ? 100 / min : 0) : min;
+      if (minPct && pct < minPct) return null;
+      const sg = s > 0 ? '+' : s < 0 ? '-' : '';
+      if (fmt === '‰') return `${sg}${(pct * 10).toFixed(1).replace('.', sep)} ‰`;
+      if (fmt === '%' || (fmt === 'auto' && pct < 10)) return `${sg}${pct.toFixed(1).replace('.', sep)} %`;
+      return `1:${String(+(1 / Math.abs(s)).toFixed(2)).replace('.', sep)}`;
+    },
+  };
+}
+
 export const ANNOT_COLOR = '#0B6F69';
 
 /**
@@ -332,8 +380,6 @@ function annotationMarks(section, lay) {
   if (!A?.runs?.length) return [];
   const k = lay ? lay.scale / 1000 : 0.1; // metres per paper mm
   const b = section.bounds;
-  const dec = A.dec || '.';
-  const num = (v, n = 3) => (Math.abs(v) < 0.5 * 10 ** -n ? 0 : v).toFixed(n).replace('.', dec);
   const layer = 'ANNOTATION_POINTS', col = ANNOT_COLOR, grey = '#444444';
   const out = [];
   const txt = (text, at, o = {}) => out.push({ text, at, size: o.size ?? 2.3, rot: o.rot || 0, anchor: o.anchor || 'start', color: o.color || grey, layer, dxfH: (o.size ?? 2.3) * k, bold: o.bold });
@@ -350,50 +396,64 @@ function annotationMarks(section, lay) {
   for (const e of [...all].sort((p, q) => q.sig - p.sig)) if (!picked.some((q) => Math.abs(q.x - e.x) < gap)) picked.push(e);
   picked.sort((p, q) => p.x - q.x);
   for (const e of picked) e.ys.sort((p, q) => q - p);
-  const off = (x) => num(x - A.originX);
-  const heights = (e) => e.ys.map((y) => num(y)).join(' / ');
   const mark = (x, y) => {
     const s = 0.9 * k;
     out.push({ line: [[x - s, y - s], [x + s, y + s]], color: col, w: 0.25, layer });
     out.push({ line: [[x - s, y + s], [x + s, y - s]], color: col, w: 0.25, layer });
   };
-  // band under the cut: leader from each point down, rows of offsets and heights
-  if (A.mode !== 'point') {
-    const top0 = b.minY - 4 * k, row = 14 * k, mid = top0 - row, bot = mid - row;
-    for (const y of [top0, mid, bot]) out.push({ line: [[b.minX, y], [b.maxX, y]], color: grey, w: 0.25, layer });
-    txt(A.labels?.offset || 'Offset', [b.minX - 2 * k, top0 - row / 2 - 0.9 * k], { anchor: 'end', size: 2.5, bold: true });
-    txt(A.labels?.height || 'Height', [b.minX - 2 * k, mid - row / 2 - 0.9 * k], { anchor: 'end', size: 2.5, bold: true });
+  // band under the cut: leader from each point down, one row per chosen value (#49)
+  const F = annotFormat(A);
+  const rows = [];
+  if (F.rows.offset) rows.push({ label: A.labels?.offset || 'Offset', text: (e) => F.off(e.x) });
+  if (F.rows.height) rows.push({ label: A.labels?.height || 'Height', text: (e) => e.ys.map((y) => F.height(y)).join(' / '), small: (e) => e.ys.length > 1 });
+  if (A.mode !== 'point' && rows.length + (F.rows.dist ? 1 : 0)) {
+    const row = 14 * k, top0 = b.minY - 4 * k;
+    const nRows = rows.length + (F.rows.dist ? 1 : 0);
+    const bot = top0 - nRows * row;
+    for (let i = 0; i <= nRows; i++) out.push({ line: [[b.minX, top0 - i * row], [b.maxX, top0 - i * row]], color: grey, w: 0.25, layer });
+    rows.forEach((r, i) => txt(r.label, [b.minX - 2 * k, top0 - i * row - row / 2 - 0.9 * k], { anchor: 'end', size: 2.5, bold: true }));
+    if (F.rows.dist) txt(A.labels?.dist || 'Distance', [b.minX - 2 * k, top0 - rows.length * row - row / 2 - 0.9 * k], { anchor: 'end', size: 2.5, bold: true });
+    const tickBot = top0 - rows.length * row;
     for (const e of picked) {
       out.push({ line: [[e.x, e.ys[e.ys.length - 1]], [e.x, top0]], color: '#9aa0a6', w: 0.12, dash: 'dot', layer });
-      out.push({ line: [[e.x, top0], [e.x, bot]], color: grey, w: 0.12, layer });
-      // vertical texts, centred in their row, just right of the tick
+      out.push({ line: [[e.x, top0], [e.x, F.rows.dist ? bot : tickBot]], color: grey, w: 0.12, layer });
       // vertical texts (rotated 90°: the letters lie left of the baseline), centred in their row
-      txt(off(e.x), [e.x + 2.2 * k, top0 - row / 2], { rot: 90, anchor: 'middle' });
-      txt(heights(e), [e.x + (e.ys.length > 1 ? 1.9 : 2.2) * k, mid - row / 2], { rot: 90, anchor: 'middle', size: e.ys.length > 1 ? 1.9 : 2.3 });
+      rows.forEach((r, i) => {
+        const sm = r.small?.(e);
+        txt(r.text(e), [e.x + (sm ? 1.9 : 2.2) * k, top0 - i * row - row / 2], { rot: 90, anchor: 'middle', size: sm ? 1.9 : 2.3 });
+      });
       mark(e.x, e.ys[0]);
     }
+    // distances between neighbouring points, horizontal, in the middle between the ticks
+    if (F.rows.dist) {
+      const yy = top0 - rows.length * row - row / 2 - 0.9 * k;
+      for (let i = 1; i < picked.length; i++) {
+        const a = picked[i - 1], c = picked[i];
+        if (c.x - a.x < 7 * k) continue; // no room for the text
+        txt(F.dist(c.x - a.x), [(a.x + c.x) / 2, yy], { anchor: 'middle', size: 2.1 });
+      }
+    }
   }
-  // texts at the points: short leader up, "offset / height" upwards
+  // texts at the points: short leader up, the chosen values upwards
   if (A.mode !== 'band') {
     for (const e of picked) {
       const y = e.ys[0];
       if (A.mode === 'point') mark(e.x, y);
+      const parts = rows.map((r) => r.text(e));
+      if (!parts.length) continue;
       out.push({ line: [[e.x, y + 1.2 * k], [e.x, y + 5 * k]], color: col, w: 0.18, layer });
-      txt(`${off(e.x)} / ${heights(e)}`, [e.x + 0.8 * k, y + 5.6 * k], { rot: 90, color: col });
-      out[out.length - 1].at[0] = e.x + 0.85 * k; // centred on the leader
+      txt(parts.join(' / '), [e.x + 0.85 * k, y + 5.6 * k], { rot: 90, color: col });
     }
   }
-  // slopes between the break points (not for vertical faces and very short pieces)
+  // slopes between the break points (not for vertical faces, very short pieces, or below the threshold)
   if (A.slopes) {
     for (const r of A.runs) {
       for (let i = 1; i < r.length; i++) {
         const p = r[i - 1], q = r[i];
         const dx = q.x - p.x, dy = q.y - p.y;
         if (Math.abs(dx) < 1e-6 || Math.hypot(dx, dy) < 10 * k || Math.abs(dy / dx) > 6) continue;
-        const sl = dy / dx;
-        let text;
-        if (Math.abs(sl) < 0.1) text = `${sl > 0 ? '+' : sl < 0 ? '-' : ''}${Math.abs(sl * 100).toFixed(1).replace('.', dec)} %`;
-        else text = `1:${String(+(1 / Math.abs(sl)).toFixed(2)).replace('.', dec)}`;
+        const text = F.slope(dy / dx);
+        if (!text) continue;
         const ang = (Math.atan2(dy, dx) * 180) / Math.PI;
         const mx = (p.x + q.x) / 2, my = (p.y + q.y) / 2;
         const n = [-Math.sin((ang * Math.PI) / 180), Math.cos((ang * Math.PI) / 180)]; // left normal = up for a rising line
@@ -1168,7 +1228,8 @@ export function toDxf(section, info) {
     for (const l of layer.loops) poly(ln, l, true);
     for (const l of layer.open) poly(ln, l, false);
   }
-  const ascii = (x) => String(x).replace(/[–—]/g, '-').replace(/[^\x20-\x7E]/g, '?');
+  // DXF text is ASCII; other characters (‰, æøå, ·) are written as \U+XXXX, which CAD programs read
+  const ascii = (x) => String(x).replace(/[–—]/g, '-').replace(/[^\x20-\x7E]/gu, (c) => `\\U+${c.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`);
   // point cloud dots (#27)
   for (const pg of section.cloud || []) for (let q = 0; q < pg.xy.length; q += 2) { g(0, 'POINT'); g(8, 'POINTCLOUD'); g(10, pg.xy[q].toFixed(4)); g(20, pg.xy[q + 1].toFixed(4)); g(30, 0); }
   for (const mk of dxfMarks) {
