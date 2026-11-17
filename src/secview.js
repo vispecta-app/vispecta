@@ -46,6 +46,7 @@ export class SectionViewer {
         btn('⟳', t('sv.refresh'), () => this.update()),
         this.cutBtn = btn('✂', t('planes.cut3d'), () => this.plane && this.ctx.toggleCut?.(this.plane)),
         this.ptsBtn = btn('⌖', t('sv.points'), () => { this.showPoints = !this.showPoints; try { localStorage.setItem('onlineifc.sv.points', this.showPoints ? '1' : ''); } catch { /* ignore */ } this.update(); }),
+        this.resetPtsBtn = btn('↺', t('sv.resetPoints'), () => { if (this.plane) { this.ctx.resetPoints?.(this.plane); this.update(); } }),
         this.keyBtn = btn('▦', t('sv.keyPlan'), () => { this.showKey = !this.showKey; try { localStorage.setItem('onlineifc.sv.key', this.showKey ? '1' : '0'); } catch { /* ignore */ } this.renderKey(); }),
         this.popBtn,
         btn('✕', t('common.close'), () => this.close())));
@@ -93,6 +94,7 @@ export class SectionViewer {
     };
     this.body.addEventListener('pointerdown', (e) => {
       if (!this.view) return;
+      this.press = ptrs.size ? null : { x: e.clientX, y: e.clientY };
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
       this.body.setPointerCapture(e.pointerId);
       startDrag();
@@ -116,7 +118,14 @@ export class SectionViewer {
         this.render();
       }
     });
-    const lift = (e) => { if (ptrs.delete(e.pointerId)) startDrag(); };
+    const lift = (e) => {
+      if (!ptrs.delete(e.pointerId)) return;
+      // a click (not a drag) with the points shown: remove or add an annotated point (#48)
+      const pr = this.press;
+      this.press = null;
+      if (e.type === 'pointerup' && pr && !ptrs.size && Math.hypot(e.clientX - pr.x, e.clientY - pr.y) < 4 && this.showPoints) this.#pointClick(e);
+      startDrag();
+    };
     this.body.addEventListener('pointerup', lift);
     this.body.addEventListener('pointercancel', lift);
     this.body.addEventListener('pointerleave', () => { this.coord.textContent = ''; });
@@ -246,6 +255,12 @@ export class SectionViewer {
 
   #toModel(e) {
     if (!this.view) return null;
+    // the SVG's own screen transform is exact (also with borders, padding or a popped-out window)
+    const m = this.svg.getScreenCTM?.();
+    if (m && this.svg.getAttribute('viewBox')) {
+      const q = new DOMPoint(e.clientX, e.clientY).matrixTransform(m.inverse());
+      return { x: q.x, y: q.y };
+    }
     const r = this.body.getBoundingClientRect();
     const k = this.#scale(r);
     // the viewBox is centred in the element (preserveAspectRatio xMidYMid meet)
@@ -313,6 +328,8 @@ export class SectionViewer {
       }
     }
     this.ptsBtn.classList.toggle('on', !!this.showPoints);
+    this.resetPtsBtn.hidden = !this.showPoints;
+    this.el.classList.toggle('points', !!this.showPoints);
     // break points of the top outline with offset / height (not closer than the labels need)
     const A = sec?.annot;
     if (this.showPoints && A?.runs) {
@@ -321,10 +338,14 @@ export class SectionViewer {
       const pts = A.runs.flat().sort((a, b) => b.sig - a.sig);
       const used = [];
       const gp = mk('g', { class: 'sv-points' });
+      const minD = A.minDist || 0;
+      this.shownPoints = [];
       for (const p of pts) {
-        if (used.some((q) => Math.abs(q.x - p.x) < 16 * px && Math.abs(q.y - p.y) < 60 * px)) continue;
+        if (used.some((q) => (Math.abs(q.x - p.x) < 16 * px && Math.abs(q.y - p.y) < 60 * px) || (minD && Math.abs(q.x - p.x) < minD))) continue;
         used.push(p);
-        gp.append(mk('circle', { cx: p.x, cy: -p.y, r: 3 * px }));
+        this.shownPoints.push(p);
+        if (p.added) gp.append(mk('rect', { x: p.x - 3.2 * px, y: -p.y - 3.2 * px, width: 6.4 * px, height: 6.4 * px, class: 'added' }));
+        else gp.append(mk('circle', { cx: p.x, cy: -p.y, r: 3 * px }));
         const tx = mk('text', { x: p.x + 2 * px, y: -p.y - 6 * px, 'font-size': 10.5 * px, transform: `rotate(-90 ${p.x + 2 * px} ${-p.y - 6 * px})` });
         tx.textContent = `${num(p.x - A.originX)} / ${num(p.y)}`;
         gp.append(tx);
@@ -335,6 +356,40 @@ export class SectionViewer {
     for (const L of sec?.layers?.values() || []) n += L.elements;
     this.info.textContent = sec ? this.ctx.t('sv.info', { n, ms: this.ms ?? 0 }) : '';
     if (sec && !n) this.info.textContent = this.ctx.t('drw.empty');
+  }
+
+  /**
+   * A click in the section with the points shown (#48): on a point it removes it; on an outline it
+   * adds a point there – on a corner when one is near, else on the edge. Within 9 px.
+   */
+  #pointClick(e) {
+    const sec = this.section;
+    if (!sec?.annot || !this.plane || !this.view) return;
+    const p = this.#toModel(e);
+    const r = this.body.getBoundingClientRect();
+    const ctm = this.svg.getScreenCTM?.();
+    const tol = 9 / (ctm?.a || this.#scale(r));
+    const px = p.x, py = -p.y; // drawing coordinates (y up)
+    const hit = (this.shownPoints || []).find((q) => Math.hypot(q.x - px, q.y - py) < tol);
+    if (hit) { this.ctx.editPoint?.(this.plane, 'remove', hit.x, hit.y); this.update(); return; }
+    let best = null;
+    const consider = (x, y, d, corner) => { if (d < tol && (!best || (corner && !best.corner) || (corner === best.corner && d < best.d))) best = { x, y, d, corner }; };
+    for (const L of sec.layers.values()) {
+      const lines = [...(L.loops || []).map((l) => [...l, l[0]]), ...(L.open || [])];
+      for (const l of lines) {
+        for (let i = 0; i < l.length; i++) {
+          const a = l[i];
+          consider(a[0], a[1], Math.hypot(a[0] - px, a[1] - py), true);
+          if (i + 1 >= l.length) continue;
+          const b = l[i + 1], dx = b[0] - a[0], dy = b[1] - a[1], len2 = dx * dx + dy * dy;
+          if (!len2) continue;
+          const tt = Math.max(0, Math.min(1, ((px - a[0]) * dx + (py - a[1]) * dy) / len2));
+          const qx = a[0] + tt * dx, qy = a[1] + tt * dy;
+          consider(qx, qy, Math.hypot(qx - px, qy - py), false);
+        }
+      }
+    }
+    if (best) { this.ctx.editPoint?.(this.plane, 'add', best.x, best.y); this.update(); }
   }
 
   /**

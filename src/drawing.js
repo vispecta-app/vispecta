@@ -133,7 +133,8 @@ export function computeSection(viewer, entry, { marks = [], annot = null } = {})
   }
   const section = { layers, bounds, axes: ax, marks: out, cloud, limit: lim };
   if (annot && !ax.horizontal && Number.isFinite(bounds.minX)) {
-    section.annot = { ...annot, runs: breakPoints(layers, { classes: annot.classes }), originX: entry.station ? 0 : bounds.minX, station: !!entry.station };
+    const runs = outlinePoints(layers, { outline: annot.outline, classes: annot.classes, angle: annot.angle ?? 10 });
+    section.annot = { ...annot, runs: applyPointEdits(runs, annot.editsFor?.(entry)), originX: entry.station ? 0 : bounds.minX, station: !!entry.station };
     section.padTopMm = annot.mode !== 'band' ? 30 : 0;
     section.padBottomMm = annot.mode !== 'point' ? 34 : 0;
     section.marksFor = (lay) => annotationMarks(section, lay);
@@ -270,6 +271,55 @@ export function breakPoints(layers, { classes = null, angle = 10, facet = 0.25, 
   return out;
 }
 
+/**
+ * The points to annotate (#48): the break points of the top outline (default), of the bottom
+ * outline, or of all outlines of the chosen classes. Returns runs like breakPoints.
+ */
+export function outlinePoints(layers, { outline = 'top', classes = null, angle = 10 } = {}) {
+  if (outline === 'bottom') {
+    // the bottom outline is the top outline of the mirrored cut
+    const flip = new Map();
+    const f = (l) => l.map((p) => [p[0], -p[1]]);
+    for (const [cls, L] of layers) flip.set(cls, { loops: (L.loops || []).map(f), open: (L.open || []).map(f) });
+    return breakPoints(flip, { classes, angle }).map((r) => r.map((p) => ({ ...p, y: -p.y })));
+  }
+  if (outline === 'all') {
+    // every outline on its own, simplified to the corners that bend at least `angle`
+    const runs = [];
+    const simplify = (l, closed) => {
+      const n = l.length, out = [];
+      for (let i = 0; i < n; i++) {
+        if (!closed && (i === 0 || i === n - 1)) { out.push({ x: l[i][0], y: l[i][1], sig: 180 }); continue; }
+        const p = l[(i - 1 + n) % n], q = l[i], r = l[(i + 1) % n];
+        const a1 = Math.atan2(q[1] - p[1], q[0] - p[0]), a2 = Math.atan2(r[1] - q[1], r[0] - q[0]);
+        let da = Math.abs(((a2 - a1) * 180) / Math.PI) % 360;
+        if (da > 180) da = 360 - da;
+        if (da >= angle) out.push({ x: q[0], y: q[1], sig: da });
+      }
+      return out;
+    };
+    for (const [cls, L] of layers) {
+      if (classes && !classes.has(cls)) continue;
+      for (const l of L.loops || []) { const r = simplify(l, true); if (r.length) runs.push(r); }
+      for (const l of L.open || []) { const r = simplify(l, false); if (r.length) runs.push(r); }
+    }
+    return runs;
+  }
+  return breakPoints(layers, { classes, angle });
+}
+
+/**
+ * Applies the points removed and added by hand in the section window (#48): removed points (within
+ * 2 cm) are left out, added points are kept always (sig 999, flagged `added`).
+ */
+export function applyPointEdits(runs, edits) {
+  if (!edits || (!edits.removed?.length && !edits.added?.length)) return runs;
+  const gone = (p) => edits.removed.some(([x, y]) => Math.abs(x - p.x) < 0.02 && Math.abs(y - p.y) < 0.02);
+  const out = runs.map((r) => r.filter((p) => !gone(p))).filter((r) => r.length);
+  for (const [x, y] of edits.added || []) out.push([{ x, y, sig: 999, added: true }]);
+  return out;
+}
+
 export const ANNOT_COLOR = '#0B6F69';
 
 /**
@@ -295,7 +345,7 @@ function annotationMarks(section, lay) {
     else all.push({ x: p.x, ys: [p.y], sig: p.sig });
   }
   // the most significant first, then nothing closer than the text needs on paper
-  const gap = 3.6 * k;
+  const gap = Math.max(3.6 * k, A.minDist || 0); // and at least the chosen minimum distance (#48)
   const picked = [];
   for (const e of [...all].sort((p, q) => q.sig - p.sig)) if (!picked.some((q) => Math.abs(q.x - e.x) < gap)) picked.push(e);
   picked.sort((p, q) => p.x - q.x);

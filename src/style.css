@@ -589,6 +589,9 @@ body.py-open .planes-panel { max-height: calc(100% - 60px); }
 .sv-grid line { stroke: #e3e6e8; stroke-width: 1; }
 .sv-grid text { fill: #8a9196; font-family: system-ui, sans-serif; }
 .sv-foot { display: flex; justify-content: space-between; gap: 8px; padding: 3px 8px; font-size: var(--fs-xs); color: var(--muted); border-top: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+/* one line, always: text that comes and goes (the coordinates under the cursor) must not resize the drawing */
+.sv-foot > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.sv-foot { flex: none; }
 body.sv-popup { margin: 0; height: 100vh; background: var(--bg); }
 .secview.popped { position: static; width: 100vw; height: 100vh; max-width: none; resize: none; border-radius: 0; border: 0; box-shadow: none; }
 
@@ -758,6 +761,8 @@ fieldset.annot .annot-row .chk { margin-bottom: 6px; color: var(--text); }
 .ann-classes .chk small { color: var(--muted); }
 #drw-annot.off .annot-body { display: none; }
 .sv-points circle { fill: #0B6F69; }
+.sv-points rect.added { fill: #f08a24; }
+.secview.points .sv-body { cursor: crosshair; }
 .sv-points text { fill: #0B6F69; font-family: system-ui, sans-serif; }
 
 /* ---------- visual identity: display type and figures ---------- */

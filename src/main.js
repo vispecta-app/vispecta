@@ -2097,6 +2097,8 @@ function openSecView(p, { popOut = false } = {}) {
     keyPlan: (pl) => keyPlan(pl),
     hatch: () => $('#plane-hatch').checked,
     cut3d: (pl) => (pl.station ? pl.cut3d !== false : null),
+    editPoint: (pl, op, x, y) => editAnnotPoint(pl, op, x, y),
+    resetPoints: (pl) => resetAnnotPoints(pl),
     toggleCut: (pl) => togglePlaneCut(pl),
     onClose: () => viewer.setPlaneHighlight(null),
     onPlane: (pl) => viewer.setPlaneHighlight(pl),
@@ -2857,9 +2859,12 @@ const projects = new ProjectManager({
     groups: state.modelGroups.map(({ id, name, visible, open }) => ({ id, name, visible, open })),
     models: viewer.models.map((m) => ({ key: projects.keys.get(m) || null, name: m.name, alias: m.alias || null, group: m.groupId || null, color: m.overrideColor ? `#${m.overrideColor.getHexString()}` : null })),
     stationFormat: stationFormat.value, // the client's stationing format stays with the project (#29)
+    annotEdits: annotEdits.size ? [...annotEdits] : undefined, // points chosen by hand (#48)
     corridor: corridor.def ? { path: corridor.def.al.name, drawn: !!corridor.def.al.drawn, offsets: corridor.def.offsets, from: corridor.def.from, to: corridor.def.to } : null, // (#26)
   }),
   setExtra: (x) => {
+    annotEdits.clear();
+    for (const [k, e] of x?.annotEdits || []) annotEdits.set(k, { removed: e.removed || [], added: e.added || [] });
     drawnPaths.length = 0;
     for (const l of x?.lines || []) drawnPaths.push(Object.assign(makePath(l.name, l.pts), l.hidden ? { hidden: true } : {}));
     state.modelGroups = (x?.groups || []).map((g) => ({ ...g }));
@@ -3115,6 +3120,35 @@ function updateAnnotUi() {
 $('#drw-plane').addEventListener('change', updateAnnotUi);
 $('#ann-on').addEventListener('change', updateAnnotUi);
 
+// ------------------------------------------------- annotated points chosen by hand (#48)
+/**
+ * Points removed and added in the section window, per section: {removed: [[x, y]], added: [[x, y]]}
+ * in drawing coordinates (x: offset from the alignment at a station). Cross sections at a station
+ * are keyed by alignment and station (so a series at the same station gets them too), other
+ * sections by plane and position. Saved in the project.
+ */
+const annotEdits = new Map();
+function editKey(entry) {
+  if (entry.station) return `st:${entry.station.al.id || entry.station.al.name}@${Math.round((entry.station.al.station0 + entry.station.s) * 1000)}`;
+  return `pl:${entry.plane.normal.toArray().map((v) => v.toFixed(4)).join(',')}@${entry.plane.constant.toFixed(3)}`;
+}
+/** Removes the annotated point at (x, y), or adds one there (op 'remove' | 'add'). */
+function editAnnotPoint(entry, op, x, y) {
+  const k = editKey(entry);
+  const e = annotEdits.get(k) || { removed: [], added: [] };
+  const near = (q) => Math.abs(q[0] - x) < 0.02 && Math.abs(q[1] - y) < 0.02;
+  if (op === 'remove') {
+    // a point added by hand simply goes; a computed one is remembered as removed
+    if (e.added.some(near)) e.added = e.added.filter((q) => !near(q)); else e.removed.push([x, y]);
+  } else {
+    e.removed = e.removed.filter((q) => !near(q));
+    if (!e.added.some(near)) e.added.push([x, y]);
+  }
+  if (e.removed.length || e.added.length) annotEdits.set(k, e); else annotEdits.delete(k);
+  projects.touch?.();
+}
+function resetAnnotPoints(entry) { annotEdits.delete(editKey(entry)); projects.touch?.(); }
+
 /** Options of the annotation as chosen in the drawing dialog (null when off). */
 function annotOptions({ force = false } = {}) {
   if (!force && !$('#ann-on').checked) return null;
@@ -3123,6 +3157,11 @@ function annotOptions({ force = false } = {}) {
     mode: $('#ann-mode').value,
     slopes: $('#ann-slopes').checked,
     classes: boxes.length ? new Set(boxes.filter((b) => b.checked).map((b) => b.value)) : null,
+    // which points (#48): outline, smallest bend, smallest distance, and the points edited by hand
+    outline: $('#ann-outline').value,
+    angle: Math.min(89, Math.max(1, +$('#ann-angle').value || 10)),
+    minDist: Math.max(0, +String($('#ann-mindist').value).replace(',', '.') || 0),
+    editsFor: (entry) => annotEdits.get(editKey(entry)) || null,
     dec: ['da', 'de'].includes(getLang()) ? ',' : '.',
     labels: { offset: t('ann.offset'), height: t('ann.height') },
   };
@@ -3131,7 +3170,7 @@ function annotOptions({ force = false } = {}) {
 function saveDrawingOptions() {
   try { localStorage.setItem(ANN_EXCLUDED, JSON.stringify($$('#ann-classes input').filter((b) => !b.checked).map((b) => b.value))); } catch { /* ignore */ }
   const out = {};
-  for (const id of ['drw-format', 'drw-paper', 'drw-scale', 'drw-colors', 'drw-fill', 'drw-bg', 'ann-on', 'ann-mode', 'ann-slopes']) {
+  for (const id of ['drw-format', 'drw-paper', 'drw-scale', 'drw-colors', 'drw-fill', 'drw-bg', 'ann-on', 'ann-mode', 'ann-slopes', 'ann-outline', 'ann-angle', 'ann-mindist']) {
     const el = $(`#${id}`);
     if (el) out[id] = el.type === 'checkbox' ? el.checked : el.value;
   }
