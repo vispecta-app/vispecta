@@ -3081,22 +3081,15 @@ function openDrawingDialog(plane = null) {
   const m = viewer.models[0];
   const pSel = plane || planes[0];
   $('#drw-name').value = `${m ? m.name.replace(/\.ifc$/i, '') : 'Model'} – ${pSel.station ? `${t('st.section')} ${sectionLetter(pSel)}–${sectionLetter(pSel)} (${stationText(pSel)})` : t(AXIS_LABEL[pSel.axis] || 'planes.face')}`;
-  // the options chosen last time
-  try {
-    const saved = JSON.parse(localStorage.getItem(DRW_OPTS) || 'null');
-    if (saved) for (const [id, v] of Object.entries(saved)) {
-      const el = $(`#${id}`);
-      if (!el) continue;
-      if (el.type === 'checkbox') el.checked = !!v;
-      else if ([...el.options].some((o) => o.value === v)) el.value = v;
-    }
-  } catch { /* ignore */ }
+  restoreDrawingOptions();
   updateSeriesUi();
   renderAnnotClasses();
   updateAnnotUi();
   $('#drawing-dialog').showModal();
 }
 const DRW_OPTS = 'onlineifc.drawingOptions';
+// fields of the label content and number formats (#49), remembered with the other options
+const ANN_FMT_IDS = ['ann-row-off', 'ann-row-h', 'ann-row-dist', 'ann-dec', 'ann-off-ref', 'ann-off-zero', 'ann-off-dec', 'ann-off-unit', 'ann-off-pre', 'ann-off-suf', 'ann-off-plus', 'ann-h-ref', 'ann-h-zero', 'ann-h-dec', 'ann-h-unit', 'ann-h-pre', 'ann-h-suf', 'ann-sl-fmt', 'ann-sl-min'];
 const ANN_EXCLUDED = 'onlineifc.annot.excluded';
 
 /** Classes of the visible models as check boxes; the ones left out last time stay unticked. */
@@ -3152,6 +3145,36 @@ function editAnnotPoint(entry, op, x, y) {
 }
 function resetAnnotPoints(entry) { annotEdits.delete(editKey(entry)); projects.touch?.(); }
 
+/**
+ * The drawing options chosen last time. Also at start, so the section window shows the points and
+ * texts as set up before the dialog is opened.
+ */
+function restoreDrawingOptions() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(DRW_OPTS) || 'null'); } catch { /* ignore */ }
+  for (const [id, v] of Object.entries(saved || {})) {
+    const el = $(`#${id}`);
+    if (!el) continue;
+    if (el.type === 'checkbox') el.checked = !!v;
+    else if (el.tagName === 'SELECT') { if ([...el.options].some((o) => o.value === v)) el.value = v; } else el.value = v ?? '';
+  }
+  updateAnnotFormatUi();
+}
+
+/** A number from a field (comma or point), 0 when empty. */
+const numIn = (sel) => { const v = +String($(sel).value).replace(',', '.'); return Number.isFinite(v) ? v : 0; };
+/** Decimals from a field, 0–4. */
+const decIn = (sel) => Math.min(4, Math.max(0, Math.round(numIn(sel))));
+/** The zero fields only matter for "chosen offset" / "chosen level". */
+function updateAnnotFormatUi() {
+  $('#ann-off-zero').hidden = $('#ann-off-ref').value !== 'custom';
+  $('#ann-h-zero').hidden = $('#ann-h-ref').value !== 'custom';
+}
+for (const id of ['#ann-off-ref', '#ann-h-ref']) $(id).addEventListener('change', updateAnnotFormatUi);
+restoreDrawingOptions();
+// the section window shows the same texts: update it when a format changes
+$('#ann-format').addEventListener('change', () => { if (secViewer?.isOpen) secViewer.update(); });
+
 /** Options of the annotation as chosen in the drawing dialog (null when off). */
 function annotOptions({ force = false } = {}) {
   if (!force && !$('#ann-on').checked) return null;
@@ -3165,15 +3188,30 @@ function annotOptions({ force = false } = {}) {
     angle: Math.min(89, Math.max(1, +$('#ann-angle').value || 10)),
     minDist: Math.max(0, +String($('#ann-mindist').value).replace(',', '.') || 0),
     editsFor: (entry) => annotEdits.get(editKey(entry)) || null,
-    dec: ['da', 'de'].includes(getLang()) ? ',' : '.',
-    labels: { offset: t('ann.offset'), height: t('ann.height') },
+    dec: $('#ann-dec').value !== 'auto' ? $('#ann-dec').value : ['da', 'de'].includes(getLang()) ? ',' : '.',
+    labels: { offset: t('ann.offset'), height: t('ann.height'), dist: t('ann.dist') },
+    // label content and number formats (#49)
+    offsetRef: $('#ann-off-ref').value,
+    offsetZero: numIn('#ann-off-zero'),
+    heightZeroFor: (entry) => {
+      const r = $('#ann-h-ref').value;
+      if (r === 'custom') return numIn('#ann-h-zero');
+      if (r === 'axis' && entry.station) return heightAt(entry.station.al, entry.station.s) ?? 0;
+      return 0;
+    },
+    fmt: {
+      rows: { offset: $('#ann-row-off').checked, height: $('#ann-row-h').checked, dist: $('#ann-row-dist').checked },
+      off: { dec: decIn('#ann-off-dec'), unit: $('#ann-off-unit').value, prefix: $('#ann-off-pre').value, suffix: $('#ann-off-suf').value, plus: $('#ann-off-plus').checked },
+      height: { dec: decIn('#ann-h-dec'), unit: $('#ann-h-unit').value, prefix: $('#ann-h-pre').value, suffix: $('#ann-h-suf').value },
+      slope: { fmt: $('#ann-sl-fmt').value, min: numIn('#ann-sl-min') },
+    },
   };
 }
 
 function saveDrawingOptions() {
   try { localStorage.setItem(ANN_EXCLUDED, JSON.stringify($$('#ann-classes input').filter((b) => !b.checked).map((b) => b.value))); } catch { /* ignore */ }
   const out = {};
-  for (const id of ['drw-format', 'drw-paper', 'drw-scale', 'drw-colors', 'drw-fill', 'drw-bg', 'ann-on', 'ann-mode', 'ann-slopes', 'ann-outline', 'ann-angle', 'ann-mindist']) {
+  for (const id of ['drw-format', 'drw-paper', 'drw-scale', 'drw-colors', 'drw-fill', 'drw-bg', 'ann-on', 'ann-mode', 'ann-slopes', 'ann-outline', 'ann-angle', 'ann-mindist', ...ANN_FMT_IDS]) {
     const el = $(`#${id}`);
     if (el) out[id] = el.type === 'checkbox' ? el.checked : el.value;
   }
