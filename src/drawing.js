@@ -144,8 +144,12 @@ export function computeSection(viewer, entry, { marks = [], annot = null } = {})
     section.annot = { ...annot, runs: applyPointEdits(runs, annot.editsFor?.(entry)), originX, zeroHeight, station: !!entry.station };
     const f = annotFormat(section.annot);
     const nRows = (f.rows.offset ? 1 : 0) + (f.rows.height ? 1 : 0) + (f.rows.dist ? 1 : 0);
-    section.padTopMm = annot.mode !== 'band' ? 30 : 0;
-    section.padBottomMm = annot.mode !== 'point' && nRows ? nRows * 14 + 6 : 0;
+    // room on paper for the band and the dimension chain (#50)
+    const ts = annot.textScale || 1, dims = annot.dims && annot.dims !== 'off' ? 10 * ts : 0;
+    const band = annot.mode !== 'point' && nRows ? (nRows * 14 + 6) * ts : 0;
+    const pts = annot.mode !== 'band' ? 30 * ts : 0;
+    section.padTopMm = (annot.band === 'over' ? band + dims : dims) + pts;
+    section.padBottomMm = annot.band === 'over' ? 0 : band;
     section.marksFor = (lay) => annotationMarks(section, lay);
   }
   return section;
@@ -256,6 +260,10 @@ export function breakPoints(layers, { classes = null, angle = 10, facet = 0.25, 
         if (xi > xc + eps && xi < nx - eps) { nx = xi; next = l; }
       }
       if (!next) break;
+      // only a crossing on the outline itself counts: a short segment that doesn't span the whole
+      // interval (e.g. a sub-ballast slope) can lie above both lines (#50)
+      const yt = top(nx);
+      if (yt === null || Math.abs(yt - at(cur, nx)) > 1e-6) break;
       push(nx, at(cur, nx));
       cur = next; xc = nx;
     }
@@ -371,18 +379,49 @@ export function annotFormat(A) {
 export const ANNOT_COLOR = '#0B6F69';
 
 /**
- * Annotation marks of the break points for a layout (null: DXF, about 1:100):
- * mode 'band' (band of offsets and heights under the cut), 'point' (texts at the points) or 'both';
- * slopes between the break points (% or 1:n).
+ * Spreads label positions along x so neighbouring labels are at least `gap` apart, keeping them as
+ * close to their points as possible (#50): runs of crowded labels are centred on their points.
+ * Returns the label x for every x (sorted input).
+ */
+export function spreadLabels(xs, gap) {
+  const groups = xs.map((x) => ({ xs: [x], c: x }));
+  const pos = (g) => g.c - ((g.xs.length - 1) * gap) / 2; // first label of a group
+  let merged = true;
+  while (merged) {
+    merged = false;
+    for (let i = 1; i < groups.length; i++) {
+      const a = groups[i - 1], b = groups[i];
+      if (pos(b) < pos(a) + a.xs.length * gap - 1e-9) {
+        const xsAll = [...a.xs, ...b.xs];
+        groups.splice(i - 1, 2, { xs: xsAll, c: xsAll.reduce((u, v) => u + v, 0) / xsAll.length });
+        merged = true;
+        break;
+      }
+    }
+  }
+  return groups.flatMap((g) => g.xs.map((_, j) => pos(g) + j * gap));
+}
+
+/**
+ * Annotation marks of the break points for a layout (null: DXF at about 1:100):
+ * mode 'band' (band of values with the section), 'point' (texts at the points) or 'both';
+ * band 'under' (default) or 'over' the section; textScale; slopes; dims 'off' | 'chain' | 'overall'.
+ * Labels that would overlap are spread out with kinked leaders (#50). DXF layers: ANNOTATION_BAND,
+ * ANNOTATION_POINTS, ANNOTATION_SLOPES, DIMENSIONS.
  */
 function annotationMarks(section, lay) {
   const A = section.annot;
   if (!A?.runs?.length) return [];
   const k = lay ? lay.scale / 1000 : 0.1; // metres per paper mm
+  const ts = A.textScale || 1;
   const b = section.bounds;
-  const layer = 'ANNOTATION_POINTS', col = ANNOT_COLOR, grey = '#444444';
+  const col = ANNOT_COLOR, grey = '#444444';
   const out = [];
-  const txt = (text, at, o = {}) => out.push({ text, at, size: o.size ?? 2.3, rot: o.rot || 0, anchor: o.anchor || 'start', color: o.color || grey, layer, dxfH: (o.size ?? 2.3) * k, bold: o.bold });
+  const txt = (text, at, o = {}) => {
+    const size = (o.size ?? 2.3) * ts;
+    out.push({ text, at, size, rot: o.rot || 0, anchor: o.anchor || 'start', color: o.color || grey, layer: o.layer || 'ANNOTATION_BAND', dxfH: size * k, bold: o.bold });
+  };
+  const line = (pts, o = {}) => out.push({ line: pts, color: o.color || grey, w: o.w ?? 0.25, dash: o.dash, layer: o.layer || 'ANNOTATION_BAND' });
   // points with the same x (vertical faces) are one entry with several heights
   const all = [];
   for (const r of A.runs) for (const p of r) {
@@ -390,60 +429,87 @@ function annotationMarks(section, lay) {
     if (e) { if (!e.ys.some((y) => Math.abs(y - p.y) < 1e-4)) e.ys.push(p.y); e.sig = Math.max(e.sig, p.sig); }
     else all.push({ x: p.x, ys: [p.y], sig: p.sig });
   }
-  // the most significant first, then nothing closer than the text needs on paper
-  const gap = Math.max(3.6 * k, A.minDist || 0); // and at least the chosen minimum distance (#48)
+  // thin out by the chosen minimum distance (#48) and so densely packed points don't all crowd in;
+  // labels closer than the text needs are spread out below rather than dropped
+  const gap = 3.6 * k * ts;
+  const thin = Math.max(gap * 0.35, A.minDist || 0);
   const picked = [];
-  for (const e of [...all].sort((p, q) => q.sig - p.sig)) if (!picked.some((q) => Math.abs(q.x - e.x) < gap)) picked.push(e);
+  for (const e of [...all].sort((p, q) => q.sig - p.sig)) if (!picked.some((q) => Math.abs(q.x - e.x) < thin)) picked.push(e);
   picked.sort((p, q) => p.x - q.x);
   for (const e of picked) e.ys.sort((p, q) => q - p);
+  const lx = spreadLabels(picked.map((e) => e.x), gap);
   const mark = (x, y) => {
     const s = 0.9 * k;
-    out.push({ line: [[x - s, y - s], [x + s, y + s]], color: col, w: 0.25, layer });
-    out.push({ line: [[x - s, y + s], [x + s, y - s]], color: col, w: 0.25, layer });
+    line([[x - s, y - s], [x + s, y + s]], { color: col, layer: 'ANNOTATION_POINTS' });
+    line([[x - s, y + s], [x + s, y - s]], { color: col, layer: 'ANNOTATION_POINTS' });
   };
-  // band under the cut: leader from each point down, one row per chosen value (#49)
   const F = annotFormat(A);
   const rows = [];
   if (F.rows.offset) rows.push({ label: A.labels?.offset || 'Offset', text: (e) => F.off(e.x) });
   if (F.rows.height) rows.push({ label: A.labels?.height || 'Height', text: (e) => e.ys.map((y) => F.height(y)).join(' / '), small: (e) => e.ys.length > 1 });
+  const over = A.band === 'over';
+  // dimension chain (#50): between the annotated points, or only overall, on the other side of the band
+  const dimY = over ? b.minY - 6 * k * ts : b.maxY + 6 * k * ts;
+  if (A.dims && A.dims !== 'off' && picked.length > 1) {
+    const xs = A.dims === 'overall' ? [picked[0].x, picked[picked.length - 1].x] : picked.map((e) => e.x);
+    const L = 'DIMENSIONS', dc = '#1d3557';
+    line([[xs[0], dimY], [xs[xs.length - 1], dimY]], { color: dc, w: 0.18, layer: L });
+    for (const x of xs) {
+      const e = picked.find((q) => Math.abs(q.x - x) < 1e-9);
+      line([[x, dimY + (over ? 1.5 : -1.5) * k], [x, over ? Math.min(...e.ys) - 0.8 * k : e.ys[0] + 0.8 * k]], { color: '#9aa0a6', w: 0.1, layer: L });
+      const t = 1.1 * k; // oblique tick, as on construction drawings
+      line([[x - t, dimY - t], [x + t, dimY + t]], { color: dc, w: 0.3, layer: L });
+    }
+    for (let i = 1; i < xs.length; i++) {
+      const d = xs[i] - xs[i - 1];
+      if (d < 6 * k * ts) continue; // no room for the text between the ticks
+      txt(F.dist(d), [(xs[i - 1] + xs[i]) / 2, dimY + 0.9 * k], { anchor: 'middle', size: 2.1, color: dc, layer: L });
+    }
+  }
+  // band: one row per chosen value (#49), under the section (default) or over it
   if (A.mode !== 'point' && rows.length + (F.rows.dist ? 1 : 0)) {
-    const row = 14 * k, top0 = b.minY - 4 * k;
+    const row = 14 * k * ts;
     const nRows = rows.length + (F.rows.dist ? 1 : 0);
-    const bot = top0 - nRows * row;
-    for (let i = 0; i <= nRows; i++) out.push({ line: [[b.minX, top0 - i * row], [b.maxX, top0 - i * row]], color: grey, w: 0.25, layer });
-    rows.forEach((r, i) => txt(r.label, [b.minX - 2 * k, top0 - i * row - row / 2 - 0.9 * k], { anchor: 'end', size: 2.5, bold: true }));
-    if (F.rows.dist) txt(A.labels?.dist || 'Distance', [b.minX - 2 * k, top0 - rows.length * row - row / 2 - 0.9 * k], { anchor: 'end', size: 2.5, bold: true });
-    const tickBot = top0 - rows.length * row;
-    for (const e of picked) {
-      out.push({ line: [[e.x, e.ys[e.ys.length - 1]], [e.x, top0]], color: '#9aa0a6', w: 0.12, dash: 'dot', layer });
-      out.push({ line: [[e.x, top0], [e.x, F.rows.dist ? bot : tickBot]], color: grey, w: 0.12, layer });
-      // vertical texts (rotated 90°: the letters lie left of the baseline), centred in their row
+    // edge of the band towards the section, and the direction away from it
+    const near = over ? b.maxY + 10 * k * ts + (A.dims && A.dims !== 'off' ? 8 * k * ts : 0) : b.minY - 4 * k;
+    const dir = over ? 1 : -1;
+    const yAt = (i) => near + dir * i * row;              // i-th line of the band
+    const mid = (i) => near + dir * (i + 0.5) * row;      // middle of row i
+    for (let i = 0; i <= nRows; i++) line([[b.minX, yAt(i)], [b.maxX, yAt(i)]]);
+    rows.forEach((r, i) => txt(r.label, [b.minX - 2 * k, mid(i) - 0.9 * k], { anchor: 'end', size: 2.5, bold: true }));
+    if (F.rows.dist) txt(A.labels?.dist || 'Distance', [b.minX - 2 * k, mid(rows.length) - 0.9 * k], { anchor: 'end', size: 2.5, bold: true });
+    const kink = 3 * k * ts; // leaders bend in the first 3 mm of the band to reach a spread label
+    picked.forEach((e, j) => {
+      const tx = lx[j];
+      const yp = over ? Math.max(...e.ys) : Math.min(...e.ys);
+      line([[e.x, yp], [e.x, near]], { color: '#9aa0a6', w: 0.12, dash: 'dot', layer: 'ANNOTATION_POINTS' });
+      line([[e.x, near], [tx, near + dir * kink], [tx, yAt(rows.length + (F.rows.dist ? 1 : 0))]], { w: 0.12 });
       rows.forEach((r, i) => {
         const sm = r.small?.(e);
-        txt(r.text(e), [e.x + (sm ? 1.9 : 2.2) * k, top0 - i * row - row / 2], { rot: 90, anchor: 'middle', size: sm ? 1.9 : 2.3 });
+        txt(r.text(e), [tx + (sm ? 1.9 : 2.2) * k * ts, mid(i)], { rot: 90, anchor: 'middle', size: sm ? 1.9 : 2.3 });
       });
       mark(e.x, e.ys[0]);
-    }
-    // distances between neighbouring points, horizontal, in the middle between the ticks
+    });
+    // distances between neighbouring points, horizontal, between the ticks
     if (F.rows.dist) {
-      const yy = top0 - rows.length * row - row / 2 - 0.9 * k;
+      const yy = mid(rows.length) - 0.9 * k;
       for (let i = 1; i < picked.length; i++) {
-        const a = picked[i - 1], c = picked[i];
-        if (c.x - a.x < 7 * k) continue; // no room for the text
-        txt(F.dist(c.x - a.x), [(a.x + c.x) / 2, yy], { anchor: 'middle', size: 2.1 });
+        if (lx[i] - lx[i - 1] < 7 * k * ts) continue; // no room for the text
+        txt(F.dist(picked[i].x - picked[i - 1].x), [(lx[i - 1] + lx[i]) / 2, yy], { anchor: 'middle', size: 2.1 });
       }
     }
   }
-  // texts at the points: short leader up, the chosen values upwards
+  // texts at the points: a leader up (kinked when the labels are spread), the chosen values upwards
   if (A.mode !== 'band') {
-    for (const e of picked) {
+    picked.forEach((e, j) => {
       const y = e.ys[0];
       if (A.mode === 'point') mark(e.x, y);
       const parts = rows.map((r) => r.text(e));
-      if (!parts.length) continue;
-      out.push({ line: [[e.x, y + 1.2 * k], [e.x, y + 5 * k]], color: col, w: 0.18, layer });
-      txt(parts.join(' / '), [e.x + 0.85 * k, y + 5.6 * k], { rot: 90, color: col });
-    }
+      if (!parts.length) return;
+      const tx = lx[j];
+      line([[e.x, y + 1.2 * k], [e.x, y + 3 * k], [tx, y + 5 * k]], { color: col, w: 0.18, layer: 'ANNOTATION_POINTS' });
+      txt(parts.join(' / '), [tx + 0.85 * k * ts, y + 5.6 * k], { rot: 90, color: col, layer: 'ANNOTATION_POINTS' });
+    });
   }
   // slopes between the break points (not for vertical faces, very short pieces, or below the threshold)
   if (A.slopes) {
@@ -451,13 +517,13 @@ function annotationMarks(section, lay) {
       for (let i = 1; i < r.length; i++) {
         const p = r[i - 1], q = r[i];
         const dx = q.x - p.x, dy = q.y - p.y;
-        if (Math.abs(dx) < 1e-6 || Math.hypot(dx, dy) < 10 * k || Math.abs(dy / dx) > 6) continue;
+        if (Math.abs(dx) < 1e-6 || Math.hypot(dx, dy) < 10 * k * ts || Math.abs(dy / dx) > 6) continue;
         const text = F.slope(dy / dx);
         if (!text) continue;
         const ang = (Math.atan2(dy, dx) * 180) / Math.PI;
         const mx = (p.x + q.x) / 2, my = (p.y + q.y) / 2;
         const n = [-Math.sin((ang * Math.PI) / 180), Math.cos((ang * Math.PI) / 180)]; // left normal = up for a rising line
-        txt(text, [mx + n[0] * 1.4 * k, my + n[1] * 1.4 * k], { rot: ang, anchor: 'middle', size: 2.1, color: '#2d6a2d' });
+        txt(text, [mx + n[0] * 1.4 * k, my + n[1] * 1.4 * k], { rot: ang, anchor: 'middle', size: 2.1, color: '#2d6a2d', layer: 'ANNOTATION_SLOPES' });
       }
     }
   }
@@ -747,6 +813,42 @@ function marksPdf(section, lay, P, k, rgb) {
   return c;
 }
 
+/**
+ * Hatch lines of cut faces (#50): parallel lines `spacing` apart at `angle` degrees, clipped to the
+ * loops of one layer (even-odd, so holes stay open). Returns [[a, b], …] in drawing coordinates.
+ */
+export function hatchSegments(loops, spacing, angle = 45) {
+  if (!loops?.length || !(spacing > 0)) return [];
+  const a = (angle * Math.PI) / 180, c = Math.cos(a), sn = Math.sin(a);
+  // rotate so the hatch runs along x: u = x·c + y·s (along), v = −x·s + y·c (across)
+  const rot = (p) => [p[0] * c + p[1] * sn, -p[0] * sn + p[1] * c];
+  const back = (u, v) => [u * c - v * sn, u * sn + v * c];
+  const edges = [];
+  let v0 = Infinity, v1 = -Infinity;
+  for (const l of loops) {
+    const r = l.map(rot);
+    for (let i = 0; i < r.length; i++) {
+      const p = r[i], q = r[(i + 1) % r.length];
+      edges.push([p, q]);
+      v0 = Math.min(v0, p[1]); v1 = Math.max(v1, p[1]);
+    }
+  }
+  const out = [];
+  if (!(v1 > v0) || (v1 - v0) / spacing > 20000) return out;
+  for (let v = Math.ceil(v0 / spacing) * spacing; v <= v1; v += spacing) {
+    const us = [];
+    for (const [p, q] of edges) {
+      if ((p[1] > v) === (q[1] > v)) continue;
+      us.push(p[0] + ((v - p[1]) / (q[1] - p[1])) * (q[0] - p[0]));
+    }
+    us.sort((x, y) => x - y);
+    for (let i = 0; i + 1 < us.length; i += 2) if (us[i + 1] - us[i] > 1e-9) out.push([back(us[i], v), back(us[i + 1], v)]);
+  }
+  return out;
+}
+const HATCH_MM = 2.0; // hatch spacing on paper
+const HATCH_W = 0.13; // hatch line weight (mm)
+
 /** Joins segments into closed loops and open polylines (endpoints matched within 0.1 mm). */
 /**
  * The mark of the app (a cross section and the point that looks at it) after the last line of the
@@ -984,7 +1086,7 @@ export function toSvg(section, lay, info, opts) {
   for (const [cls, L] of section.layers) {
     if (isModelColors(opts)) {
       // model colours: one path per colour, filled with the element colour and a darker outline
-      out.push(`<g id="${escXml(cls)}" stroke-width="0.35" stroke-linejoin="round" stroke-linecap="round">`);
+      out.push(`<g id="${escXml(cls)}" stroke-width="${opts.lw ?? 0.35}" stroke-linejoin="round" stroke-linecap="round">`);
       for (const [hex, g] of groupByColor(L, opts.colors)) {
         if (g.loops.length) out.push(`<path d="${g.loops.map((l) => path(l, true)).join('')}" stroke="${outline(hex)}" fill="${opts.fill ? hex : 'none'}" fill-rule="evenodd"/>`);
         if (g.open.length) out.push(`<path d="${g.open.map((l) => path(l, false)).join('')}" stroke="${outline(hex)}" fill="none"/>`);
@@ -993,10 +1095,18 @@ export function toSvg(section, lay, info, opts) {
       continue;
     }
     const col = opts.mono ? '#000' : classColor(cls, i++);
-    out.push(`<g id="${escXml(cls)}" stroke="${col}" stroke-width="0.35" stroke-linejoin="round" stroke-linecap="round">`);
+    out.push(`<g id="${escXml(cls)}" stroke="${col}" stroke-width="${opts.lw ?? 0.35}" stroke-linejoin="round" stroke-linecap="round">`);
     if (L.loops.length) out.push(`<path d="${L.loops.map((l) => path(l, true)).join('')}" fill="${opts.fill ? (opts.mono ? '#d0d0d0' : tint(col, 0.75)) : 'none'}" fill-rule="evenodd"/>`);
     if (L.open.length) out.push(`<path d="${L.open.map((l) => path(l, false)).join('')}" fill="none"/>`);
     out.push('</g>');
+  }
+  // hatching of the cut faces (#50), one group per class
+  if (opts.hatch) {
+    const sp = (HATCH_MM * lay.scale) / 1000;
+    for (const [cls, L] of section.layers) {
+      const segs = hatchSegments(L.loops, sp);
+      if (segs.length) out.push(`<path id="${escXml(cls)}_HATCH" d="${segs.map(([a, b]) => `M${lay.map(a).map(f2).join(' ')}L${lay.map(b).map(f2).join(' ')}`).join('')}" stroke="#333" stroke-width="${HATCH_W}" fill="none"/>`);
+    }
   }
   if (section.cloud) {
     // point cloud dots (#27): small squares, 0.3 mm
@@ -1096,7 +1206,7 @@ function pdfPage(section, lay, info, opts) {
   let i = 0;
   for (const [cls, L] of section.layers) {
     if (isModelColors(opts)) {
-      c.push(`${(0.35 * k).toFixed(3)} w`);
+      c.push(`${((opts.lw ?? 0.35) * k).toFixed(3)} w`);
       for (const [hex, g] of groupByColor(L, opts.colors)) {
         c.push(`${rgb(outline(hex))} RG ${rgb(hex)} rg`);
         for (const l of g.loops) {
@@ -1112,7 +1222,7 @@ function pdfPage(section, lay, info, opts) {
     }
     const col = opts.mono ? '#000000' : classColor(cls, i++);
     const fillCol = opts.mono ? '#d0d0d0' : tint(col, 0.75);
-    c.push(`${rgb(col)} RG ${rgb(fillCol)} rg ${(0.35 * k).toFixed(3)} w`);
+    c.push(`${rgb(col)} RG ${rgb(fillCol)} rg ${((opts.lw ?? 0.35) * k).toFixed(3)} w`);
     for (const l of L.loops) {
       const pts = l.map((p) => lay.map(p));
       c.push(`${P(...pts[0])} m ${pts.slice(1).map((p) => `${P(...p)} l`).join(' ')} h ${opts.fill ? 'B*' : 'S'}`);
@@ -1121,6 +1231,15 @@ function pdfPage(section, lay, info, opts) {
       const pts = l.map((p) => lay.map(p));
       c.push(`${P(...pts[0])} m ${pts.slice(1).map((p) => `${P(...p)} l`).join(' ')} S`);
     }
+  }
+  // hatching of the cut faces (#50)
+  if (opts.hatch) {
+    const sp = (HATCH_MM * lay.scale) / 1000;
+    c.push(`q 0.2 0.2 0.2 RG ${(HATCH_W * k).toFixed(3)} w`);
+    for (const [, L] of section.layers) {
+      for (const [a, b] of hatchSegments(L.loops, sp)) c.push(`${P(...lay.map(a))} m ${P(...lay.map(b))} l S`);
+    }
+    c.push('Q');
   }
   if (section.cloud) {
     // point cloud dots (#27): small filled squares, 0.3 mm
@@ -1199,21 +1318,27 @@ function latin1(s) { const b = new Uint8Array(s.length); for (let i = 0; i < s.l
 const latin1Length = (s) => s.length;
 
 /** DXF (R12, ASCII) with one layer per IFC class. Coordinates in metres. */
-export function toDxf(section, info) {
+export function toDxf(section, info, opts = {}) {
   const L = [];
   const g = (code, val) => { L.push(String(code), String(val)); };
   const layerName = (cls) => cls.replace(/[^A-Za-z0-9_-]/g, '_').toUpperCase();
   const aci = [1, 5, 3, 6, 30, 4, 140, 40, 160, 210];
-  const dxfMarks = allMarks(section, null);
+  // annotation sized for the chosen scale (as on paper), else about 1:100 (#50)
+  const dxfMarks = allMarks(section, opts.scale ? { scale: opts.scale, map: (p) => p } : null);
+  const hatchSp = opts.hatch ? (HATCH_MM * (opts.scale || 100)) / 1000 : 0;
+  const hatches = hatchSp ? [...section.layers].map(([cls, L]) => [cls, hatchSegments(L.loops, hatchSp)]).filter(([, h]) => h.length) : [];
+  // layer colours (AutoCAD colour index): band 7, points 4, slopes 3, dimensions 5, axis/marks 1, hatch 8
+  const MARK_ACI = { ANNOTATION_BAND: 7, ANNOTATION_POINTS: 4, ANNOTATION_SLOPES: 3, DIMENSIONS: 5, ALIGNMENT_AXIS: 1, OFFSET_LINES: 6, SECTION_MARKS: 1 };
   const markLayers = [...new Set(dxfMarks.map((mk) => mk.layer || 'ANNOTATION'))];
   g(0, 'SECTION'); g(2, 'HEADER'); g(9, '$ACADVER'); g(1, 'AC1009');
   g(9, '$EXTMIN'); g(10, section.bounds.minX); g(20, section.bounds.minY);
   g(9, '$EXTMAX'); g(10, section.bounds.maxX); g(20, section.bounds.maxY);
   g(0, 'ENDSEC');
-  g(0, 'SECTION'); g(2, 'TABLES'); g(0, 'TABLE'); g(2, 'LAYER'); g(70, section.layers.size + 1 + markLayers.length + (section.cloud ? 1 : 0));
+  g(0, 'SECTION'); g(2, 'TABLES'); g(0, 'TABLE'); g(2, 'LAYER'); g(70, section.layers.size + 1 + markLayers.length + hatches.length + (section.cloud ? 1 : 0));
   if (section.cloud) { g(0, 'LAYER'); g(2, 'POINTCLOUD'); g(70, 0); g(62, 8); g(6, 'CONTINUOUS'); }
   g(0, 'LAYER'); g(2, '0'); g(70, 0); g(62, 7); g(6, 'CONTINUOUS');
-  for (const ml of markLayers) { g(0, 'LAYER'); g(2, ml); g(70, 0); g(62, 1); g(6, 'CONTINUOUS'); }
+  for (const ml of markLayers) { g(0, 'LAYER'); g(2, ml); g(70, 0); g(62, MARK_ACI[ml] ?? 1); g(6, 'CONTINUOUS'); }
+  for (const [cls] of hatches) { g(0, 'LAYER'); g(2, `${layerName(cls)}_HATCH`); g(70, 0); g(62, 8); g(6, 'CONTINUOUS'); }
   let i = 0;
   for (const [cls] of section.layers) { g(0, 'LAYER'); g(2, layerName(cls)); g(70, 0); g(62, aci[i++ % aci.length]); g(6, 'CONTINUOUS'); }
   g(0, 'ENDTAB'); g(0, 'ENDSEC');
@@ -1227,6 +1352,11 @@ export function toDxf(section, info) {
     const ln = layerName(cls);
     for (const l of layer.loops) poly(ln, l, true);
     for (const l of layer.open) poly(ln, l, false);
+  }
+  // hatching (#50): lines on a layer of its own per class, so it can be switched off
+  for (const [cls, segs] of hatches) {
+    const ln = `${layerName(cls)}_HATCH`;
+    for (const [a, b] of segs) { g(0, 'LINE'); g(8, ln); g(10, a[0].toFixed(5)); g(20, a[1].toFixed(5)); g(30, 0); g(11, b[0].toFixed(5)); g(21, b[1].toFixed(5)); g(31, 0); }
   }
   // DXF text is ASCII; other characters (‰, æøå, ·) are written as \U+XXXX, which CAD programs read
   const ascii = (x) => String(x).replace(/[–—]/g, '-').replace(/[^\x20-\x7E]/gu, (c) => `\\U+${c.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`);

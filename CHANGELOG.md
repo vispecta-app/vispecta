@@ -21,6 +21,8 @@ https://github.com/vispecta-app/vispecta/releases
 - **Edit** is no longer in the toolbar; it stays in the properties panel (and the `E` key).
 
 ### Fixed
+- **Break points could be placed on a line under the outline** (e.g. on the terrain under an
+  embankment) where a short segment lay above two crossing lines.
 - **DXF texts with ‰, æ, ø, å or · showed `?`.** They are written as `\U+XXXX`, which CAD
   programs read.
 - **Saved drawing options stopped loading at the first number field.** All options load again,
@@ -29,6 +31,13 @@ https://github.com/vispecta-app/vispecta/releases
   cut anything yet.
 
 ### Added
+- **Cross-section drawings: layout, styles and hatching.** Hatched cut faces in PDF, SVG and DXF
+  (DXF: a layer `<CLASS>_HATCH` per class); line weight thin / normal / thick; the band under or
+  over the section; text size 80–150 %; labels that would overlap are spread out with kinked
+  leaders instead of being left out; a dimension chain between the annotated points (or overall);
+  DXF layers ANNOTATION_BAND, ANNOTATION_POINTS, ANNOTATION_SLOPES and DIMENSIONS with their own
+  colours, and the DXF annotation sized for the same scale as the PDF.
+  ([#50](https://github.com/vispecta-app/vispecta/issues/50))
 - **Undo and redo.** Ctrl+Z (Cmd+Z) and ↶ in the toolbar undo the last change – hiding,
   isolating, colours, models switched off, sections added, moved or removed, measurements, drawn
   lines, the corridor; Ctrl+Y / Ctrl+Shift+Z and ↷ redo it. A message says what was undone. The

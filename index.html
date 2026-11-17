@@ -483,6 +483,9 @@
         <label class="field"><span data-i18n="drw.scale"></span><select id="drw-scale"></select></label>
       </div>
       <label class="chk"><input type="checkbox" id="drw-fill" checked /> <span data-i18n="drw.fill"></span></label>
+      <label class="chk"><input type="checkbox" id="drw-hatch" checked /> <span data-i18n="drw.hatch"></span></label>
+      <label class="field drw-inline"><span data-i18n="drw.lw"></span>
+        <select id="drw-lw"><option value="0.25" data-i18n="drw.lwThin"></option><option value="0.35" selected data-i18n="drw.lwNormal"></option><option value="0.5" data-i18n="drw.lwThick"></option></select></label>
       <label class="chk"><input type="checkbox" id="drw-bg" checked /> <span data-i18n="drw.background"></span></label>
       <label class="field"><span data-i18n="drw.colors"></span>
         <select id="drw-colors">
@@ -498,6 +501,14 @@
             <label class="field"><span data-i18n="ann.mode"></span>
               <select id="ann-mode"><option value="band" data-i18n="ann.band"></option><option value="point" data-i18n="ann.point"></option><option value="both" data-i18n="ann.both"></option></select></label>
             <label class="chk"><input type="checkbox" id="ann-slopes" /> <span data-i18n="ann.slopes"></span></label>
+          </div>
+          <div class="annot-row">
+            <label class="field"><span data-i18n="ann.bandPos"></span>
+              <select id="ann-band"><option value="under" data-i18n="ann.bandUnder"></option><option value="over" data-i18n="ann.bandOver"></option></select></label>
+            <label class="field"><span data-i18n="ann.textSize"></span>
+              <select id="ann-text"><option value="0.8">80 %</option><option value="1" selected>100 %</option><option value="1.25">125 %</option><option value="1.5">150 %</option></select></label>
+            <label class="field" data-i18n-title="ann.dimsTitle"><span data-i18n="ann.dims"></span>
+              <select id="ann-dims"><option value="off" data-i18n="ann.dimsOff"></option><option value="chain" data-i18n="ann.dimsChain"></option><option value="overall" data-i18n="ann.dimsOverall"></option></select></label>
           </div>
           <div class="annot-row">
             <label class="field"><span data-i18n="ann.outline"></span>

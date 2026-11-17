@@ -3182,6 +3182,10 @@ function annotOptions({ force = false } = {}) {
   return {
     mode: $('#ann-mode').value,
     slopes: $('#ann-slopes').checked,
+    // layout on paper (#50)
+    band: $('#ann-band').value,
+    textScale: +$('#ann-text').value || 1,
+    dims: $('#ann-dims').value,
     classes: boxes.length ? new Set(boxes.filter((b) => b.checked).map((b) => b.value)) : null,
     // which points (#48): outline, smallest bend, smallest distance, and the points edited by hand
     outline: $('#ann-outline').value,
@@ -3211,7 +3215,7 @@ function annotOptions({ force = false } = {}) {
 function saveDrawingOptions() {
   try { localStorage.setItem(ANN_EXCLUDED, JSON.stringify($$('#ann-classes input').filter((b) => !b.checked).map((b) => b.value))); } catch { /* ignore */ }
   const out = {};
-  for (const id of ['drw-format', 'drw-paper', 'drw-scale', 'drw-colors', 'drw-fill', 'drw-bg', 'ann-on', 'ann-mode', 'ann-slopes', 'ann-outline', 'ann-angle', 'ann-mindist', ...ANN_FMT_IDS]) {
+  for (const id of ['drw-format', 'drw-paper', 'drw-scale', 'drw-colors', 'drw-fill', 'drw-bg', 'ann-on', 'ann-mode', 'ann-slopes', 'ann-outline', 'ann-angle', 'ann-mindist', 'drw-hatch', 'drw-lw', 'ann-band', 'ann-text', 'ann-dims', ...ANN_FMT_IDS]) {
     const el = $(`#${id}`);
     if (el) out[id] = el.type === 'checkbox' ? el.checked : el.value;
   }
@@ -3223,7 +3227,8 @@ async function exportDrawing() {
   if (!entry) return;
   const format = $('#drw-format').value;
   const scaleVal = $('#drw-scale').value;
-  const opts = { paper: $('#drw-paper').value, scale: scaleVal === 'fit' ? 'fit' : +scaleVal, fill: $('#drw-fill').checked, mono: $('#drw-colors').value === 'mono', colors: $('#drw-colors').value };
+  const opts = { paper: $('#drw-paper').value, scale: scaleVal === 'fit' ? 'fit' : +scaleVal, fill: $('#drw-fill').checked, mono: $('#drw-colors').value === 'mono', colors: $('#drw-colors').value,
+    hatch: $('#drw-hatch').checked, lw: +$('#drw-lw').value || 0.35 }; // hatching and line weight (#50)
   $('#drawing-dialog').close();
   saveDrawingOptions();
   if (entry.station && $('#ser-on').checked) {
@@ -3247,7 +3252,8 @@ async function exportDrawing() {
   };
   const file = name.replace(/[^\w\-æøåÆØÅäöüÄÖÜß ]+/g, '').trim().replace(/\s+/g, '_') || 'section';
   if (format === 'dxf') {
-    download(`${file}.dxf`, toDxf(section, info), 'application/dxf');
+    // the annotation and the hatching sized for the scale the PDF would get (#50)
+    download(`${file}.dxf`, toDxf(section, info, { scale: layout(section, opts).scale, hatch: opts.hatch }), 'application/dxf');
   } else {
     const lay = layout(section, opts);
     if (!lay.fits) toast(t('drw.tooBig', { scale: lay.scale }));
