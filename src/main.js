@@ -3647,6 +3647,8 @@ function captureState() {
     measures: [...measure.items],
     lines: drawnPaths.map((p) => ({ p, name: p.name, hidden: !!p.hidden, pts: pathPoints(p) })),
     corridor: corridor.def ? { ...corridor.def, offsets: [...corridor.def.offsets] } : null,
+    // annotated points removed / added by hand in the section window (#48)
+    points: [...annotEdits].map(([k, e]) => [k, { removed: e.removed.map((q) => [...q]), added: e.added.map((q) => [...q]) }]),
   };
   const r = (x) => Math.round(x * 1e4) / 1e4;
   const key = JSON.stringify({
@@ -3656,6 +3658,7 @@ function captureState() {
     measures: st.measures.map((m) => m.id),
     lines: st.lines.map((l) => [l.p.id, l.name, l.hidden, l.pts.map((q) => q.map(r))]),
     corridor: st.corridor ? [st.corridor.al.id || st.corridor.al.name, st.corridor.offsets, r(st.corridor.from), r(st.corridor.to)] : null,
+    points: st.points,
   });
   return { key, models: viewer.models.map(uidOf).join(','), state: st };
 }
@@ -3685,9 +3688,13 @@ function restoreState(st) {
   }
   if (st.corridor) corridor.set({ ...st.corridor, offsets: [...st.corridor.offsets] }); else corridor.clear();
   corridorHits = null;
-  // section planes
-  viewer.clearPlanes();
-  for (const s of st.planes) {
+  // section planes – only rebuilt when they differ (rebuilding replaces the plane objects, and the
+  // section window would lose its plane); the section window stays on the plane at the same place
+  const planeSig = (list) => JSON.stringify(list.map((p) => [p.axis, p.n.map((v) => v.toFixed(6)), p.c.toFixed(5), p.enabled, p.cut3d, p.boxPart, p.station ? [p.station.al.id || p.station.al.name, p.station.s.toFixed(4)] : null]));
+  const nowPlanes = captureState().state.planes;
+  const svIndex = secViewer?.isOpen ? viewer.planes.indexOf(secViewer.plane) : -1;
+  if (planeSig(nowPlanes) !== planeSig(st.planes)) viewer.clearPlanes();
+  for (const s of planeSig(nowPlanes) !== planeSig(st.planes) ? st.planes : []) {
     const e = viewer.addPlane(s.axis === 'custom' ? 'x' : s.axis);
     e.axis = s.axis;
     e.axisVec.fromArray(s.axisVec);
@@ -3700,12 +3707,16 @@ function restoreState(st) {
     if (s.anchor) e.anchor = new THREE.Vector3().fromArray(s.anchor);
     viewer.updatePlane(e);
   }
+  if (svIndex >= 0 && viewer.planes[svIndex] && secViewer.plane !== viewer.planes[svIndex]) secViewer.open(viewer.planes[svIndex]);
   measure.restore(st.measures);
+  annotEdits.clear();
+  for (const [k, e] of st.points || []) annotEdits.set(k, { removed: e.removed.map((q) => [...q]), added: e.added.map((q) => [...q]) });
   afterModelsChanged();
   refreshVisibilityUi();
   renderPlanes();
   renderModels();
   secViewer?.planesChanged?.();
+  if (secViewer?.isOpen) secViewer.update(); // the hand-picked points may have changed (#48)
   projects.touch?.();
 }
 
@@ -3725,6 +3736,7 @@ function describeChange(a, b) {
   if (A.measures.length !== B.measures.length) out.push(t('undo.measure'));
   if (JSON.stringify(A.lines.map((l) => [l.p.id, l.name, l.hidden, l.pts])) !== JSON.stringify(B.lines.map((l) => [l.p.id, l.name, l.hidden, l.pts]))) out.push(t('undo.line'));
   if (JSON.stringify(A.corridor && [A.corridor.offsets, A.corridor.from, A.corridor.to]) !== JSON.stringify(B.corridor && [B.corridor.offsets, B.corridor.from, B.corridor.to])) out.push(t('undo.corridor'));
+  if (JSON.stringify(A.points) !== JSON.stringify(B.points)) out.push(t('undo.points'));
   return out.join(', ') || t('undo.change');
 }
 
