@@ -25,6 +25,11 @@ https://github.com/vispecta-app/vispecta/releases
   cut anything yet.
 
 ### Added
+- **Undo and redo.** Ctrl+Z (Cmd+Z) and ↶ in the toolbar undo the last change – hiding,
+  isolating, colours, models switched off, sections added, moved or removed, measurements, drawn
+  lines, the corridor; Ctrl+Y / Ctrl+Shift+Z and ↷ redo it. A message says what was undone. The
+  camera is not part of it, and opening or removing a model starts the history again.
+  ([#67](https://github.com/vispecta-app/vispecta/issues/67))
 - **Choose the annotated points of a cross section.** In the section window (⌖), click a point to
   remove it, or click an outline to add one (on a corner when one is near, else on the edge); ↺
   puts the computed points back. The choice is kept per station – also on that page of a series –

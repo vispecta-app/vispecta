@@ -31,6 +31,7 @@ import { renderVersion } from './version.js';
 import { ProjectManager } from './projects.js';
 import { SectionViewer } from './secview.js';
 import { LineEditor } from './lineedit.js';
+import { History } from './history.js';
 import { FilterPanel, keyLabel } from './filters.js';
 import { IssuesPanel } from './issues.js';
 import { readAlignments, AlignmentLayer, SectionMarks, pointAt, heightAt, project, formatStation, parseStation, setStationFormat, stationFormat, STATION_FORMATS } from './alignment.js';
@@ -668,6 +669,8 @@ function updateAlignments() {
 
 function afterModelsChanged() {
   updateAlignments();
+  // undo (#67): a model was opened or removed – the history starts from the state as it is now
+  setTimeout(() => history.commit(), 0);
   if (idsResults && idsResults.some((e) => !viewer.models.includes(e.model))) { idsResults = null; renderIds(); }
   if (comparison && (!viewer.models.includes(comparison.oldM) || !viewer.models.includes(comparison.newM))) { comparison = null; renderComparison(); }
   $('#welcome').hidden = viewer.models.length + viewer.clouds.length > 0;
@@ -3621,4 +3624,133 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator && (location.protocol =
   window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('service worker', e)));
 }
 
-window.onlineIfc = { viewer, state, openFiles, python, measure, views, walk, drawnPaths, projects, get secViewer() { return secViewer; } };
+// ======================================================================= undo / redo (#67)
+// Snapshots of what the user changes (see history.js): visibility and colours of elements and models,
+// model groups, section planes, measurements, drawn lines and the corridor.
+const modelUid = new WeakMap();
+let modelSeq = 0;
+const uidOf = (m) => { if (!modelUid.has(m)) modelUid.set(m, ++modelSeq); return modelUid.get(m); };
+
+function captureState() {
+  const st = {
+    models: viewer.models.map((m) => ({
+      m, hidden: [...m.hidden], colors: [...m.elementColor], opac: [...m.elementOpacity],
+      vis: m.ownVisible !== false, color: m.overrideColor ? m.overrideColor.getHex() : null, opacity: m.opacity, group: m.groupId || null,
+    })),
+    groups: state.modelGroups.map((g) => ({ ...g })),
+    planes: viewer.planes.map((p) => ({
+      axis: p.axis, axisVec: p.axisVec.toArray(), n: p.plane.normal.toArray(), c: p.plane.constant,
+      enabled: p.enabled, cut3d: p.cut3d !== false, boxPart: p.boxPart || null,
+      station: p.station ? { al: p.station.al, s: p.station.s, T: p.station.T.toArray() } : null,
+      anchor: p.anchor ? p.anchor.toArray() : null,
+    })),
+    measures: [...measure.items],
+    lines: drawnPaths.map((p) => ({ p, name: p.name, hidden: !!p.hidden, pts: pathPoints(p) })),
+    corridor: corridor.def ? { ...corridor.def, offsets: [...corridor.def.offsets] } : null,
+  };
+  const r = (x) => Math.round(x * 1e4) / 1e4;
+  const key = JSON.stringify({
+    models: st.models.map((x) => [uidOf(x.m), x.hidden.length, x.hidden, x.colors, x.opac, x.vis, x.color, x.opacity, x.group]),
+    groups: st.groups.map((g) => [g.id, g.name, g.visible]),
+    planes: st.planes.map((p) => [p.axis, p.n.map(r), r(p.c), p.enabled, p.cut3d, p.boxPart, p.station ? [p.station.al.id || p.station.al.name, r(p.station.s)] : null]),
+    measures: st.measures.map((m) => m.id),
+    lines: st.lines.map((l) => [l.p.id, l.name, l.hidden, l.pts.map((q) => q.map(r))]),
+    corridor: st.corridor ? [st.corridor.al.id || st.corridor.al.name, st.corridor.offsets, r(st.corridor.from), r(st.corridor.to)] : null,
+  });
+  return { key, models: viewer.models.map(uidOf).join(','), state: st };
+}
+
+function restoreState(st) {
+  // models: colours, transparency and hidden elements, own visibility, colour, opacity, group
+  for (const x of st.models) {
+    const m = x.m;
+    if (!viewer.models.includes(m)) continue;
+    m.elementOpacity = new Map(x.opac);
+    m.setElementColors(new Map(x.colors));
+    m.hidden.clear();
+    m.hide(x.hidden);
+    m.setVisible(x.vis);
+    m.setColor(x.color);
+    m.setOpacity(x.opacity);
+    m.groupId = x.group;
+  }
+  state.modelGroups = st.groups.map((g) => ({ ...g }));
+  for (const m of viewer.models) { const g = state.modelGroups.find((x) => x.id === m.groupId); m.setGroupHidden(g ? !g.visible : false); }
+  // drawn lines first: station planes and the corridor may lie on them
+  drawnPaths.length = 0;
+  for (const l of st.lines) {
+    const g = makePath(l.name, l.pts);
+    Object.assign(l.p, { name: l.name, hidden: l.hidden, poly: g.poly, cum: g.cum, length: g.length, zs: g.zs });
+    drawnPaths.push(l.p);
+  }
+  if (st.corridor) corridor.set({ ...st.corridor, offsets: [...st.corridor.offsets] }); else corridor.clear();
+  corridorHits = null;
+  // section planes
+  viewer.clearPlanes();
+  for (const s of st.planes) {
+    const e = viewer.addPlane(s.axis === 'custom' ? 'x' : s.axis);
+    e.axis = s.axis;
+    e.axisVec.fromArray(s.axisVec);
+    e.plane.normal.fromArray(s.n);
+    e.plane.constant = s.c;
+    e.enabled = s.enabled;
+    if (!s.cut3d) e.cut3d = false;
+    if (s.boxPart) e.boxPart = s.boxPart;
+    if (s.station) e.station = { al: s.station.al, s: s.station.s, T: new THREE.Vector3().fromArray(s.station.T) };
+    if (s.anchor) e.anchor = new THREE.Vector3().fromArray(s.anchor);
+    viewer.updatePlane(e);
+  }
+  measure.restore(st.measures);
+  afterModelsChanged();
+  refreshVisibilityUi();
+  renderPlanes();
+  renderModels();
+  secViewer?.planesChanged?.();
+  projects.touch?.();
+}
+
+/** What changed between two snapshots, in words (for "Undid: …"). */
+function describeChange(a, b) {
+  const A = a.state, B = b.state, out = [];
+  const hid = (s) => s.models.reduce((n, x) => n + x.hidden.length, 0);
+  const dh = hid(B) - hid(A);
+  if (dh > 0) out.push(t('undo.hide', { n: fmtNum(dh) }));
+  else if (dh < 0) out.push(t('undo.show', { n: fmtNum(-dh) }));
+  const k = (s, f) => JSON.stringify(s.models.map(f));
+  if (k(A, (x) => [x.colors, x.opac]) !== k(B, (x) => [x.colors, x.opac])) out.push(t('undo.colours'));
+  if (k(A, (x) => [x.vis, x.color, x.opacity, x.group]) !== k(B, (x) => [x.vis, x.color, x.opacity, x.group]) || JSON.stringify(A.groups) !== JSON.stringify(B.groups)) out.push(t('undo.models'));
+  if (A.planes.length < B.planes.length) out.push(t('undo.addSection'));
+  else if (A.planes.length > B.planes.length) out.push(t('undo.removeSection'));
+  else if (JSON.stringify(A.planes.map((p) => [p.n, p.c, p.enabled, p.cut3d])) !== JSON.stringify(B.planes.map((p) => [p.n, p.c, p.enabled, p.cut3d]))) out.push(t('undo.moveSection'));
+  if (A.measures.length !== B.measures.length) out.push(t('undo.measure'));
+  if (JSON.stringify(A.lines.map((l) => [l.p.id, l.name, l.hidden, l.pts])) !== JSON.stringify(B.lines.map((l) => [l.p.id, l.name, l.hidden, l.pts]))) out.push(t('undo.line'));
+  if (JSON.stringify(A.corridor && [A.corridor.offsets, A.corridor.from, A.corridor.to]) !== JSON.stringify(B.corridor && [B.corridor.offsets, B.corridor.from, B.corridor.to])) out.push(t('undo.corridor'));
+  return out.join(', ') || t('undo.change');
+}
+
+const history = new History({
+  capture: captureState,
+  restore: restoreState,
+  describe: describeChange,
+  onChange: (canUndo, canRedo) => {
+    $('#undo-btn').disabled = !canUndo;
+    $('#redo-btn').disabled = !canRedo;
+  },
+});
+function doUndo() { const what = history.undo(); toast(what ? t('undo.undid', { what }) : t('undo.nothing')); }
+function doRedo() { const what = history.redo(); toast(what ? t('undo.redid', { what }) : t('undo.nothingRedo')); }
+$('#undo-btn').addEventListener('click', doUndo);
+$('#redo-btn').addEventListener('click', doRedo);
+// an action has (probably) happened: the history takes a snapshot once things have settled
+for (const ev of ['pointerup', 'keyup', 'change', 'click']) document.addEventListener(ev, () => history.touch(), true);
+viewer.addEventListener('planeschanged', () => history.touch());
+measure.addEventListener?.('change', () => history.touch());
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+  if (e.target.closest?.('input, textarea, select, .cm-editor, [contenteditable]')) return; // the field's own undo
+  const k = e.key.toLowerCase();
+  if (k === 'z' && !e.shiftKey) { e.preventDefault(); doUndo(); } else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); doRedo(); }
+});
+history.commit();
+
+window.onlineIfc = { viewer, state, openFiles, python, measure, views, walk, drawnPaths, projects, history, get secViewer() { return secViewer; } };
