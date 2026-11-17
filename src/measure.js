@@ -156,6 +156,17 @@ export class MeasureTool extends EventTarget {
     this.#emit();
   }
 
+  /** Puts back a list of finished measurements (undo, #67); the objects are the earlier ones. */
+  restore(items) {
+    for (const m of [...this.items]) this.#discard(m);
+    this.current = null;
+    for (const m of items) {
+      this.items.push(m);
+      this.#redraw(m);
+    }
+    this.#emit();
+  }
+
   remove(id) {
     const m = this.items.find((x) => x.id === id);
     if (m) this.#discard(m);

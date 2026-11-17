@@ -17,6 +17,8 @@ Vispecta is an open-source project by Rasmus Roien Molbaek (AGPL-3.0 licence). I
 ## Features
 The toolbar groups the functions: **View**, **Section**, **Visibility**, **Alignment** (stationing, cross sections, longitudinal profiles, drive along, draw a line), **Measure** and **Tools** (merge, compare, IDS check, quantity takeoff, Python). On small screens the side panels are drawers over the 3D view.
 
+**Undo / redo:** Ctrl+Z (Cmd+Z on Mac) or ↶ in the toolbar undoes the last change, Ctrl+Y / Ctrl+Shift+Z or ↷ redoes it (#67). It covers hidden and isolated elements, colours and transparency, models and groups switched on or off, section planes (added, moved, removed, 3D cut on/off), measurements, drawn lines and the corridor – up to 50 steps. The camera is not part of it (saved views cover that), and in a text field Ctrl+Z stays the field's own. Opening or removing a model starts the history again.
+
 
 ### Review
 - **Open files** (IFC2x3, IFC4, IFC4x3): drag and drop them anywhere in the window at any time, or click the drop area on the start screen / *Open IFC*. Dropped files are recognised by type: `.ifc` models are added to the view, `.bcf`/`.bcfzip` go to *Issues*, `.ids` opens the IDS check, and `.vispecta.json` opens a workspace.
@@ -223,6 +225,7 @@ Built with [three.js](https://threejs.org), [three-mesh-bvh](https://github.com/
 | `src/alignment.js` | IFC4x3 alignments and stationing |
 | `src/secview.js` | section window: live 2D cut of a plane, stepping, zoom, pop-out window |
 | `src/lineedit.js` | editing the points of a drawn line |
+| `src/history.js` | undo / redo from snapshots of the state |
 | `src/cutlines.js` | outline along the cut faces in 3D |
 | `src/ifc.js`, `src/model.js` | loading IFC, metadata and metadata editing (web-ifc) |
 | `src/python.js`, `src/python-worker.js` | Pyodide/IfcOpenShell worker and merge logic |
