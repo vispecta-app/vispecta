@@ -25,6 +25,11 @@ https://github.com/vispecta-app/vispecta/releases
   cut anything yet.
 
 ### Added
+- **Undo and redo.** Ctrl+Z (Cmd+Z) and ↶ in the toolbar undo the last change – hiding,
+  isolating, colours, models switched off, sections added, moved or removed, measurements, drawn
+  lines, the corridor; Ctrl+Y / Ctrl+Shift+Z and ↷ redo it. A message says what was undone. The
+  camera is not part of it, and opening or removing a model starts the history again.
+  ([#67](https://github.com/vispecta-app/vispecta/issues/67))
 - **Drawn lines in the model browser:** show/hide, rename, zoom to, edit the points and remove a
   line you have drawn. Editing: drag a point (snaps to the model), **+** adds one, right-click
   removes one, ✓ keeps / ✕ undoes. Cross sections and the corridor on the line follow.

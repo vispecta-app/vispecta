@@ -163,6 +163,7 @@ input[type='checkbox'], input[type='radio'] { accent-color: var(--accent); margi
   border: 1px solid transparent; border-radius: 6px; background: transparent; white-space: nowrap; font-weight: 500;
 }
 .toolbar > button:hover, .menu-btn:hover { background: var(--panel-2); border-color: var(--border); }
+.toolbar > button:disabled { opacity: .35; cursor: default; background: none; border-color: transparent; }
 .toolbar > button.on, .menu-btn.open { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 .toolbar > .btn.primary { margin-right: 2px; }
 select.lang { background: var(--panel-2); padding: 0 6px; }
