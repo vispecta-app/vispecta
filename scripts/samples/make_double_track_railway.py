@@ -1,25 +1,25 @@
 """
-Vispecta sample: a fictitious double-track railway for 180 km/h, 2.5 km, as IFC 4.3 (IFC4X3_ADD2),
-one file per discipline, plus a survey point cloud. Everything is generated; nothing is surveyed.
+Vispecta sample: a fictitious double-track railway for 180 km/h, 1 km (12+000 - 13+000), as IFC 4.3
+(IFC4X3_ADD2), one file per discipline, plus a survey point cloud. Everything is generated.
 
     pip install ifcopenshell ifcpatch numpy laspy[lazrs]
-    python scripts/samples/make_bn_dobbeltspor.py public/samples/bn-dobbeltspor
-    ALIGN_ONLY=1 python scripts/samples/make_bn_dobbeltspor.py public/samples/bn-dobbeltspor
+    python scripts/samples/make_double_track_railway.py public/samples/double-track-railway
+    ALIGN_ONLY=1 python scripts/samples/make_double_track_railway.py public/samples/double-track-railway
 
-The second run writes 01-Linjefoering.ifc (the alignments only); the first writes the other files
-and 00-Samlet.ifc (everything in one file, not used by the sample).
+The second run writes 01-Alignment.ifc (the alignments only); the first writes the other files and
+00-Combined.ifc (everything in one file, not used by the sample).
 
-Banedanmark norms the model follows (see public/samples/bn-dobbeltspor/README.md for the details):
+Banedanmark norms the model follows (see public/samples/double-track-railway/README.md):
   BN1-6-7   cross section (double track fs = 4.50 m, Bsk, Bt, Ut 2 x 0.20 m, Pb, 40 permille),
             transition wedges Loz = 17 m at the bridge (15.1, figure 12.1-1)
   BN1-11-1  ditches in fill (Bilag 1.1), fall >= 2 permille, wells with sand traps, lined outlet
   BN1-13-4  cable troughs over ground (12.7.1, table 12.7-1)
   BN1-59-5  railway bridge cross section and drainage (11.2)
-  BN1-154-3 frispormærker (f0 = 4.25 m)
   BN1-160-1 km marks every 200 m
   BN1-214-3 Sicat SX overhead contact line components
   Sporteknik / GAB Spor 0-1: S99 sleepers, 60E1 rails inclined 1:40
 Assumptions where a norm gives no value are written in the property sets ("Antaget").
+The crossover code (XO_*) is left in for later use; XO_ZONE is empty, so it has no effect.
 """
 import math, sys
 import ifcopenshell
@@ -30,7 +30,7 @@ import ifcopenshell.guid
 import os
 OUT_DIR = sys.argv[1] if len(sys.argv) > 1 else 'bn-dobbeltspor'
 os.makedirs(OUT_DIR, exist_ok=True)
-OUT = os.path.join(OUT_DIR, '00-Samlet.ifc')
+OUT = os.path.join(OUT_DIR, '00-Combined.ifc')
 ALIGN_ONLY = os.environ.get('ALIGN_ONLY') == '1'
 
 V = 180
@@ -57,7 +57,7 @@ MT = 0.20                                        # topsoil on the embankment slo
 XO_S, XO_R, XO_A = 330.0, 500.0, math.atan(1 / 12)
 XO_X1 = XO_R * math.sin(XO_A); XO_OFF = XO_R * (1 - math.cos(XO_A))
 XO_LS = (FS - 2 * XO_OFF) / math.sin(XO_A); XO_X2 = XO_X1 + XO_LS * math.cos(XO_A); XO_X3 = XO_X2 + XO_X1
-XO_ZONE = (XO_S - 3.0, XO_S + XO_X3 + 3.0)       # long turnout sleepers and a level ballast bed between the tracks
+XO_ZONE = (-1e9, -1e9)                          # no crossover in this sample
 def xo_v(x):
     # lateral position (left +) of the crossover centre line x m after its start on track 1, and its angle
     if x <= XO_X1:
@@ -88,7 +88,8 @@ CT_RAIL, CT_W, CT_H, CT_EMBED = 3.25, 0.36, 0.30, 0.15   # distance to rail, tro
 RAIL_FOOT = 0.075               # half the 60E1 foot width: the distance to the rail is taken from its outer edge
 CT_IN = 4.10                    # inner face of the trough from the track centre (>= 0.75 + 0.075 + 3.25 = 4.075, rounded up)
 CT_WALL, CT_LID = 0.06, 0.04
-R, D_CANT, LCL = 2000.0, 0.110, 180.0
+R, D_CANT, LCL = 2000.0, 0.110, 150.0
+L_IN, L_ARC = 300.0, 250.0         # line before the curve (with the bridge), arc length
 START_STATION = 12000.0
 STEP = 5.0
 TRACKS = [0.0, -FS]             # lateral position of the track centres from track 1 (left +)
@@ -96,21 +97,21 @@ VR = -FS / 2                    # the middle between the tracks: top of the plan
 
 f = ifcopenshell.api.run('project.create_file', version='IFC4X3_ADD2')
 run = lambda cmd, **kw: ifcopenshell.api.run(cmd, f, **kw)
-project = run('root.create_entity', ifc_class='IfcProject', name='Dobbeltsporet bane 180 km/h – BN1-6-7')
+project = run('root.create_entity', ifc_class='IfcProject', name='Double-track railway 180 km/h – Banedanmark BN1-6-7')
 run('unit.assign_unit', length={'is_metric': True, 'raw': 'METERS'})
 ctx = run('context.add_context', context_type='Model')
 body = run('context.add_context', context_type='Model', context_identifier='Body', target_view='MODEL_VIEW', parent=ctx)
 crs = f.createIfcProjectedCRS('EPSG:25832', 'ETRS89 / UTM zone 32N', 'ETRS89', 'DVR90', 'UTM', '32N', None)
 f.createIfcMapConversion(ctx, crs, 680000.0, 6150000.0, 0.0, 1.0, 0.0, None)
 
-site = run('root.create_entity', ifc_class='IfcSite', name='Strækning')
-rail = run('root.create_entity', ifc_class='IfcRailway', name='Ny bane, dobbeltsporet, 180 km/h')
-part_t1 = run('root.create_entity', ifc_class='IfcRailwayPart', name='Spor 1 – overbygning', predefined_type='TRACK')
-part_t2 = run('root.create_entity', ifc_class='IfcRailwayPart', name='Spor 2 – overbygning', predefined_type='TRACK')
-part_sub = run('root.create_entity', ifc_class='IfcRailwayPart', name='Underbygning og jordarbejder', predefined_type='SUBSTRUCTURE')
-part_drain = run('root.create_entity', ifc_class='IfcRailwayPart', name='Afvanding (BN1-11)', predefined_type='USERDEFINED')
-part_cable = run('root.create_entity', ifc_class='IfcRailwayPart', name='Kabelanlæg langs sporet (BN1-13)', predefined_type='LINESIDE')
-part_ocs = run('root.create_entity', ifc_class='IfcRailwayPart', name='Køreledningsanlæg (Sicat SX, 25 kV 50 Hz)', predefined_type='ABOVETRACK')
+site = run('root.create_entity', ifc_class='IfcSite', name='Line section 12+000–13+000')
+rail = run('root.create_entity', ifc_class='IfcRailway', name='New double-track railway, 180 km/h')
+part_t1 = run('root.create_entity', ifc_class='IfcRailwayPart', name='Track 1 – superstructure', predefined_type='TRACK')
+part_t2 = run('root.create_entity', ifc_class='IfcRailwayPart', name='Track 2 – superstructure', predefined_type='TRACK')
+part_sub = run('root.create_entity', ifc_class='IfcRailwayPart', name='Substructure and earthworks', predefined_type='SUBSTRUCTURE')
+part_drain = run('root.create_entity', ifc_class='IfcRailwayPart', name='Drainage (BN1-11)', predefined_type='USERDEFINED')
+part_cable = run('root.create_entity', ifc_class='IfcRailwayPart', name='Lineside cables (BN1-13)', predefined_type='LINESIDE')
+part_ocs = run('root.create_entity', ifc_class='IfcRailwayPart', name='Overhead contact line (Sicat SX, 25 kV 50 Hz)', predefined_type='ABOVETRACK')
 for part, pt, ot in ((part_t1, 'TRACK', None), (part_t2, 'TRACK', None), (part_sub, 'SUBSTRUCTURE', None), (part_drain, 'USERDEFINED', 'DRAINAGE'), (part_cable, 'LINESIDE', None), (part_ocs, 'ABOVETRACK', None)):
     part.PredefinedType, part.ObjectType, part.UsageType = pt, ot, 'LONGITUDINAL'
 run('aggregate.assign_object', relating_object=project, products=[site])
@@ -137,7 +138,7 @@ def integrate(segs, x, y, th):
     return starts
 
 # ------------------------------------------------------------------ track 1
-segs1 = [('LINE', 600.0, 0.0, 0.0), ('CLOTHOID', LCL, 0.0, R), ('CIRCULARARC', 800.0, R, R), ('CLOTHOID', LCL, R, 0.0), ('LINE', 740.0, 0.0, 0.0)]
+segs1 = [('LINE', L_IN, 0.0, 0.0), ('CLOTHOID', LCL, 0.0, R), ('CIRCULARARC', L_ARC, R, R), ('CLOTHOID', LCL, R, 0.0), ('LINE', 1000.0 - L_IN - 2 * LCL - L_ARC, 0.0, 0.0)]
 TH0 = 0.35
 TOTAL1 = sum(s[1] for s in segs1)
 # heading change from the start along track 1 (left turn +), for the length of the parallel track
@@ -183,7 +184,7 @@ y2 = 0.0 - FS * math.cos(TH0)
 # vertical of track 1 (height of the lower rail): +5 ‰, crest R 20 000, -6 ‰, sag R 20 000, +3 ‰
 RV = 20000.0
 g = [0.005, -0.006, 0.003]
-pvi = [900.0, 1900.0]
+pvi = [500.0, 800.0]
 vsegs1 = []
 s_prev, h_prev = 0.0, 25.0
 for i in (1, 2):
@@ -203,8 +204,8 @@ def height(s):   # track 1 profile; track 2 follows it at the same section
     kind, s0, L, h0, g0, g1 = vsegs1[-1]
     return h0 + g0 * L
 
-csegs1 = [('CONSTANTCANT', 0.0, 600.0, 0.0, 0.0), ('LINEARTRANSITION', 600.0, LCL, 0.0, D_CANT), ('CONSTANTCANT', 600.0 + LCL, 800.0, D_CANT, D_CANT),
-          ('LINEARTRANSITION', 1400.0 + LCL, LCL, D_CANT, 0.0), ('CONSTANTCANT', 1400.0 + 2 * LCL, TOTAL1 - 1400.0 - 2 * LCL, 0.0, 0.0)]
+csegs1 = [('CONSTANTCANT', 0.0, L_IN, 0.0, 0.0), ('LINEARTRANSITION', L_IN, LCL, 0.0, D_CANT), ('CONSTANTCANT', L_IN + LCL, L_ARC, D_CANT, D_CANT),
+          ('LINEARTRANSITION', L_IN + LCL + L_ARC, LCL, D_CANT, 0.0), ('CONSTANTCANT', L_IN + 2 * LCL + L_ARC, TOTAL1 - L_IN - 2 * LCL - L_ARC, 0.0, 0.0)]
 def cant(s):
     for kind, s0, L, d0, d1 in csegs1:
         if s <= s0 + L + 1e-9:
@@ -236,10 +237,10 @@ def build_alignment(name, segs, x0, y0, smap):
 align1, st1 = build_alignment('Spor 1', segs1, 0.0, 0.0, lambda s: s)
 align2, st2 = build_alignment('Spor 2', segs2, x2, y2, s2_of)
 if ALIGN_ONLY:
-    project.Name = 'Linjeføring – dobbeltsporet bane 180 km/h (BN1-6-7)'
+    project.Name = 'Alignment – double-track railway 180 km/h (BN1-6-7)'
     for p_ in (part_t1, part_t2, part_sub, part_drain, part_cable, part_ocs):
         ifcopenshell.api.run('root.remove_product', f, product=p_)
-    f.write(os.path.join(OUT_DIR, '01-Linjefoering.ifc'))
+    f.write(os.path.join(OUT_DIR, '01-Alignment.ifc'))
     print('written alignments')
     sys.exit(0)
 
@@ -361,7 +362,7 @@ def terrain_at(s, v):
     return -stream_dip(s) + height(s) - 2.6 - 0.9 * math.sin(2 * math.pi * s / 760.0) - 0.4 * math.sin(2 * math.pi * s / 230.0) + 0.012 * v
 
 # ------------------------------------------------------------------ meshes
-stations = sorted(set([i * STEP for i in range(int(TOTAL1 / STEP))] + [TOTAL1, BR_S0, BR_S1, BR_S0 - LOZ, BR_S1 + LOZ, BR_S0 - FILTER_W, BR_S1 + FILTER_W, XO_ZONE[0], XO_ZONE[1], XO_ZONE[0] - 2.0, XO_ZONE[1] + 2.0, 198.0, 212.0]))
+stations = sorted(set([i * STEP for i in range(int(TOTAL1 / STEP))] + [TOTAL1, BR_S0, BR_S1, BR_S0 - LOZ, BR_S1 + LOZ, BR_S0 - FILTER_W, BR_S1 + FILTER_W, 198.0, 212.0]))
 frames = [frame(basis1, s) for s in stations]
 secs = [section(s, lambda v, s=s: terrain_at(s, v)) for s in stations]
 
@@ -936,9 +937,9 @@ def loft(key, sts=br_st, frs=br_fr, secs_=br_secs):
     for a, b, c in ear_clip(secs_[-1][key]): tris.append((last + a, last + b, last + c))
     return pts, tris
 
-bridge_fac = run('root.create_entity', ifc_class='IfcBridge', name='Jernbanebro over vandløb, st. 12+195–12+215', predefined_type='SLAB_BRIDGE')
-br_super = run('root.create_entity', ifc_class='IfcBridgePart', name='Overbygning (brodæk)', predefined_type='SUPERSTRUCTURE')
-br_sub = run('root.create_entity', ifc_class='IfcBridgePart', name='Underbygning (landfæster)', predefined_type='SUBSTRUCTURE')
+bridge_fac = run('root.create_entity', ifc_class='IfcBridge', name='Railway bridge over a stream, 12+195–12+215', predefined_type='SLAB_BRIDGE')
+br_super = run('root.create_entity', ifc_class='IfcBridgePart', name='Superstructure (deck)', predefined_type='SUPERSTRUCTURE')
+br_sub = run('root.create_entity', ifc_class='IfcBridgePart', name='Substructure (abutments)', predefined_type='SUBSTRUCTURE')
 for bp_ in (br_super, br_sub): bp_.UsageType = 'LONGITUDINAL'
 run('aggregate.assign_object', relating_object=site, products=[bridge_fac])
 run('aggregate.assign_object', relating_object=bridge_fac, products=[br_super, br_sub])
@@ -1034,6 +1035,7 @@ print('wedges: at the abutments the stable gravel goes', round(wedge_depth(BR_S0
 # ------------------------------------------------------------------ bridge: stairs and cable ducts in the edge beams
 CUR[0] = '05-Bro'
 st_stair = style('Trappe (beton)', (0.70, 0.70, 0.68))
+st_steel_hr = style('Håndliste (stål, galvaniseret)', (0.62, 0.64, 0.66))
 for s_st, nm in ((BR_S0 - 3.0, 'nord'), (BR_S1 + 3.0, 'syd')):
     sc = section(s_st, lambda v, s=s_st: terrain_at(s_st, v))
     fr = frame(basis1, s_st)
@@ -1046,6 +1048,15 @@ for s_st, nm in ((BR_S0 - 3.0, 'nord'), (BR_S1 + 3.0, 'syd')):
             steps.append(prism([(min(v0, v1_) - B[0], -0.5), (max(v0, v1_) - B[0], -0.5), (max(v0, v1_) - B[0], 0.5), (min(v0, v1_) - B[0], 0.5)], zt_ - 0.30, zt_ - r_ * 0 , fr, B[0]))
         element('IfcStair', f'Trappe {nm} {sn} (servicepassage → terræn, {n} trin)', merge(*steps), br_sub, st_stair, 'STRAIGHT_RUN_STAIR',
                 psets={'Vispecta_BN1-59-5': {'Norm': 'BN1-59-5 11.2.2: trappetrin ved højdeforskel >= 0,5 m', 'Trin': n, 'Stigning_m': round(r_, 3), 'Grund_m': round(abs(g_), 3)}})
+        # handrails on both sides: 0.90 m above the nosings, posts at every third step and at the ends
+        parts_hr = []
+        for a_ in (-0.55, 0.55):
+            top_ = (B[0], B[1] + 0.90); bot_ = (B[0] + g_ * n, B[1] - r_ * (n - 1) + 0.90)
+            parts_hr.append(cyl(w3(fr, top_[0], a_, top_[1]), w3(fr, bot_[0], a_, bot_[1]), 0.022, 8))
+            for k in list(range(0, n, 3)) + [n - 1]:
+                vk = B[0] + g_ * (k + 0.5); zk = B[1] - r_ * k
+                parts_hr.append(cyl(w3(fr, vk, a_, zk), w3(fr, vk, a_, zk + 0.90), 0.02, 6))
+        element('IfcRailing', f'Håndliste trappe {nm} {sn} (h = 0,90 m, begge sider)', merge(*parts_hr), br_sub, st_steel_hr, 'HANDRAIL')
 CUR[0] = '07-El-og-kabler'
 st_duct = style('Kabelrør (PE)', (0.95, 0.55, 0.10))
 for (vkb, ktk, sg, sn) in ((vl_kb, 0, 1, 'venstre'), (vr_kb, 1, -1, 'højre')):
@@ -1056,70 +1067,10 @@ for (vkb, ktk, sg, sn) in ((vl_kb, 0, 1, 'venstre'), (vr_kb, 1, -1, 'højre')):
             pts_.append(w3(frx, vkb + sg * dv, 0, kt - 0.25))
         element('IfcCableCarrierSegment', f'Kabelkanal i kantbjælke {sn} nr. {j + 1} (PE ø110)', cyl(pts_[0], pts_[1], 0.055, 12), part_cable, st_duct, 'CONDUITSEGMENT')
 
-# ------------------------------------------------------------------ crossover: two turnouts 60E1-500-1:12 with point heating
-CUR[0] = '02-Spor'
-part_xo = run('root.create_entity', ifc_class='IfcRailwayPart', name='Sporskifteforbindelse spor 1 → spor 2 (2 × 60E1-500-1:12)', predefined_type='TURNOUTTRACK')
-part_xo.UsageType = 'LONGITUDINAL'
-run('aggregate.assign_object', relating_object=rail, products=[part_xo]); run('geometry.edit_object_placement', product=part_xo)
 def rail_section(s_, c, u):
     sg = 1 if u < 0 else -1
     a_ = math.atan(RAIL_INCL); ca, sa = math.cos(a_), math.sin(a_)
     return [track_pt(s_, c, u + px * ca + sg * py * sa, RAIL_H - (-sg * px * sa + py * ca)) for px, py in RAIL_PROFILE][::-1]
-def div_rail(side, x0, x1, step=1.0):
-    xs = [x0 + (x1 - x0) * k / max(1, math.ceil((x1 - x0) / step)) for k in range(max(1, math.ceil((x1 - x0) / step)) + 1)]
-    secs_ = []
-    for x in xs:
-        vc, th = xo_v(x)
-        secs_.append({'r': rail_section(XO_S + x, vc, side * RHD / 2 / math.cos(th))})
-    return gloft('r', xs, [frame(basis1, XO_S + x) for x in xs], secs_)
-x_sep = math.sqrt(2 * XO_R * 0.16)           # where the closure rail is 0.16 m off the stock rail
-BLADE = 16.0
-xo_ps = {'Vispecta_Spor': {'Type': '60E1-500-1:12 (forenklet geometri: R = 500 m til 1:12, ret mellemstykke, R = 500 m tilbage)',
-                           'Sporafstand': FS, 'Laengde_forbindelse_m': round(XO_X3, 2), 'Hastighed_afvigende_spor': '60 km/h (antaget)'}}
-st_rail = rail_style
-element('IfcTrackElement', 'Sporskifte 1: tunge (krum, venstre)', div_rail(-1, 0.5, BLADE), part_xo, st_rail, 'HALF_SET_OF_BLADES', psets=xo_ps)
-element('IfcRail', 'Sporskifteforbindelse: skinne venstre', div_rail(-1, BLADE, XO_X3 - x_sep), part_xo, st_rail, 'RAIL')
-element('IfcRail', 'Sporskifteforbindelse: skinne højre', div_rail(1, x_sep, XO_X3 - BLADE), part_xo, st_rail, 'RAIL')
-element('IfcTrackElement', 'Sporskifte 2: tunge (krum, højre)', div_rail(1, XO_X3 - BLADE, XO_X3 - 0.5), part_xo, st_rail, 'HALF_SET_OF_BLADES')
-x_f1 = XO_R * math.sin(math.acos(1 - 1.5 / XO_R)); x_f2 = XO_X3 - x_f1
-st_frog = style('Krydsning (manganstål)', (0.30, 0.30, 0.32))
-for nm, xf, vf in (('Sporskifte 1: krydsning 1:12', x_f1, -RHD / 2), ('Sporskifte 2: krydsning 1:12', x_f2, -FS + RHD / 2)):
-    frf = frame(basis1, XO_S + xf); zs_ = track_pt(XO_S + xf, 0.0, 0.0, RAIL_H + PAD)[1]
-    element('IfcTrackElement', nm, prism([(-0.17, -2.0), (0.17, -2.0), (0.17, 2.0), (-0.17, 2.0)], zs_, zs_ + PAD + RAIL_H - 0.002, frf, vf), part_xo, st_frog, 'FROG')
-for nm, xf, vc_ in (('Sporskifte 1: kontraskinne', x_f1, RHD / 2 - 0.08), ('Sporskifte 2: kontraskinne', x_f2, -FS - RHD / 2 + 0.08)):
-    frf = frame(basis1, XO_S + xf); zs_ = track_pt(XO_S + xf, 0.0, 0.0, RAIL_H + PAD)[1]
-    element('IfcRail', nm, prism([(-0.03, -3.0), (0.03, -3.0), (0.03, 3.0), (-0.03, 3.0)], zs_ + 0.03, zs_ + PAD + RAIL_H + 0.04, frf, vc_), part_xo, st_rail, 'USERDEFINED')
-st_pm = style('Drivmaskine', (0.85, 0.72, 0.12))
-for nm, x, v_ in (('Sporskifte 1: drivmaskine', 1.5, 1.95), ('Sporskifte 2: drivmaskine', XO_X3 - 1.5, -FS - 1.95)):
-    frp = frame(basis1, XO_S + x); zs_ = track_pt(XO_S + x, 0.0, 0.0, RAIL_H + PAD)[1]
-    element('IfcActuator', nm, prism([(-0.6, -0.25), (0.6, -0.25), (0.6, 0.25), (-0.6, 0.25)], zs_ - 0.05, zs_ + 0.25, frp, v_), part_xo, st_pm, 'ELECTRICACTUATOR')
-# frispormærker (BN1-154-3, 15): midway between the tracks where their centres are f0 = 4.25 m apart
-F0 = 4.25
-x_m = XO_R * math.sin(math.acos(1 - (FS - F0) / XO_R))
-st_fsm = style('Frispormærke (hvid)', (0.97, 0.97, 0.97))
-for nm, x, vm_ in (('Frispormærke ved sporskifte 2 (spor 2 / forbindelse)', x_m, (xo_v(x_m)[0] - FS) / 2),
-                   ('Frispormærke ved sporskifte 1 (spor 1 / forbindelse)', XO_X3 - x_m, xo_v(XO_X3 - x_m)[0] / 2)):
-    frp = frame(basis1, XO_S + x); zs_ = track_pt(XO_S + x, 0.0, 0.0, RAIL_H + PAD)[1] - CRIB
-    element('IfcSign', nm, prism([(-0.10, -0.10), (0.10, -0.10), (0.10, 0.10), (-0.10, 0.10)], zs_ - 0.30, zs_ + 0.25, frp, vm_), part_xo, st_fsm, 'MARKER',
-            psets={'Vispecta_BN1-154-3': {'Norm': 'BN1-154-3 afsnit 15 og tabel 14.1', 'f0': F0, 'Station': round(START_STATION + XO_S + x, 2),
-                                          'Placering': 'Midt mellem sporene, hvor sporafstanden er f0'}})
-# point heating (electric): heating rods on the stock rails in the switch, a cabinet on the banket, a feed cable
-CUR[0] = '07-El-og-kabler'
-st_heat = style('Sporskiftevarme', (0.80, 0.10, 0.10)); st_cab = style('Styreskab', (0.55, 0.60, 0.62)); st_cbl = style('Kabel', (0.10, 0.10, 0.10))
-for nm, xa, xb, c_, v_cab, x_cab in (('Sporskifte 1', -1.0, BLADE + 1.0, 0.0, TRACKS[0] + 4.75, -5.0), ('Sporskifte 2', XO_X3 - BLADE - 1.0, XO_X3 + 1.0, -FS, TRACKS[1] - 4.75 + 0.0, XO_X3 + 5.0)):
-    rods = []
-    for u_ in (-RHD / 2 - 0.09, RHD / 2 + 0.09):
-        za = track_pt(XO_S + xa, c_, 0, RAIL_H + PAD)[1] + 0.025; zb_ = track_pt(XO_S + xb, c_, 0, RAIL_H + PAD)[1] + 0.025
-        rods.append(cyl(w3(frame(basis1, XO_S + xa), c_ - u_, 0, za), w3(frame(basis1, XO_S + xb), c_ - u_, 0, zb_), 0.012, 6))
-    element('IfcElectricAppliance', f'{nm}: sporskiftevarme (elektrisk, 2 × {xb - xa:.0f} m)', merge(*rods), part_xo, st_heat, 'USERDEFINED', 'SPORSKIFTEVARME',
-            psets={'Vispecta_El': {'Type': 'Elektrisk sporskiftevarme på stokskinner og tunger', 'Effekt_kW': 6.0, 'Styring': 'Vejrstation / styreskab'}})
-    sc_c = section(XO_S + x_cab, lambda v, s=XO_S + x_cab: terrain_at(XO_S + x_cab, v)); frc = frame(basis1, XO_S + x_cab)
-    zg = sc_c['zp'](v_cab)
-    element('IfcElectricDistributionBoard', f'{nm}: styreskab for sporskiftevarme', merge(
-        prism([(-0.3, -0.5), (0.3, -0.5), (0.3, 0.5), (-0.3, 0.5)], zg - 0.6, zg + 0.1, frc, v_cab),
-        prism([(-0.2, -0.4), (0.2, -0.4), (0.2, 0.4), (-0.2, 0.4)], zg + 0.1, zg + 1.5, frc, v_cab)), part_cable, st_cab, 'DISTRIBUTIONBOARD')
-    p_a = w3(frc, v_cab, 0, zg - 0.2); p_b = w3(frame(basis1, XO_S + xa), c_ + (RHD / 2 + 0.09) * (1 if v_cab > c_ else -1), 0, track_pt(XO_S + xa, c_, 0, RAIL_H + PAD)[1] - 0.25)
-    element('IfcCableSegment', f'{nm}: forsyningskabel til sporskiftevarme', cyl(p_a, p_b, 0.015, 6), part_cable, st_cbl, 'CABLESEGMENT')
 
 # ------------------------------------------------------------------ rail welds (aluminothermic, every 120 m)
 CUR[0] = '02-Spor'
@@ -1170,9 +1121,8 @@ for km_ in range(int(START_STATION), int(START_STATION + TOTAL1) + 1, 200):
 CUR[0] = '09-Landskab'
 TREES = [(120, 30, 'Stilkeg (Quercus robur)', 14), (128, 37, 'Stilkeg (Quercus robur)', 12), (141, 31, 'Rødel (Alnus glutinosa)', 10),
          (612, -34, 'Ask (Fraxinus excelsior)', 13), (624, -41, 'Ask (Fraxinus excelsior)', 11),
-         (1310, 34, 'Bøg (Fagus sylvatica)', 16), (1322, 41, 'Bøg (Fagus sylvatica)', 15), (1331, 30, 'Bøg (Fagus sylvatica)', 13), (1346, 37, 'Birk (Betula pendula)', 11),
-         (1962, -36, 'Rødel (Alnus glutinosa)', 10), (1976, -30, 'Rødel (Alnus glutinosa)', 9),
-         (2311, 33, 'Stilkeg (Quercus robur)', 15), (2321, 42, 'Birk (Betula pendula)', 12), (2336, 29, 'Stilkeg (Quercus robur)', 13)]
+         (880, 34, 'Bøg (Fagus sylvatica)', 16), (892, 41, 'Bøg (Fagus sylvatica)', 15), (905, 30, 'Birk (Betula pendula)', 11),
+         (958, -36, 'Rødel (Alnus glutinosa)', 10), (972, -30, 'Rødel (Alnus glutinosa)', 9)]
 def sphere(c, r, nlat=5, nlon=10):
     pts = [(c[0], c[1], c[2] + r)]
     for i in range(1, nlat):
@@ -1213,7 +1163,7 @@ for i in range(22):
     wtris += [(a0, a0 + 2, a0 + 3), (a0, a0 + 3, a0 + 1)]
 element('IfcGeographicElement', 'Vandløb (vandspejl)', (wpts, wtris), site, style('Vand', (0.35, 0.60, 0.85)), 'USERDEFINED', 'VANDLØB', closed=False,
         psets={'Vispecta_Landskab': {'Bundbredde_m': b_, 'Dybde_m': d_, 'Anlaeg': '1:2', 'Vanddybde_m': 0.30}})
-print(f'crossover: {XO_X3:.2f} m long, frogs at x = {x_f1:.2f} / {x_f2:.2f} m, frispormærker at x = {x_m:.2f} / {XO_X3 - x_m:.2f} m; welds {nw}; km marks {nkm}; trees {len(TREES)}')
+print(f'welds {nw}; km marks {nkm}; trees {len(TREES)}')
 
 # ------------------------------------------------------------------ sleepers (one type, mapped geometry)
 # B99-type monoblock concrete sleeper as a plain box 2.60 x 0.30 x 0.22 m, every 0.625 m along each
@@ -1315,26 +1265,7 @@ for k, (c, part, total, to_s1) in enumerate(((TRACKS[0], part_t1, TOTAL1, lambda
     all_sleepers += occ
     count[k + 1] = (len(occ), round(SL_SPACING / 2 + (len(occ) - 1) * SL_SPACING, 3), round(total, 3))
 f.createIfcRelDefinesByType(ifcopenshell.guid.new(), None, None, None, all_sleepers, sl_type)
-# long turnout sleepers (simplified boxes 7.00 x 0.26 x 0.206 m under both tracks) in the crossover
-LT = TRACKS[0] + SL_LEN / 2 - (TRACKS[1] - SL_LEN / 2)
-lt_rep = f.createIfcShapeRepresentation(body, 'Body', 'Tessellation', [tfs(box(-LT / 2, LT / 2, -0.13, 0.13, -SL_H, 0.0))])
-f.createIfcStyledItem(lt_rep.Items[0], [f.createIfcSurfaceStyle('Sporskiftesvelle', 'BOTH', [f.createIfcSurfaceStyleShading(f.createIfcColourRgb(None, 0.62, 0.62, 0.60), 0.0)])], None)
-lt_map = f.createIfcRepresentationMap(f.createIfcAxis2Placement3D(o3, None, None), lt_rep)
-lt_type = run('root.create_entity', ifc_class='IfcTrackElementType', name=f'Sporskiftesvelle beton (forenklet, {LT:.2f} m)', predefined_type='SLEEPER')
-lt_type.RepresentationMaps = [lt_map]
-lt_occ = []
-x_ = XO_ZONE[0] + 0.3
-while x_ <= XO_ZONE[1] - 0.3:
-    px, py, tx, ty = frame(basis1, x_)
-    v0, z0 = track_pt(x_, VR, 0.0, RAIL_H + PAD)
-    pl = f.createIfcLocalPlacement(site_pl, f.createIfcAxis2Placement3D(f.createIfcCartesianPoint((px - ty * v0, py + tx * v0, z0)), f.createIfcDirection((0.0, 0.0, 1.0)), f.createIfcDirection((-ty, tx, 0.0))))
-    shape = f.createIfcProductDefinitionShape(None, None, [f.createIfcShapeRepresentation(body, 'Body', 'MappedRepresentation', [f.createIfcMappedItem(lt_map, op)])])
-    lt_occ.append(f.createIfcTrackElement(ifcopenshell.guid.new(), None, f'Sporskiftesvelle nr. {len(lt_occ) + 1}', None, None, pl, shape, f'SP-{len(lt_occ) + 1:03d}', 'SLEEPER'))
-    x_ += 0.60
-f.createIfcRelContainedInSpatialStructure(ifcopenshell.guid.new(), None, None, None, lt_occ, part_xo)
-f.createIfcRelDefinesByType(ifcopenshell.guid.new(), None, None, None, lt_occ, lt_type)
-FAG.setdefault('02-Spor', []).extend(lt_occ)
-print('turnout sleepers', len(lt_occ))
+
 print('sleepers per track (count, last at, track length):', count, '| triangles per sleeper', ntri)
 
 f.write(OUT)
@@ -1344,7 +1275,7 @@ print('written', OUT)
 import numpy as np, laspy
 rng = np.random.default_rng(7)
 fr_s = np.array([frame(basis1, float(x)) for x in range(int(TOTAL1) + 2)])
-N = 420000
+N = int(168 * TOTAL1)                                   # about 1.5 points per m2
 S = rng.uniform(0, TOTAL1, N); Vv = rng.uniform(-55.0, 50.0, N)
 Z = np.array([terrain_at(a, b) for a, b in zip(S, Vv)]) + rng.normal(0, 0.015, N)
 cls = np.full(N, 2, np.uint8)
@@ -1382,13 +1313,14 @@ hdr = laspy.LasHeader(point_format=3, version='1.2'); hdr.scales = [0.001] * 3; 
 las = laspy.LasData(hdr)
 las.x, las.y, las.z = X[order], Y[order], Z[order]; las.classification = C[order]
 las.red, las.green, las.blue = rgb[order, 0], rgb[order, 1], rgb[order, 2]; las.intensity = inten[order]
-las.write(os.path.join(OUT_DIR, '10-Opmaaling.laz'))
+las.write(os.path.join(OUT_DIR, '10-Survey.laz'))
 print('point cloud', len(C), 'points', dict(zip(*np.unique(C, return_counts=True))))
 
 # ------------------------------------------------------------------ one IFC file per discipline
 import ifcpatch.recipes.ExtractElements as EE
-TITLES = {'02-Spor': 'Spor', '03-Jord': 'Jord og underbygning', '04-Afvanding': 'Afvanding', '05-Bro': 'Bro', '06-Koereledning': 'Køreledning',
-          '07-El-og-kabler': 'El og kabler', '08-Terraen': 'Terræn', '09-Landskab': 'Landskab (træer og vandløb)'}
+TITLES = {'02-Spor': ('02-Track', 'Track'), '03-Jord': ('03-Earthworks', 'Earthworks and substructure'), '04-Afvanding': ('04-Drainage', 'Drainage'),
+          '05-Bro': ('05-Bridge', 'Bridge'), '06-Koereledning': ('06-Overhead-line', 'Overhead contact line'),
+          '07-El-og-kabler': ('07-Cables', 'Cables'), '08-Terraen': ('08-Terrain', 'Terrain'), '09-Landskab': ('09-Landscape', 'Landscape (trees and the stream)')}
 for fag, els in sorted(FAG.items()):
     pt = EE.Patcher(f, None, query='IfcNothing')
     pt.contained_ins = {}; pt.aggregates = {}; pt.new = ifcopenshell.file(schema_version=f.schema_version)
@@ -1396,8 +1328,9 @@ for fag, els in sorted(FAG.items()):
     pt.add_element(f.by_type('IfcProject')[0])
     for el in els: pt.add_element(el)
     pt.create_spatial_tree()
-    pt.new.by_type('IfcProject')[0].Name = f'{TITLES.get(fag, fag)} – dobbeltsporet bane 180 km/h (BN1-6-7)'
-    pt.new.write(os.path.join(OUT_DIR, f'{fag}.ifc'))
+    fn, title = TITLES[fag]
+    pt.new.by_type('IfcProject')[0].Name = f'{title} – double-track railway 180 km/h (BN1-6-7)'
+    pt.new.write(os.path.join(OUT_DIR, f'{fn}.ifc'))
     print('written', fag, len(els), 'elements')
 
 mid = section(1000.0, lambda v: terrain_at(1000.0, v))

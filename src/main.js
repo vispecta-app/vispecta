@@ -227,9 +227,9 @@ const SAMPLES = {
     focus: { station: 6083, back: 120, side: 90, up: 70 },
   },
   rail: {
-    dir: 'samples/bn-dobbeltspor/',
-    files: ['01-Linjefoering', '02-Spor', '03-Jord', '04-Afvanding', '05-Bro', '06-Koereledning', '07-El-og-kabler', '08-Terraen', '09-Landskab'],
-    clouds: ['10-Opmaaling.laz'],
+    dir: 'samples/double-track-railway/',
+    files: ['01-Alignment', '02-Track', '03-Earthworks', '04-Drainage', '05-Bridge', '06-Overhead-line', '07-Cables', '08-Terrain', '09-Landscape'],
+    clouds: ['10-Survey.laz'],
     groups: [['samples.grpTrack', /^0[1267]-/], ['samples.grpCivil', /^0[345]-/], ['samples.grpLand', /^0[89]-/]],
     // the bridge at 12+195–12+215, from the north-west, a little above the line
     focus: { station: 12205, back: 28, side: 30, up: 9 },
