@@ -505,6 +505,36 @@
             <label class="field" data-i18n-title="ann.angleTitle"><span data-i18n="ann.angle"></span><input id="ann-angle" type="number" min="1" max="89" step="1" value="10" /></label>
             <label class="field" data-i18n-title="ann.minDistTitle"><span data-i18n="ann.minDist"></span><input id="ann-mindist" type="number" min="0" step="0.05" value="0" /></label>
           </div>
+          <details class="ann-format" id="ann-format">
+            <summary data-i18n="ann.format"></summary>
+            <div class="annot-row">
+              <label class="chk"><input type="checkbox" id="ann-row-off" checked /> <span data-i18n="ann.offset"></span></label>
+              <label class="chk"><input type="checkbox" id="ann-row-h" checked /> <span data-i18n="ann.height"></span></label>
+              <label class="chk"><input type="checkbox" id="ann-row-dist" /> <span data-i18n="ann.dist"></span></label>
+              <label class="field"><span data-i18n="ann.decSign"></span>
+                <select id="ann-dec"><option value="auto" data-i18n="ann.decAuto"></option><option value=".">1.250</option><option value=",">1,250</option></select></label>
+            </div>
+            <table class="ann-fmt-table">
+              <tr><th></th><th data-i18n="ann.zero"></th><th data-i18n="ann.decimals"></th><th data-i18n="ann.unit"></th><th data-i18n="ann.prefix"></th><th data-i18n="ann.suffix"></th></tr>
+              <tr><th data-i18n="ann.offset"></th>
+                <td><select id="ann-off-ref"><option value="axis" data-i18n="ann.refAxis"></option><option value="left" data-i18n="ann.refLeft"></option><option value="custom" data-i18n="ann.refOffset"></option></select>
+                  <input id="ann-off-zero" type="number" step="any" value="0" class="num-sm" data-i18n-title="ann.offZeroTitle" /></td>
+                <td><input id="ann-off-dec" type="number" min="0" max="4" value="3" class="num-sm" /></td>
+                <td><select id="ann-off-unit"><option value="m">m</option><option value="mm">mm</option></select></td>
+                <td><input id="ann-off-pre" type="text" class="num-sm" /></td>
+                <td><input id="ann-off-suf" type="text" class="num-sm" /> <label class="chk" data-i18n-title="ann.plusTitle"><input type="checkbox" id="ann-off-plus" /> +</label></td></tr>
+              <tr><th data-i18n="ann.height"></th>
+                <td><select id="ann-h-ref"><option value="abs" data-i18n="ann.refAbs"></option><option value="axis" data-i18n="ann.refAlign"></option><option value="custom" data-i18n="ann.refLevel"></option></select>
+                  <input id="ann-h-zero" type="number" step="any" value="0" class="num-sm" data-i18n-title="ann.hZeroTitle" /></td>
+                <td><input id="ann-h-dec" type="number" min="0" max="4" value="3" class="num-sm" /></td>
+                <td><select id="ann-h-unit"><option value="m">m</option><option value="mm">mm</option></select></td>
+                <td><input id="ann-h-pre" type="text" class="num-sm" placeholder="K=" /></td>
+                <td><input id="ann-h-suf" type="text" class="num-sm" /></td></tr>
+              <tr><th data-i18n="ann.slope"></th>
+                <td><select id="ann-sl-fmt"><option value="auto" data-i18n="ann.slAuto"></option><option value="%">%</option><option value="‰">‰</option><option value="1:n">1:n</option></select></td>
+                <td colspan="4"><label class="field-inline"><span data-i18n="ann.slMin"></span> <input id="ann-sl-min" type="number" min="0" step="any" value="0" class="num-sm" /></label></td></tr>
+            </table>
+          </details>
           <div class="field">
             <span><span data-i18n="ann.classes"></span> · <button type="button" class="link" data-action="ann-all" data-i18n="ann.all"></button> · <button type="button" class="link" data-action="ann-none" data-i18n="ann.none"></button></span>
             <div class="ann-classes" id="ann-classes"></div>

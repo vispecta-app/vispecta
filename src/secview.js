@@ -2,7 +2,7 @@
 // Step through the sections (‹ › or the arrow keys) while the model shows where the cut is.
 // The window floats over the viewport and can be popped out into a browser window of its own
 // (e.g. on a second screen); its controls keep working there.
-import { sectionPaths } from './drawing.js';
+import { sectionPaths, annotFormat } from './drawing.js';
 
 const SVG = 'http://www.w3.org/2000/svg';
 const niceSteps = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
@@ -333,8 +333,8 @@ export class SectionViewer {
     // break points of the top outline with offset / height (not closer than the labels need)
     const A = sec?.annot;
     if (this.showPoints && A?.runs) {
-      const dec = A.dec || '.';
-      const num = (v) => (Math.abs(v) < 5e-4 ? 0 : v).toFixed(3).replace('.', dec);
+      const F = annotFormat(A); // the same texts as the drawing (#49)
+      const label = (p) => [F.rows.offset ? F.off(p.x) : null, F.rows.height ? F.height(p.y) : null].filter((x) => x !== null).join(' / ');
       const pts = A.runs.flat().sort((a, b) => b.sig - a.sig);
       const used = [];
       const gp = mk('g', { class: 'sv-points' });
@@ -347,7 +347,7 @@ export class SectionViewer {
         if (p.added) gp.append(mk('rect', { x: p.x - 3.2 * px, y: -p.y - 3.2 * px, width: 6.4 * px, height: 6.4 * px, class: 'added' }));
         else gp.append(mk('circle', { cx: p.x, cy: -p.y, r: 3 * px }));
         const tx = mk('text', { x: p.x + 2 * px, y: -p.y - 6 * px, 'font-size': 10.5 * px, transform: `rotate(-90 ${p.x + 2 * px} ${-p.y - 6 * px})` });
-        tx.textContent = `${num(p.x - A.originX)} / ${num(p.y)}`;
+        tx.textContent = label(p);
         gp.append(tx);
       }
       svg.append(gp);

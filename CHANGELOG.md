@@ -25,6 +25,10 @@ https://github.com/vispecta-app/vispecta/releases
   with chords of tens of metres; the horizontal alignment is now computed from its design
   parameters (lines, arcs, clothoids) to within about 1 mm.
   ([#79](https://github.com/vispecta-app/vispecta/issues/79))
+- **DXF texts with ‰, æ, ø, å or · showed `?`.** They are written as `\U+XXXX`, which CAD
+  programs read.
+- **Saved drawing options stopped loading at the first number field.** All options load again,
+  also at start, so the section window shows the points as set up before.
 - **The section box could not be seen.** It is now drawn as a wireframe, also where it doesn't
   cut anything yet.
 
@@ -34,6 +38,13 @@ https://github.com/vispecta-app/vispecta/releases
   lines, the corridor; Ctrl+Y / Ctrl+Shift+Z and ↷ redo it. A message says what was undone. The
   camera is not part of it, and opening or removing a model starts the history again.
   ([#67](https://github.com/vispecta-app/vispecta/issues/67))
+- **Label content and number format of the annotation.** Under *Label content and number
+  format* in the drawing dialog: rows offset / height / distance to the next point; zero of the
+  offsets (alignment axis, left edge or a chosen offset, e.g. the track centre) and of the heights
+  (absolute, the alignment's height or a chosen level, e.g. top of rail); per value decimals, m or
+  mm, text before/after (e.g. `K=`) and + for positive offsets; decimal sign; slopes in %, ‰, 1:n
+  or auto, and not below a threshold. The section window shows the same texts.
+  ([#49](https://github.com/vispecta-app/vispecta/issues/49))
 - **Choose the annotated points of a cross section.** In the section window (⌖), click a point to
   remove it, or click an outline to add one (on a corner when one is near, else on the edge); ↺
   puts the computed points back. The choice is kept per station – also on that page of a series –
