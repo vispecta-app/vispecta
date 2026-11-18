@@ -183,7 +183,7 @@ function write({ xy, zs, tris, ox, oy, name, georef, source, grid, maxEdge, tota
   const elPl = e(`IFCLOCALPLACEMENT(${sitePl},${e(`IFCAXIS2PLACEMENT3D(${e(`IFCCARTESIANPOINT((${num(ox)},${num(oy)},0.))`)},$,$)`)})`);
   const pl = e(`IFCCARTESIANPOINTLIST3D((${coords.join(',')}),$)`);
   const fs = e(`IFCTRIANGULATEDFACESET(${pl},$,.F.,(${idx.join(',')}),$)`);
-  const colour = e('IFCCOLOURRGB($,0.62,0.55,0.40)');
+  const colour = e('IFCCOLOURRGB($,0.50,0.64,0.42)');
   const style = e(`IFCSURFACESTYLE('Terrain',.BOTH.,(${e(`IFCSURFACESTYLESHADING(${colour},0.)`)}))`);
   e(`IFCSTYLEDITEM(${fs},(${style}),$)`);
   const shape = e(`IFCPRODUCTDEFINITIONSHAPE($,$,(${e(`IFCSHAPEREPRESENTATION(${body},'Body','Tessellation',(${fs}))`)}))`);

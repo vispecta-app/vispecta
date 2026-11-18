@@ -883,3 +883,8 @@ fieldset.annot .annot-row .chk { margin-bottom: 6px; color: var(--text); }
 .preset-row .field { flex: 1 1 220px; margin: 0; }
 .sv-sheet { position: absolute; inset: 0; overflow: hidden; background: #8a9497; }
 .sv-sheet > svg { stroke: none; stroke-width: 1; fill: #000; font-weight: 400;  display: block; transform-origin: 0 0; box-shadow: 0 2px 12px rgba(0,0,0,.35); background: #fff; }
+
+/* alignments of a model in its card (#89) */
+.aln-list { margin: 6px 0 4px; display: flex; flex-direction: column; gap: 2px; }
+.aln-list .aln-head { font-size: var(--fs-sm); margin-bottom: 2px; }
+.aln-row .line-len { font-variant-numeric: tabular-nums; }

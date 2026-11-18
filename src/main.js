@@ -288,7 +288,7 @@ function openCorridorDialog() {
   if (!list.length) return toast(t('aln.none'));
   const sel = $('#cor-path');
   const cur = corridor.def?.al;
-  sel.replaceChildren(...list.map((a, i) => h('option', { value: String(i), text: a.drawn ? `✎ ${a.name}` : a.name, selected: a === cur })));
+  sel.replaceChildren(...list.map((a, i) => h('option', { value: String(i), text: alnLabel(a), selected: a === cur })));
   const al = cur && list.includes(cur) ? cur : list[+sel.value];
   if (!corridor.def || corridor.def.al !== al) {
     $('#cor-from').value = formatStation(al.station0);
@@ -482,6 +482,8 @@ function cloudsChanged() {
 }
 
 // ------------------------------------------------------------- terrain (TIN), #45
+// The colour a terrain opens in (#90); *Colour by height* on its card shows the heights instead.
+const TERRAIN_GREEN = '#7fa36b';
 /** A model that holds only IfcGeographicElement (a terrain from Vispecta or a CAD program). */
 function isTerrainModel(m) {
   if (!m.elementIds.size) return false;
@@ -526,7 +528,6 @@ async function openTerrain(res, name) {
   const m = viewer.models.find((x) => !before.has(x));
   if (!m) return;
   m.terrain = true;
-  m.setHeightColors(true);
   renderModels();
   secViewer?.planesChanged?.();
   toast(t('ter.done', { name, n: fmtNum(res.triangles), p: fmtNum(res.points) }), true);
@@ -615,13 +616,14 @@ async function openIfcFiles(list, keys = null, { fit = true } = {}) {
         checkUnits(model);
         if (key) projects.modelAdded(model, file, key);
         try { model.alignments = await readAlignments(model); } catch (e) { console.warn('alignments', e); model.alignments = []; }
+        for (const a of model.alignments) a.ifcName = a.name; // the name in the file; an alias replaces `name` (#89)
         // tell when the file is cut off or has nothing to show, instead of silently showing less
         if (model.truncated) toast(t('msg.truncated', { name: file.name, n: fmtNum(model.elementIds.size) }));
         else if (!model.elementIds.size && !model.alignments.length) toast(t('msg.noGeometry', { name: file.name }));
         // Build the picking index (BVH) in the background so the first click is instant
         setTimeout(() => { try { model.pickTargets(); } catch { /* built on first pick instead */ } }, 300);
         if (state.spacesVisible) model.show(model.spaceIds);
-        if (isTerrainModel(model)) { model.terrain = true; model.setHeightColors(true); }
+        if (isTerrainModel(model)) { model.terrain = true; model.setBaseColor(TERRAIN_GREEN); } // natural green; height colours on the card (#90)
       } catch (err) {
         console.error(err);
         toast(t('msg.loadFailed', { name: file.name, error: err.message || err }));
@@ -1519,9 +1521,12 @@ function modelCard(m) {
       h('div', { class: 'card-row' }, h('label', { text: t('models.color') }), colorInput,
         h('button', { class: 'btn xs', onclick: () => { m.setColor(null); renderModels(); projects.touch?.(); }, text: t('models.original') })),
       h('div', { class: 'card-row' }, h('label', { text: t('models.transparency') }), opacity, opVal),
-      m.terrain ? h('label', { class: 'card-row chk' }, h('input', { type: 'checkbox', checked: !!m.heightColors, onchange: (e) => { m.setHeightColors(e.target.checked); viewer.invalidate(); } }), h('span', { text: t('ter.heightColors') }),
-        m.heightRange ? h('span', { class: 'muted', text: m.heightRange.map((y) => fmtNum(+viewer.toIfc(new THREE.Vector3(0, y, 0).applyMatrix4(m.group.matrixWorld)).z.toFixed(1))).join(' – ') + ' m' }) : null) : null,
+      m.terrain ? h('div', { class: 'card-row' }, h('label', { text: t('ter.heightColors') }),
+        h('select', { title: t('ter.heightTitle'), onchange: (e) => { m.setHeightColors(e.target.value === 'off' ? false : e.target.value); viewer.invalidate(); renderModels(); projects.touch?.(); } },
+          ['off', 'default', 'earth'].map((v) => h('option', { value: v, text: t(`ter.hc.${v}`), selected: (m.heightColors || 'off') === v }))),
+        m.heightColors && m.heightRange ? h('span', { class: 'muted', text: m.heightRange.map((y) => fmtNum(+viewer.toIfc(new THREE.Vector3(0, y, 0).applyMatrix4(m.group.matrixWorld)).z.toFixed(1))).join(' – ') + ' m' }) : null) : null,
       h('div', { class: 'card-row' }, h('label', { text: t('mg.group') }), groupSel),
+      m.alignments?.length ? h('div', { class: 'aln-list' }, h('div', { class: 'aln-head muted', text: t('aln.list', { n: m.alignments.length }) }), m.alignments.map(alignmentRow)) : null,
       h('div', { class: 'card-btns' },
         h('button', { class: 'btn sm', onclick: () => viewer.fitBox(m.getBox()), text: t('models.zoom') }),
         h('button', { class: `btn sm${m.changes.length ? ' primary-outline' : ''}`, onclick: () => saveIfc(m), text: t('models.downloadIfc') }),
@@ -2123,6 +2128,8 @@ function axisRow(p) {
   return planeRow(p, { name, slider, posInput, unit: 'm', step: (dir) => moveTo(viewer.getPlanePos(p) + dir * planeStep()) });
 }
 // ------------------------------------------------- cross sections at a station
+/** An alignment's name in a list: drawn lines with ✎, hidden ones marked (#89). */
+const alnLabel = (a) => `${a.drawn ? '✎ ' : ''}${a.name}${a.hidden ? ` (${t('aln.hiddenTag')})` : ''}`;
 /** All alignments of the visible models. */
 const allAlignments = () => [...viewer.models.filter((m) => m.visible).flatMap((m) => m.alignments || []), ...drawnPaths];
 
@@ -2426,7 +2433,7 @@ function stationRow(p) {
   const name = list.length > 1
     ? h('span', { class: 'pl-name pl-pick' }, h('b', { text: label }),
       h('select', { title: t('st.alignment'), onchange: (e) => { const a = list[+e.target.value]; const r = project(a, viewer.toIfc(p.anchor)); setStationPlane(p, a, r.s); renderPlanes(); } },
-        list.map((a, i2) => h('option', { value: String(i2), text: a.name, selected: a === al }))))
+        list.map((a, i2) => h('option', { value: String(i2), text: alnLabel(a), selected: a === al }))))
     : h('span', { class: 'pl-name', title: al.name }, h('b', { text: label }), ` · ${al.name}`);
   upd();
   return planeRow(p, { name, slider, posInput, unit: 'km', step: (dir) => moveTo(p.station.s + dir * planeStep()), cls: 'station' });
@@ -2535,7 +2542,7 @@ const lineEditor = new LineEditor({
 });
 
 /** The points of a drawn line as [x, y, z] (IFC). */
-const pathPoints = (p) => p.poly.map((q, k) => [q[0], q[1], p.zs[k]]);
+const pathPoints = (p) => p.poly.map((q, k) => [q[0], q[1], p.zs ? p.zs[k] : (heightAt(p, p.cum[k]) ?? 0)]);
 
 /** Zooms to a drawn line (its points, with a little room). */
 function zoomToPath(p) {
@@ -2543,6 +2550,24 @@ function zoomToPath(p) {
   for (const q of pathPoints(p)) b.expandByPoint(viewer.fromIfc(q[0], q[1], q[2]));
   b.expandByScalar(Math.max(5, b.getSize(new THREE.Vector3()).length() * 0.1));
   viewer.fitBox(b);
+}
+
+/** An alignment of a model in the model browser (#89): show/hide, alias, stationing, length, zoom. */
+function alignmentRow(a) {
+  const vis = h('input', { type: 'checkbox', checked: !a.hidden, title: t('aln.show') });
+  vis.addEventListener('change', () => { a.hidden = !vis.checked; updateAlignments(); renderModels(); renderPlanes(); projects.touch?.(); });
+  const name = h('span', { class: 'mg-name', text: a.name, title: a.alias ? `${t('aln.aliasTitle')} · ${a.ifcName}` : t('aln.aliasTitle') });
+  const rename = () => inlineEdit(name, a.alias, a.ifcName || a.name, (v) => {
+    a.alias = v || null;
+    a.name = a.alias || a.ifcName || a.name;
+    updateAlignments(); renderModels(); renderPlanes(); secViewer?.update?.(); projects.touch?.();
+  });
+  name.addEventListener('dblclick', rename);
+  return h('div', { class: `line-row aln-row${a.hidden ? ' off' : ''}` },
+    vis, name,
+    h('span', { class: 'line-len', title: t('aln.range'), text: `${formatStation(a.station0)} – ${formatStation(a.station0 + a.length)}` }),
+    h('button', { class: 'icon-btn', title: t('line.zoom'), text: '⤢', onclick: () => zoomToPath(a) }),
+    h('button', { class: 'icon-btn', title: t('aln.aliasTitle'), text: '✎', onclick: rename }));
 }
 
 /** A drawn line in the model browser: show/hide, name (rename), length, zoom, edit points, remove. */
@@ -2583,7 +2608,7 @@ function openProfileDialog(select = null) {
   if (!hasScene()) return toast(t('msg.loadFirst'));
   const sel = $('#prof-path');
   const prev = select || list[+sel.value] || null;
-  sel.replaceChildren(...list.map((a, i) => h('option', { value: String(i), text: a.drawn ? `✎ ${a.name}` : a.name })));
+  sel.replaceChildren(...list.map((a, i) => h('option', { value: String(i), text: alnLabel(a) })));
   if (!list.length) sel.append(h('option', { value: '', text: t('prof.noPath') }));
   const idx = prev ? list.indexOf(prev) : 0;
   sel.value = String(Math.max(0, idx));
@@ -2752,7 +2777,7 @@ function openDrive() {
   drive.al = drive.al && list.includes(drive.al) ? drive.al : best.al;
   if (drive.al === best.al) drive.s = best.r.s;
   const sel = $('#drive-path');
-  sel.replaceChildren(...list.map((a, i) => h('option', { value: String(i), text: a.drawn ? `✎ ${a.name}` : a.name, selected: a === drive.al })));
+  sel.replaceChildren(...list.map((a, i) => h('option', { value: String(i), text: alnLabel(a), selected: a === drive.al })));
   $('#drive-panel').hidden = false;
   drivePose();
   $('#drive-station').select();
@@ -3026,7 +3051,10 @@ const projects = new ProjectManager({
   getExtra: () => ({
     lines: drawnPaths.map((p) => ({ name: p.name, pts: pathPoints(p), ...(p.hidden ? { hidden: true } : {}) })),
     groups: state.modelGroups.map(({ id, name, visible, open }) => ({ id, name, visible, open })),
-    models: viewer.models.map((m) => ({ key: projects.keys.get(m) || null, name: m.name, alias: m.alias || null, group: m.groupId || null, color: m.overrideColor ? `#${m.overrideColor.getHexString()}` : null })),
+    models: viewer.models.map((m) => ({ key: projects.keys.get(m) || null, name: m.name, alias: m.alias || null, group: m.groupId || null, color: m.overrideColor ? `#${m.overrideColor.getHexString()}` : null,
+      // alignments: alias and visibility per alignment (#89); terrain: height colours on or off (#90)
+      alignments: (m.alignments || []).some((a) => a.alias || a.hidden) ? m.alignments.map((a) => ({ alias: a.alias || null, hidden: !!a.hidden })) : undefined,
+      heightColors: m.terrain ? m.heightColors || false : undefined })),
     stationFormat: stationFormat.value, // the client's stationing format stays with the project (#29)
     annotEdits: annotEdits.size ? [...annotEdits] : undefined, // points chosen by hand (#48)
     drawingPresets: userPresets.length ? userPresets : undefined, // drawing presets (#51)
@@ -3045,6 +3073,11 @@ const projects = new ProjectManager({
       const info = (x?.models || []).find((i) => (i.key && i.key === projects.keys.get(m)) || i.name === m.name);
       m.alias = info?.alias || null;
       m.groupId = info?.group || null;
+      (m.alignments || []).forEach((a, i) => {
+        const ai = info?.alignments?.[i];
+        a.hidden = !!ai?.hidden; a.alias = ai?.alias || null; a.name = a.alias || a.ifcName || a.name;
+      });
+      if (m.terrain && info && 'heightColors' in info) m.setHeightColors(info.heightColors || false);
       if (info && 'color' in info) m.setColor(info.color || null);
       const g = groupOf(m);
       m.setGroupHidden(g ? !g.visible : false);
@@ -3993,6 +4026,7 @@ function captureState() {
     })),
     measures: [...measure.items],
     lines: drawnPaths.map((p) => ({ p, name: p.name, hidden: !!p.hidden, pts: pathPoints(p) })),
+    alignments: viewer.models.flatMap((m) => (m.alignments || []).map((a) => ({ a, hidden: !!a.hidden, alias: a.alias || null }))), // (#89)
     corridor: corridor.def ? { ...corridor.def, offsets: [...corridor.def.offsets] } : null,
     // annotated points removed / added by hand in the section window (#48)
     points: [...annotEdits].map(([k, e]) => [k, { removed: e.removed.map((q) => [...q]), added: e.added.map((q) => [...q]) }]),
@@ -4004,6 +4038,7 @@ function captureState() {
     planes: st.planes.map((p) => [p.axis, p.n.map(r), r(p.c), p.enabled, p.cut3d, p.boxPart, p.station ? [p.station.al.id || p.station.al.name, r(p.station.s)] : null]),
     measures: st.measures.map((m) => m.id),
     lines: st.lines.map((l) => [l.p.id, l.name, l.hidden, l.pts.map((q) => q.map(r))]),
+    alignments: st.alignments.map((x) => [x.hidden, x.alias]),
     corridor: st.corridor ? [st.corridor.al.id || st.corridor.al.name, st.corridor.offsets, r(st.corridor.from), r(st.corridor.to)] : null,
     points: st.points,
   });
@@ -4026,6 +4061,7 @@ function restoreState(st) {
   }
   state.modelGroups = st.groups.map((g) => ({ ...g }));
   for (const m of viewer.models) { const g = state.modelGroups.find((x) => x.id === m.groupId); m.setGroupHidden(g ? !g.visible : false); }
+  for (const x of st.alignments || []) { x.a.hidden = x.hidden; x.a.alias = x.alias; x.a.name = x.alias || x.a.ifcName || x.a.name; } // (#89)
   // drawn lines first: station planes and the corridor may lie on them
   drawnPaths.length = 0;
   for (const l of st.lines) {
