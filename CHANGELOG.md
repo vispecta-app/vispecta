@@ -33,6 +33,12 @@ https://github.com/vispecta-app/vispecta/releases
   cut anything yet.
 
 ### Added
+- **View cube** in the top right corner of the 3D view, as in CAD programs. Click a face, edge or
+  corner to look from there (the camera turns around the same point at the same distance), drag
+  the cube to orbit, ↶ ↷ turn the view 90° about the vertical, ⌂ goes back to the 3D view of
+  everything. The compass ring shows north (IFC +Y); its letters look from that side. Works with
+  the orthographic camera and in the dark theme; *View → View cube* turns it off (remembered).
+  ([#84](https://github.com/vispecta-app/vispecta/issues/84))
 - **Undo and redo.** Ctrl+Z (Cmd+Z) and ↶ in the toolbar undo the last change – hiding,
   isolating, colours, models switched off, sections added, moved or removed, measurements, drawn
   lines, the corridor; Ctrl+Y / Ctrl+Shift+Z and ↷ redo it. A message says what was undone. The

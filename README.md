@@ -33,6 +33,7 @@ The toolbar groups the functions: **View**, **Section**, **Visibility**, **Align
 - **Colour style** (*View* menu): shows the original colours as *Original*, *Muted*, *Colour-blind friendly*, *Light grey* (nearly white, the shape first) or *Vivid*. The choice is remembered. *Colour-blind friendly* uses the Okabe–Ito palette, whose colours stay apart with the common kinds of colour blindness: every file colour snaps to the Okabe–Ito colour of its hue (greys stay grey), *Colour by model* uses Okabe–Ito colours, and compare and IDS results use blue / vermilion / yellow instead of green / red.
 - **Toolbar menus:** *View*, *Section* and *Visibility* open menus where every tool has a short description.
 - **Axis cross:** an X/Y/Z axis indicator in the top-left corner of the 3D view always shows the directions (IFC axes, Z up).
+- **View cube** (#84): in the top-right corner. Click a face, edge or corner to look from there (Top, Front = from the south, Right = from the east …), drag it to orbit, ↶ ↷ turn the view 90° about the vertical and ⌂ shows everything in 3D. The compass ring under it shows north (IFC +Y). *View → View cube* turns it off.
 - **Side panels** can be hidden (‹ / › buttons) to give the 3D view more room.
 - **Metadata:** click an element to see attributes, its location in the spatial structure, property sets, quantities (with units), type and type properties, materials and layers, and classifications. The panel can be filtered.
 - **Calculated quantities:** for every element the volume, surface area, plan area (top faces), length, width and height are calculated from the 3D geometry, next to the quantities stored in the IFC file. With several elements selected, the totals are shown. The values are also included in the CSV export.
@@ -223,6 +224,7 @@ Built with [three.js](https://threejs.org), [three-mesh-bvh](https://github.com/
 | `src/bcf.js`, `src/issues.js` | BCF read/write and the Issues tab |
 | `src/drawing.js` | 2D drawings from section planes (PDF, SVG, DXF) |
 | `src/alignment.js` | IFC4x3 alignments and stationing |
+| `src/viewcube.js` | view cube in the corner of the 3D view |
 | `src/secview.js` | section window: live 2D cut of a plane, stepping, zoom, pop-out window |
 | `src/lineedit.js` | editing the points of a drawn line |
 | `src/history.js` | undo / redo from snapshots of the state |

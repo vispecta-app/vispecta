@@ -841,3 +841,40 @@ fieldset.annot .annot-row .chk { margin-bottom: 6px; color: var(--text); }
 .ann-fmt-table td { padding: 2px 6px 2px 0; white-space: nowrap; }
 .ann-fmt-table input.num-sm { width: 58px; }
 .ann-fmt-table select { max-width: 150px; }
+
+/* ------------------------------------------------------------- view cube (#84) */
+.viewcube { position: absolute; top: 10px; right: 12px; width: 130px; height: 140px; z-index: 5; user-select: none; -webkit-user-select: none; touch-action: none; }
+.viewcube .vc-stage { position: absolute; left: 0; top: 0; width: 130px; height: 130px; display: grid; place-items: center; cursor: pointer; }
+.viewcube .vc-cube { position: relative; width: 64px; height: 64px; transform-style: preserve-3d; pointer-events: none; }
+.viewcube .vc-cell, .viewcube .vc-dir { pointer-events: auto; }
+.viewcube .vc-ring { pointer-events: none; }
+.viewcube .vc-face, .viewcube .vc-ring { position: absolute; left: 0; top: 0; width: 64px; height: 64px; }
+.viewcube .vc-face {
+  display: grid; grid-template-columns: 22% 56% 22%; grid-template-rows: 22% 56% 22%;
+  background: var(--vc-face); border: 1px solid var(--vc-edge); box-sizing: border-box;
+  backface-visibility: hidden;
+}
+.viewcube .vc-cell { transition: background-color .1s; }
+.viewcube .vc-cell.hover { background: var(--vc-hover); }
+.viewcube .vc-label {
+  position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none;
+  font: 600 11px/1 var(--font, system-ui, sans-serif); color: var(--vc-text); letter-spacing: .02em;
+}
+.viewcube .vc-ring { width: 120px; height: 120px; left: -28px; top: -28px; border-radius: 50%; border: 9px solid var(--vc-ring); box-sizing: border-box; }
+.viewcube .vc-dir {
+  position: absolute; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%;
+  display: grid; place-items: center; font: 700 10px/1 var(--font, system-ui, sans-serif);
+  color: var(--vc-text); background: var(--vc-face); border: 1px solid var(--vc-edge); cursor: pointer;
+}
+.viewcube .vc-dir[data-key='n'] { color: #fff; background: #C8372D; border-color: #C8372D; }
+.viewcube .vc-dir.hover { background: var(--vc-hover); color: #fff; }
+.viewcube .vc-btn {
+  position: absolute; width: 22px; height: 22px; padding: 0; border-radius: 6px; font-size: 13px; line-height: 1;
+  border: 1px solid var(--vc-edge); background: var(--vc-face); color: var(--vc-text); cursor: pointer; opacity: .85;
+}
+.viewcube .vc-btn:hover { background: var(--vc-hover); color: #fff; opacity: 1; }
+.viewcube .vc-home { left: 4px; top: 4px; }
+.viewcube .vc-ccw { left: 4px; bottom: 6px; }
+.viewcube .vc-cw { right: 4px; bottom: 6px; }
+:root { --vc-face: rgba(246, 249, 249, .92); --vc-edge: #9db3b2; --vc-text: #0C2A30; --vc-hover: #0E8C84; --vc-ring: rgba(157, 179, 178, .45); }
+:root[data-theme='dark'] { --vc-face: rgba(32, 44, 48, .92); --vc-edge: #4f6a6c; --vc-text: #dce8e8; --vc-hover: #12a89e; --vc-ring: rgba(79, 106, 108, .5); }
