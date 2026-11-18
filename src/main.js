@@ -212,6 +212,8 @@ async function openFiles(files) {
 //   Road, grouped into infrastructure and building
 // - cbbt: the Chesapeake Bay Bridge-Tunnel test model from buildingSMART's community samples (MIT,
 //   synthetic, geometry from OpenStreetMap) – 26 MB, two alignments of 31 km (#41)
+// - rail: Vispecta's fictitious double-track railway after Banedanmark norms, one IFC file per
+//   discipline and a survey point cloud (LAZ in UTM coordinates), opened at the bridge
 const SAMPLES = {
   scene: {
     dir: 'samples/simple-scene/',
@@ -224,25 +226,36 @@ const SAMPLES = {
     // the corridor is 31 km long: start at Island #1 (station 6+083 on the northbound alignment)
     focus: { station: 6083, back: 120, side: 90, up: 70 },
   },
+  rail: {
+    dir: 'samples/bn-dobbeltspor/',
+    files: ['01-Linjefoering', '02-Spor', '03-Jord', '04-Afvanding', '05-Bro', '06-Koereledning', '07-El-og-kabler', '08-Terraen', '09-Landskab'],
+    clouds: ['10-Opmaaling.laz'],
+    groups: [['samples.grpTrack', /^0[1267]-/], ['samples.grpCivil', /^0[345]-/], ['samples.grpLand', /^0[89]-/]],
+    // the bridge at 12+195–12+215, from the north-west, a little above the line
+    focus: { station: 12205, back: 28, side: 30, up: 9 },
+  },
 };
 async function openSamples(key = 'scene') {
   const set = SAMPLES[key] || SAMPLES.scene;
-  let files;
+  let files, clouds;
   try {
-    files = await withLoading(async (progress) => {
+    [files, clouds] = await withLoading(async (progress) => {
       let done = 0;
+      const names = [...set.files.map((n) => `${n}.ifc`), ...(set.clouds || [])];
       progress(t('samples.loading'), 0);
-      return Promise.all(set.files.map(async (name) => {
-        const res = await fetch(`${set.dir}${name}.ifc`);
-        if (!res.ok) throw new Error(`${name}.ifc: ${res.status}`);
-        const file = new File([await res.blob()], `${name}.ifc`, { type: 'application/x-step' });
-        progress(t('samples.loading'), ++done / set.files.length);
+      const all = await Promise.all(names.map(async (name) => {
+        const res = await fetch(`${set.dir}${name}`);
+        if (!res.ok) throw new Error(`${name}: ${res.status}`);
+        const file = new File([await res.blob()], name, { type: /\.ifc$/i.test(name) ? 'application/x-step' : 'application/octet-stream' });
+        progress(t('samples.loading'), ++done / names.length);
         return file;
       }));
+      return [all.slice(0, set.files.length), all.slice(set.files.length)];
     });
   } catch (err) { toast(t('samples.failed', { error: err.message || err })); return; }
   const before = new Set(viewer.models);
   await openIfcFiles(files);
+  if (clouds.length) await openCloudFiles(clouds);
   const added = viewer.models.filter((m) => !before.has(m));
   for (const [name, re] of set.groups || []) {
     const models = added.filter((m) => re.test(m.name));
@@ -472,7 +485,13 @@ function cloudsChanged() {
 /** A model that holds only IfcGeographicElement (a terrain from Vispecta or a CAD program). */
 function isTerrainModel(m) {
   if (!m.elementIds.size) return false;
-  for (const id of m.elementIds) if (!/^IfcGeographicElement$/i.test(m.typeName(id) || '')) return false;
+  for (const id of m.elementIds) {
+    if (!/^IfcGeographicElement$/i.test(m.typeName(id) || '')) return false;
+    // only terrain: trees and other geographic elements keep their own colours
+    let pdt = null;
+    try { pdt = m.api.GetLine(m.modelID, id, false)?.PredefinedType?.value ?? null; } catch { /* unknown */ }
+    if (pdt && pdt !== 'TERRAIN') return false;
+  }
   return true;
 }
 // A terrain is built in a worker (terrain-worker.js) and written as an IFC file with an
