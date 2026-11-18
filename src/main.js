@@ -38,6 +38,7 @@ import { readAlignments, AlignmentLayer, SectionMarks, pointAt, heightAt, projec
 import { loadPointCloud, LAS_CLASSES, classColor as lasClassColor } from './pointcloud.js';
 import { Corridor } from './corridor.js';
 import { computeSection, computeProfile, planeAxes, layout, toSvg, toPdf, toPdfPages, toDxf, renderBackground, SCALES, AXIS_COLOR } from './drawing.js';
+import { ViewCube } from './viewcube.js';
 import { runIdsCheck, colorIdsResult, idsCsv, specSummary, setIdsColors, IDS_EXAMPLES } from './ids.js';
 import { compareModels, showComparison, clearComparison, comparisonCsv, geomText, summaryText, CMP_COLORS, setCompareColors } from './compare.js';
 
@@ -82,6 +83,15 @@ const PALETTE = ['#4e79a7', '#f28e2b', '#e15759', '#59a14f', '#b07aa1', '#edc948
 
 const viewer = new Viewer($('#viewport'));
 const measure = new MeasureTool(viewer, $('#viewport'));
+// view cube (#84): top right corner, can be turned off under View (remembered)
+const VIEWCUBE_KEY = 'onlineifc.viewcube';
+const viewCube = new ViewCube(viewer, { onHome: () => viewer.setView('iso') });
+function setViewCube(on) {
+  viewCube.setVisible(on);
+  try { localStorage.setItem(VIEWCUBE_KEY, on ? '1' : '0'); } catch { /* ignore */ }
+  const c = document.getElementById('viewcube-check');
+  if (c) c.textContent = on ? '☑' : '☐';
+}
 const walk = new WalkMode(viewer);
 walk.addEventListener('change', () => {
   $('#viewport').classList.toggle('walking', walk.active);
@@ -111,6 +121,7 @@ $('#lang-select').addEventListener('change', (e) => {
   applyStaticTranslations();
   python.translate();
   measure.refresh();
+  viewCube.relabel();
   renderAll();
 });
 for (const d of $$('dialog')) addCloseX(d);
@@ -958,6 +969,7 @@ document.addEventListener('click', (e) => {
     isolate: () => isolateSelected(),
     'show-all': () => showAll(),
     'toggle-spaces': () => toggleSpaces(),
+    'toggle-viewcube': () => setViewCube(viewCube.el.hidden),
     'toggle-ortho': () => { if (walk.active) walk.stop(); setOrtho(!viewer.isOrtho); },
     walk: () => walk.toggle(),
     qto: () => qto.open(),
@@ -2939,6 +2951,7 @@ $('#proj-enabled').addEventListener('change', (e) => {
   projects.setEnabled(e.target.checked);
 });
 renderRecentProjects();
+{ let on = true; try { on = localStorage.getItem(VIEWCUBE_KEY) !== '0'; } catch { /* ignore */ } setViewCube(on); }
 
 // ================================================== ortho, X-ray and storeys
 function setOrtho(on) {

@@ -35,6 +35,12 @@ https://github.com/vispecta-app/vispecta/releases
   cut anything yet.
 
 ### Added
+- **View cube** in the top right corner of the 3D view, as in CAD programs. Click a face, edge or
+  corner to look from there (the camera turns around the same point at the same distance), drag
+  the cube to orbit, ↶ ↷ turn the view 90° about the vertical, ⌂ goes back to the 3D view of
+  everything. The compass ring shows north (IFC +Y); its letters look from that side. Works with
+  the orthographic camera and in the dark theme; *View → View cube* turns it off (remembered).
+  ([#84](https://github.com/vispecta-app/vispecta/issues/84))
 - **Drawing presets and a sheet view in the section window** (#51). The drawing dialog has
   presets at the top: two built-in ones (*Rail cross section A3 1:100* and *Overview*) and your
   own, saved with all drawing, annotation and label settings, the excluded classes and the
