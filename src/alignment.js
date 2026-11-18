@@ -1,4 +1,5 @@
-// IFC4x3 alignments: horizontal geometry (tessellated by web-ifc), vertical profile computed
+// IFC4x3 alignments: horizontal geometry (from the design parameters, else web-ifc's tessellation),
+// vertical profile computed
 // from IfcAlignmentVerticalSegment, stationing from IfcReferent / Pset_Stationing.
 // Used to draw the alignment with station marks and to give station + offset for points.
 import * as THREE from 'three';
@@ -27,6 +28,48 @@ function alongPoly(poly, cum, x, y, maxDist) {
     if (d < bestD) { bestD = d; best = cum[k - 1] + t * (cum[k] - cum[k - 1]); }
   }
   return bestD <= maxDist ? best : null;
+}
+
+/**
+ * The horizontal alignment computed from its design parameters (IfcAlignmentHorizontalSegment), in
+ * IFC plan coordinates: lines, circular arcs and clothoids, with points close enough that a chord
+ * is never more than about 1 mm off the curve (#79). web-ifc tessellates arcs with chords of tens of
+ * metres – up to 11 cm inside an arc of R = 2000 m, enough to put a cross section off the axis.
+ * Returns null when a segment type can't be computed exactly here (the caller keeps web-ifc's points).
+ */
+function exactHorizontal(segs, scale) {
+  if (!segs.length) return null;
+  const curv = (r) => (r ? 1 / r : 0);
+  const poly = [];
+  for (const sg of segs) {
+    if (!['LINE', 'CIRCULARARC', 'CLOTHOID'].includes(sg.type) || !Number.isFinite(sg.L) || !sg.start) return null;
+    const k0 = curv(sg.r0), k1 = curv(sg.type === 'CIRCULARARC' ? sg.r0 : sg.r1);
+    const L = sg.L;
+    let x = sg.start[0], y = sg.start[1], th = sg.dir;
+    if (!poly.length) poly.push([x * scale, y * scale]);
+    if (sg.type === 'LINE' || (!k0 && !k1)) {
+      poly.push([(x + L * Math.cos(th)) * scale, (y + L * Math.sin(th)) * scale]);
+      continue;
+    }
+    // output step for a chord error of about 1 mm: e = κ·h²/8, at most 5 m; integration in fine steps
+    const kmax = Math.max(Math.abs(k0), Math.abs(k1));
+    const out = Math.min(5, Math.sqrt((8 * 0.001) / kmax));
+    const nOut = Math.max(1, Math.ceil(L / out));
+    const sub = Math.max(1, Math.ceil(out / 0.05));
+    const ds = L / (nOut * sub);
+    let s = 0;
+    for (let i = 0; i < nOut; i++) {
+      for (let j = 0; j < sub; j++) {
+        const kA = k0 + ((k1 - k0) * s) / L, kB = k0 + ((k1 - k0) * (s + ds)) / L;
+        const tm = th + ((kA + kB) / 4) * ds; // heading in the middle of the step
+        x += ds * Math.cos(tm); y += ds * Math.sin(tm);
+        th += ((kA + kB) / 2) * ds;
+        s += ds;
+      }
+      poly.push([x * scale, y * scale]);
+    }
+  }
+  return poly;
 }
 
 /** Reads all alignments of a model. Returns [] for models without IfcAlignment. */
@@ -70,6 +113,31 @@ export async function readAlignments(model) {
       }
     }
     if (poly.length < 2) continue;
+    // the exact horizontal from the design parameters, when it matches web-ifc's ends (#79)
+    try {
+      const hsegs = [];
+      for (const child of nests.get(aid) || []) {
+        if (typeName(child) !== 'IFCALIGNMENTHORIZONTAL') continue;
+        for (const sid of nests.get(child) || []) {
+          const seg = api.GetLine(mid, sid, false);
+          const dp = seg?.DesignParameters?.value ? api.GetLine(mid, seg.DesignParameters.value, false) : null;
+          if (!dp) continue;
+          const sp = dp.StartPoint?.value ? api.GetLine(mid, dp.StartPoint.value, false) : null;
+          hsegs.push({
+            type: dp.PredefinedType?.value, start: sp?.Coordinates ? [num(sp.Coordinates[0]), num(sp.Coordinates[1])] : null,
+            dir: num(dp.StartDirection), r0: num(dp.StartRadiusOfCurvature) ?? 0, r1: num(dp.EndRadiusOfCurvature) ?? 0, L: num(dp.SegmentLength),
+          });
+        }
+      }
+      // a zero-length end segment carries no geometry
+      const exact = exactHorizontal(hsegs.filter((hs) => hs.L > 0), scale);
+      // only when the design parameters lie where web-ifc put the geometry (no extra placement)
+      const near = (a, b) => a && b && Math.hypot(a[0] - b[0], a[1] - b[1]) < 0.5;
+      if (exact && near(exact[0], poly[0]) && near(exact[exact.length - 1], poly[poly.length - 1])) {
+        poly.length = 0;
+        poly.push(...exact);
+      }
+    } catch (e) { console.warn('exact horizontal', e); }
     const cum = [0];
     for (let k = 1; k < poly.length; k++) cum.push(cum[k - 1] + Math.hypot(poly[k][0] - poly[k - 1][0], poly[k][1] - poly[k - 1][1]));
     // vertical profile

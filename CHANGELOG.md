@@ -21,6 +21,10 @@ https://github.com/vispecta-app/vispecta/releases
 - **Edit** is no longer in the toolbar; it stays in the properties panel (and the `E` key).
 
 ### Fixed
+- **Cross sections in curves sat up to 11 cm off the axis.** web-ifc tessellates circular arcs
+  with chords of tens of metres; the horizontal alignment is now computed from its design
+  parameters (lines, arcs, clothoids) to within about 1 mm.
+  ([#79](https://github.com/vispecta-app/vispecta/issues/79))
 - **DXF texts with ‰, æ, ø, å or · showed `?`.** They are written as `\U+XXXX`, which CAD
   programs read.
 - **Saved drawing options stopped loading at the first number field.** All options load again,
