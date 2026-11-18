@@ -31,6 +31,14 @@ https://github.com/vispecta-app/vispecta/releases
   cut anything yet.
 
 ### Added
+- **Drawing presets and a sheet view in the section window** (#51). The drawing dialog has
+  presets at the top: two built-in ones (*Rail cross section A3 1:100* and *Overview*) and your
+  own, saved with all drawing, annotation and label settings, the excluded classes and the
+  section width. They are kept in the browser and in the project, and can be exported and
+  imported as `*.vispecta-preset.json` to share with colleagues. 📄 in the section window shows
+  the section as the sheet it will be exported as (paper, scale, title block, annotation,
+  hatching) – it follows the stations and every change in the drawing dialog. Zoom with the
+  wheel, pan by dragging, double-click to fit.
 - **Cross-section drawings: layout, styles and hatching.** Hatched cut faces in PDF, SVG and DXF
   (DXF: a layer `<CLASS>_HATCH` per class); line weight thin / normal / thick; the band under or
   over the section; text size 80–150 %; labels that would overlap are spread out with kinked

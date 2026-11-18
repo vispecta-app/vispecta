@@ -473,6 +473,14 @@
     <dialog id="drawing-dialog">
       <h2 data-i18n="drw.title"></h2>
       <p class="muted small" data-i18n="drw.intro"></p>
+      <div class="preset-row">
+        <label class="field"><span data-i18n="preset.label"></span><select id="drw-preset"></select></label>
+        <button type="button" class="btn sm" id="drw-preset-save" data-i18n="preset.save" data-i18n-title="preset.saveTitle"></button>
+        <button type="button" class="btn sm" id="drw-preset-del" data-i18n="preset.delete"></button>
+        <button type="button" class="btn sm" id="drw-preset-export" data-i18n="preset.export" data-i18n-title="preset.exportTitle"></button>
+        <button type="button" class="btn sm" id="drw-preset-import" data-i18n="preset.import" data-i18n-title="preset.importTitle"></button>
+        <input type="file" id="drw-preset-file" accept=".json,application/json" hidden />
+      </div>
       <label class="field"><span data-i18n="drw.plane"></span><select id="drw-plane"></select></label>
       <label class="field"><span data-i18n="drw.name"></span><input id="drw-name" type="text" /></label>
       <div class="grid3">
