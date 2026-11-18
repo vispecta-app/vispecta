@@ -50,7 +50,7 @@ class Sink {
     // voxel grid only when thinning is needed
     this.cell = 0;
     if (total > this.budget && bounds) {
-      const [x0, y0, z0, x1, y1, z1] = bounds;
+      const [x0, y0, z0, x1, y1] = bounds;
       const area = Math.max((x1 - x0) * (y1 - y0), 1e-6);
       // a survey is mostly a surface: cells ≈ area / cell², a bit finer to fill the budget
       this.cell = Math.sqrt(area / this.budget) * 0.85;

@@ -5,6 +5,13 @@ https://github.com/vispecta-app/vispecta/releases
 
 ## Unreleased
 
+### Added
+- **Checks on every pull request.** ESLint (undefined names, unused variables), the build and a smoke
+  test in headless Chromium: sample scene, a station section with the section window and an SVG
+  export, a point cloud, all tabs, bad files, and the railway sample. Any page or console error
+  fails it. `npm run test` runs the same locally.
+  ([#57](https://github.com/vispecta-app/vispecta/issues/57))
+
 ## v0.0.4 – 18.11.2026
 
 ### Changed

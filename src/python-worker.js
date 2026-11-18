@@ -1,5 +1,4 @@
 // Web Worker running Pyodide + IfcOpenShell. Keeps the UI responsive while Python runs.
-/* eslint-disable no-restricted-globals */
 
 let pyodide = null;
 let loading = null;
