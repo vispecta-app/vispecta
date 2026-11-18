@@ -180,13 +180,18 @@ async function openFiles(files) {
   const list = all.filter((f) => /\.ifc$/i.test(f.name));
   const workspaces = all.filter((f) => /\.json$/i.test(f.name));
   const bcfs = all.filter((f) => /\.(bcf|bcfzip)$/i.test(f.name));
+  // .xml: an IDS file while the IDS dialog is open, else a LandXML surface (terrain, #45) when it is one
+  const xmls = all.filter((f) => /\.xml$/i.test(f.name) && !$('#ids-dialog').open);
+  const landxmls = [];
+  for (const f of xmls) { try { if (/<LandXML\b/i.test(await f.slice(0, 4096).text())) landxmls.push(f); } catch { /* not readable */ } }
   const idss = all.filter((f) => /\.ids$/i.test(f.name) || (/\.xml$/i.test(f.name) && $('#ids-dialog').open));
   const clouds = all.filter((f) => CLOUD_FILE.test(f.name)); // point clouds (#27)
-  const rest = all.filter((f) => ![list, workspaces, bcfs, idss, clouds].some((g) => g.includes(f)));
+  const rest = all.filter((f) => ![list, workspaces, bcfs, idss, clouds, landxmls].some((g) => g.includes(f)));
   if (rest.length) toast(t('msg.unknownFiles', { names: rest.map((f) => f.name).join(', ') }));
-  if (!list.length && !workspaces.length && !bcfs.length && !idss.length && !clouds.length) return;
+  if (!list.length && !workspaces.length && !bcfs.length && !idss.length && !clouds.length && !landxmls.length) return;
   if (list.length) await openIfcFiles(list);
   if (clouds.length) await openCloudFiles(clouds);
+  for (const f of landxmls) await terrainFromLandXml(f);
   for (const w of workspaces) await views.openWorkspace(w);
   for (const b of bcfs) {
     await issues.importFile(b);
@@ -447,6 +452,7 @@ function cloudCard(c) {
       classes,
       h('div', { class: 'card-btns' },
         h('button', { class: 'btn sm', onclick: () => viewer.fitBox(c.getBox()), text: t('models.zoom') }),
+        h('button', { class: 'btn sm', onclick: () => openTerrainDialog(c), text: t('ter.button'), title: t('ter.buttonTitle') }),
         h('button', { class: 'btn sm danger', onclick: () => { if (!confirm(t('pc.removeConfirm', { name: c.name }))) return; viewer.removeCloud(c); afterModelsChanged(); cloudsChanged(); }, text: t('models.remove') }))) : null);
 }
 
@@ -462,7 +468,120 @@ function cloudsChanged() {
   secViewer?.planesChanged?.();
 }
 
-async function openIfcFiles(list, keys = null) {
+// ------------------------------------------------------------- terrain (TIN), #45
+/** A model that holds only IfcGeographicElement (a terrain from Vispecta or a CAD program). */
+function isTerrainModel(m) {
+  if (!m.elementIds.size) return false;
+  for (const id of m.elementIds) if (!/^IfcGeographicElement$/i.test(m.typeName(id) || '')) return false;
+  return true;
+}
+// A terrain is built in a worker (terrain-worker.js) and written as an IFC file with an
+// IfcGeographicElement (TERRAIN) and an IfcTriangulatedFaceSet, which is then opened like any model:
+// it is shown, cut in sections (an open surface: a terrain line, no cut face), drawn in PDF/SVG/DXF
+// and profiles, saved in projects and downloaded with *Download IFC*. It is coloured by height.
+let terrainCloud = null;
+function runTerrainWorker(msg, label) {
+  return withLoading((progress) => new Promise((resolve, reject) => {
+    const w = new Worker(new URL('./terrain-worker.js', import.meta.url), { type: 'module' });
+    progress(label, 0);
+    w.onmessage = ({ data }) => {
+      if (data.progress !== undefined) progress(label, data.progress);
+      else if (data.error) { w.terminate(); reject(new Error(data.error)); }
+      else if (data.done) { w.terminate(); resolve(data.done); }
+    };
+    w.onerror = (e) => { w.terminate(); reject(new Error(e.message || 'Terrain worker failed')); };
+    w.postMessage(msg);
+  }));
+}
+
+/** The georeference written into the terrain file: the map conversion the models use. */
+function terrainGeoref() {
+  const mm = viewer.mapModel();
+  return mm?.georef?.map && (mm.lengthScale || 1) === 1 ? { map: mm.georef.map } : null;
+}
+
+async function openTerrain(res, name) {
+  const file = new File([res.ifc], `${name}.ifc`, { type: 'application/x-step' });
+  const before = new Set(viewer.models);
+  await openIfcFiles([file], null, { fit: hasScene() ? false : true });
+  const m = viewer.models.find((x) => !before.has(x));
+  if (!m) return;
+  m.terrain = true;
+  m.setHeightColors(true);
+  renderModels();
+  secViewer?.planesChanged?.();
+  toast(t('ter.done', { name, n: fmtNum(res.triangles), p: fmtNum(res.points) }), true);
+}
+
+function openTerrainDialog(cloud) {
+  terrainCloud = cloud;
+  const ground = cloud.classCounts.get(2) || 0;
+  $('#ter-cloud').textContent = `${cloud.label} · ${t('pc.points', { n: fmtNum(cloud.count) })}`;
+  const srcSel = $('#ter-source');
+  srcSel.options[0].disabled = !ground;
+  srcSel.options[0].textContent = `${t('ter.srcGround')}${ground ? ` · ${fmtNum(ground)}` : ` – ${t('ter.noGround')}`}`;
+  srcSel.value = ground ? 'ground' : 'lowest';
+  updateTerrainEstimate();
+  $('#terrain-dialog').showModal();
+}
+function updateTerrainEstimate() {
+  const c = terrainCloud;
+  if (!c) return;
+  const g = Math.max(0.05, +$('#ter-grid').value || 1);
+  const b = c.getBox().getSize(new THREE.Vector3());
+  const cells = Math.round((b.x * b.z) / (g * g)); // viewer x and z are the plan
+  $('#ter-estimate').textContent = t('ter.estimate', { n: fmtNum(Math.min(cells, $('#ter-source').value === 'ground' ? c.classCounts.get(2) || 0 : c.count)) });
+}
+for (const id of ['#ter-grid', '#ter-source']) $(id).addEventListener('input', updateTerrainEstimate);
+
+async function buildTerrain() {
+  const c = terrainCloud;
+  if (!c) return;
+  const grid = +$('#ter-grid').value || 1, maxEdge = +$('#ter-maxedge').value || 0;
+  $('#terrain-dialog').close();
+  const name = `${c.label.replace(/\.[^.]+$/, '')} – ${t('ter.suffix')}`;
+  try {
+    const res = await runTerrainWorker({
+      cloud: { positions: c.positions, classes: c.classes, hidden: [...c.hiddenClasses], toIfc: c.toIfcMatrix.elements },
+      grid, maxEdge, source: $('#ter-source').value, name, georef: terrainGeoref(),
+    }, t('ter.building', { name: c.label }));
+    await openTerrain(res, name);
+  } catch (err) {
+    console.error(err);
+    toast(t('ter.failed', { name: c.label, error: err.message || err }));
+  }
+}
+
+/**
+ * LandXML is in map coordinates (N E H) or in the IFC coordinates of the models: like a point
+ * cloud, the one that lands nearer the models is used. Returns the map -> IFC matrix or null (as is).
+ */
+function landXmlPlacement(text) {
+  const toIfc = viewer.mapToIfcMatrix();
+  const p = /<P\b[^>]*>\s*([-\d.eE+]+)[\s,]+([-\d.eE+]+)[\s,]+([-\d.eE+]+)/.exec(text);
+  const box = viewer.sceneBox({ visibleOnly: false, clouds: true });
+  if (!toIfc || !p || box.isEmpty()) return toIfc;
+  const c = viewer.toIfc(box.getCenter(new THREE.Vector3()));
+  const raw = new THREE.Vector3(+p[2], +p[1], +p[3]);
+  const map = raw.clone().applyMatrix4(toIfc);
+  return Math.hypot(map.x - c.x, map.y - c.y) < Math.hypot(raw.x - c.x, raw.y - c.y) ? toIfc : null;
+}
+
+async function terrainFromLandXml(file) {
+  const name = file.name.replace(/\.xml$/i, '');
+  try {
+    const text = await file.text();
+    const res = await runTerrainWorker({
+      landxml: text, toIfc: landXmlPlacement(text)?.elements || null, maxEdge: 0, name, georef: terrainGeoref(),
+    }, t('ter.reading', { name: file.name }));
+    await openTerrain(res, name);
+  } catch (err) {
+    console.error(err);
+    toast(t('ter.failed', { name: file.name, error: err.message || err }));
+  }
+}
+
+async function openIfcFiles(list, keys = null, { fit = true } = {}) {
   const before = viewer.models.length;
   await withLoading(async (progress) => {
     for (let i = 0; i < list.length; i++) {
@@ -483,6 +602,7 @@ async function openIfcFiles(list, keys = null) {
         // Build the picking index (BVH) in the background so the first click is instant
         setTimeout(() => { try { model.pickTargets(); } catch { /* built on first pick instead */ } }, 300);
         if (state.spacesVisible) model.show(model.spaceIds);
+        if (isTerrainModel(model)) { model.terrain = true; model.setHeightColors(true); }
       } catch (err) {
         console.error(err);
         toast(t('msg.loadFailed', { name: file.name, error: err.message || err }));
@@ -490,7 +610,7 @@ async function openIfcFiles(list, keys = null) {
     }
   });
   afterModelsChanged();
-  viewer.fitBox(viewer.sceneBox(), { keepDirection: before > 0 });
+  if (fit) viewer.fitBox(viewer.sceneBox(), { keepDirection: before > 0 });
   checkCoordinates();
 }
 
@@ -969,6 +1089,7 @@ document.addEventListener('click', (e) => {
     isolate: () => isolateSelected(),
     'show-all': () => showAll(),
     'toggle-spaces': () => toggleSpaces(),
+    'ter-build': () => buildTerrain(),
     'toggle-viewcube': () => setViewCube(viewCube.el.hidden),
     'toggle-ortho': () => { if (walk.active) walk.stop(); setOrtho(!viewer.isOrtho); },
     walk: () => walk.toggle(),
@@ -1379,6 +1500,8 @@ function modelCard(m) {
       h('div', { class: 'card-row' }, h('label', { text: t('models.color') }), colorInput,
         h('button', { class: 'btn xs', onclick: () => { m.setColor(null); renderModels(); projects.touch?.(); }, text: t('models.original') })),
       h('div', { class: 'card-row' }, h('label', { text: t('models.transparency') }), opacity, opVal),
+      m.terrain ? h('label', { class: 'card-row chk' }, h('input', { type: 'checkbox', checked: !!m.heightColors, onchange: (e) => { m.setHeightColors(e.target.checked); viewer.invalidate(); } }), h('span', { text: t('ter.heightColors') }),
+        m.heightRange ? h('span', { class: 'muted', text: m.heightRange.map((y) => fmtNum(+viewer.toIfc(new THREE.Vector3(0, y, 0).applyMatrix4(m.group.matrixWorld)).z.toFixed(1))).join(' – ') + ' m' }) : null) : null,
       h('div', { class: 'card-row' }, h('label', { text: t('mg.group') }), groupSel),
       h('div', { class: 'card-btns' },
         h('button', { class: 'btn sm', onclick: () => viewer.fitBox(m.getBox()), text: t('models.zoom') }),

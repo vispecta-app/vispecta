@@ -35,6 +35,17 @@ https://github.com/vispecta-app/vispecta/releases
   cut anything yet.
 
 ### Added
+- **Terrain (TIN) from point clouds and LandXML.** *Terrain (TIN)…* on a point cloud's card builds
+  a terrain surface from the ground points (class 2), or from the lowest point per grid cell when
+  the file has no classes (a simple ground filter). The points are thinned on a grid in plan
+  (default 1 m), triangulated, and triangles with longer edges than a limit are dropped, so there
+  are holes where there is no data. A LandXML surface (`.xml`, TIN with points and faces) opens as
+  a terrain too, in map coordinates or in those of the models. The terrain is an IFC model of its
+  own (IfcGeographicElement TERRAIN with an IfcTriangulatedFaceSet, and the models'
+  IfcMapConversion): coloured by height, a terrain line in sections, drawings (DXF layer
+  `IFCGEOGRAPHICELEMENT`) and longitudinal profiles, saved in projects and downloaded with
+  *Download IFC*. Built in a worker: 440 000 points in about 4 s.
+  ([#45](https://github.com/vispecta-app/vispecta/issues/45))
 - **View cube** in the top right corner of the 3D view, as in CAD programs. Click a face, edge or
   corner to look from there (the camera turns around the same point at the same distance), drag
   the cube to orbit, ↶ ↷ turn the view 90° about the vertical, ⌂ goes back to the 3D view of

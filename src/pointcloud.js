@@ -279,7 +279,7 @@ export class PointCloud {
   }
 }
 
-function percentiles(arr, a, b) {
+export function percentiles(arr, a, b) {
   const n = arr.length;
   if (!n) return [0, 1];
   // a sample is enough for the colour range
@@ -292,7 +292,7 @@ function percentiles(arr, a, b) {
 
 // a blue – teal – yellow – red ramp (readable on light and dark backgrounds)
 const RAMP = [[44, 80, 160], [30, 150, 170], [120, 190, 90], [240, 200, 60], [215, 80, 50]];
-function ramp(t) {
+export function ramp(t) {
   t = Math.max(0, Math.min(1, t)) * (RAMP.length - 1);
   const i = Math.min(RAMP.length - 2, Math.floor(t)), f = t - i, a = RAMP[i], b = RAMP[i + 1];
   return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];

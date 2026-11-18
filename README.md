@@ -122,6 +122,16 @@ Surveys and laser scans can be loaded next to the IFC models (#27) – drop the 
 
 Point clouds are not saved in projects or workspaces yet; open the file again.
 
+### Terrain (TIN)
+*Terrain (TIN)…* on a point cloud's card builds a terrain surface (#45):
+
+- **Ground points:** class 2 (ground) when the file has it – Danmarks Højdemodel and most surveys do – or else the lowest point per grid cell, a simple ground filter that drops vegetation and objects above the ground. Noise (classes 7 and 18) and classes switched off on the card are left out.
+- **Grid:** the points are thinned on a grid in plan (default 1 m). The dialog shows about how many terrain points that gives.
+- **Triangulation** in plan with [Delaunator](https://github.com/mapbox/delaunator) (ISC), in a worker. Triangles with an edge longer than *Max. triangle edge* (default 10 m) are dropped, so there are holes where there is no data (under bridges, water); 0 keeps them all.
+- **An IFC model of its own:** an `IfcGeographicElement` (TERRAIN) with an `IfcTriangulatedFaceSet`, with the `IfcMapConversion` of the models and a property set `Vispecta_Terrain` (source, grid, points, triangles, min./max. elevation). It is shown and switched like any model, coloured by height (*Colour by height* on its card), and a terrain line in sections, the section window, drawings (DXF layer `IFCGEOGRAPHICELEMENT`) and longitudinal profiles – an open surface has no cut face. *Download IFC* saves it, e.g. for Civil 3D, Revit or Trimble Connect.
+- **LandXML:** drop a LandXML file (`.xml`) with a TIN surface (points and faces; faces marked invisible are holes). The points are read as map coordinates through the models' `IfcMapConversion`, or as IFC coordinates – whichever lands nearer the models. A surface with points only is triangulated.
+- **Terrain IFC files** from other programs (a model with only `IfcGeographicElement`) are coloured by height too.
+
 ### Longitudinal profile
 **Alignment → Longitudinal profile** unrolls the model along an alignment or along a **line you draw**. Choose *Draw a new line*, click points in the view (on elements, or at the height of the last point), then press Enter or double click. Backspace removes the last point and Esc cancels. The visible elements are cut with the vertical surface that follows the path, so the drawing has the station along and the height up. You set the range (from–to station) and the height exaggeration (1–50×). The red line is the vertical profile of the alignment, or the heights of the clicked points of a drawn line. Station and height grid lines are chosen for the paper scale, and the profile heights are written under the stations. The profile is previewed in the dialog and exported as PDF, SVG or DXF (DXF heights are exaggerated like the drawing). Drawn lines also work for cross sections at a station and for driving, and projects remember them.
 
@@ -213,7 +223,7 @@ npm run build    # static build in dist/
 npm run preview  # preview the build
 ```
 
-Built with [three.js](https://threejs.org), [three-mesh-bvh](https://github.com/gkjohnson/three-mesh-bvh), [web-ifc](https://github.com/ThatOpen/engine_web-ifc) (viewing and metadata editing), [Pyodide](https://pyodide.org) + [IfcOpenShell](https://ifcopenshell.org) (Python and IDS), [fflate](https://github.com/101arrowz/fflate) and [CodeMirror](https://codemirror.net). It is a static site with no backend.
+Built with [three.js](https://threejs.org), [three-mesh-bvh](https://github.com/gkjohnson/three-mesh-bvh), [web-ifc](https://github.com/ThatOpen/engine_web-ifc) (viewing and metadata editing), [Pyodide](https://pyodide.org) + [IfcOpenShell](https://ifcopenshell.org) (Python and IDS), [fflate](https://github.com/101arrowz/fflate), [Delaunator](https://github.com/mapbox/delaunator) (terrain) and [CodeMirror](https://codemirror.net). It is a static site with no backend.
 
 | File | Purpose |
 | --- | --- |
@@ -226,6 +236,7 @@ Built with [three.js](https://threejs.org), [three-mesh-bvh](https://github.com/
 | `src/bcf.js`, `src/issues.js` | BCF read/write and the Issues tab |
 | `src/drawing.js` | 2D drawings from section planes (PDF, SVG, DXF) |
 | `src/alignment.js` | IFC4x3 alignments and stationing |
+| `src/terrain-worker.js` | terrain (TIN) from point clouds and LandXML, written as IFC |
 | `src/viewcube.js` | view cube in the corner of the 3D view |
 | `src/secview.js` | section window: live 2D cut of a plane, stepping, zoom, pop-out window |
 | `src/lineedit.js` | editing the points of a drawn line |

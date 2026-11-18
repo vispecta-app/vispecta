@@ -4,6 +4,7 @@ import * as WebIFC from 'web-ifc';
 import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh';
 import { fmtValue, prettyTypeName, prettyRawName, decodeIfcString } from './ifc.js';
 import { t } from './i18n.js';
+import { ramp, percentiles } from './pointcloud.js';
 
 let nextUid = 1;
 const XRAY_OPACITY = 0.12;
@@ -169,7 +170,10 @@ export class IfcModel {
   // ------------------------------------------------------------------ udseende
   #applyMaterial(b) {
     const m = b.material;
-    m.color.copy(this.overrideColor || styledColor(b.color));
+    const ramp = !!this.heightColors && !this.overrideColor && !!b.geometry.getAttribute('color');
+    if (m.vertexColors !== ramp) { m.vertexColors = ramp; m.needsUpdate = true; }
+    if (ramp) m.color.set(0xffffff);
+    else m.color.copy(this.overrideColor || styledColor(b.color));
     const op = b.opacity * this.opacity * (this.xrayKeep ? XRAY_OPACITY : 1);
     const transparent = op < 0.999;
     if (m.transparent !== transparent) m.needsUpdate = true;
@@ -181,6 +185,35 @@ export class IfcModel {
 
   setColor(color) {
     this.overrideColor = color ? new THREE.Color(color) : null;
+    for (const b of this.buckets) this.#applyMaterial(b);
+  }
+
+  /**
+   * Colours the surfaces by height (terrain, #45): a ramp between the 2 % and 98 % heights of the
+   * model. A model colour chosen in the browser still wins.
+   */
+  setHeightColors(on) {
+    this.heightColors = on;
+    if (on) {
+      let n = 0;
+      for (const b of this.buckets) n += b.positions.length / 3;
+      const ys = new Float32Array(n);
+      let k = 0;
+      for (const b of this.buckets) for (let i = 1; i < b.positions.length; i += 3) ys[k++] = b.positions[i];
+      const [lo, hi] = percentiles(ys, 0.02, 0.98);
+      const span = Math.max(1e-6, hi - lo);
+      const c = new THREE.Color();
+      for (const b of this.buckets) {
+        const P = b.positions, col = new Float32Array(P.length);
+        for (let i = 0; i < P.length; i += 3) {
+          const [r, g, bb] = ramp((P[i + 1] - lo) / span);
+          c.setRGB(r / 255, g / 255, bb / 255, THREE.SRGBColorSpace);
+          col[i] = c.r; col[i + 1] = c.g; col[i + 2] = c.b;
+        }
+        b.geometry.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      }
+      this.heightRange = [lo, hi];
+    }
     for (const b of this.buckets) this.#applyMaterial(b);
   }
 

@@ -224,6 +224,22 @@ export class Viewer extends EventTarget {
   }
 
   /** The IfcMapConversion used for map coordinates: of the reference model, else of any model. */
+  /** The model whose IfcMapConversion is used for map coordinates, or null. */
+  mapModel() { return this.#mapModel(); }
+
+  /** Map coordinates (E, N, H in metres) -> IFC coordinates, as a matrix; null without a map conversion. */
+  mapToIfcMatrix() {
+    const mm = this.#mapModel();
+    if (!mm) return null;
+    const m = mm.georef.map, ls = mm.lengthScale || 1;
+    const k = ls / (m.scale * m.mapScale), t = ls / m.scale;
+    return new THREE.Matrix4().set(
+      k * m.a, k * m.b, 0, -t * (m.a * m.eastings + m.b * m.northings),
+      -k * m.b, k * m.a, 0, -t * (-m.b * m.eastings + m.a * m.northings),
+      0, 0, k, -t * m.height,
+      0, 0, 0, 1);
+  }
+
   #mapModel() {
     if (this.referenceModel?.georef?.map) return this.referenceModel;
     return this.models.find((m) => m.georef?.map) || null;
@@ -236,18 +252,8 @@ export class Viewer extends EventTarget {
     const [ox, oy, oz] = cloud.origin;
     const raw = new THREE.Matrix4().makeTranslation(ox, oy, oz); // source = IFC coordinates
     const candidates = [['raw', raw]];
-    const mm = this.#mapModel();
-    if (mm) {
-      // map (e, n, h) -> IFC project coordinates (m): inverse IfcMapConversion
-      const m = mm.georef.map, ls = mm.lengthScale || 1;
-      const k = ls / (m.scale * m.mapScale), t = ls / m.scale;
-      const toIfc = new THREE.Matrix4().set(
-        k * m.a, k * m.b, 0, -t * (m.a * m.eastings + m.b * m.northings),
-        -k * m.b, k * m.a, 0, -t * (-m.b * m.eastings + m.a * m.northings),
-        0, 0, k, -t * m.height,
-        0, 0, 0, 1);
-      candidates.push(['map', toIfc.multiply(raw)]);
-    }
+    const toIfc = this.mapToIfcMatrix(); // map (e, n, h) -> IFC project coordinates (m): inverse IfcMapConversion
+    if (toIfc) candidates.push(['map', toIfc.multiply(raw)]);
     // the models' extent, in IFC coordinates
     const box = this.sceneBox({ visibleOnly: false, clouds: false });
     const center = box.isEmpty() ? null : this.toIfc(box.getCenter(new THREE.Vector3()));
@@ -258,6 +264,7 @@ export class Viewer extends EventTarget {
       if (d < bestD) { best = c; bestD = d; }
     }
     cloud.placement = best[0];
+    cloud.toIfcMatrix = best[1].clone(); // the cloud's own coordinates -> IFC (terrain, #45)
     cloud.points.matrix.multiplyMatrices(toViewer, best[1]);
     cloud.points.matrixWorldNeedsUpdate = true;
     cloud.points.updateMatrixWorld(true);
