@@ -6,6 +6,10 @@ https://github.com/vispecta-app/vispecta/releases
 ## Unreleased
 
 ### Changed
+- **Terrain opens in a calm green.** Height colours are now a choice on the terrain's card:
+  off (terrain green), blue – red, or green – brown – white. The choice is saved in projects, and
+  terrains made in Vispecta are written in green too.
+  ([#90](https://github.com/vispecta-app/vispecta/issues/90))
 - **Dialogs close with ✕ in the top right corner** (or Esc) – no more Cancel / Close buttons.
 - **A new cross section at a station opens the section window in the app**, next to the 3D view.
   Plan, X/Y and face sections just cut the model. The setting *Sections in a window of their own*
@@ -21,6 +25,7 @@ https://github.com/vispecta-app/vispecta/releases
 - **Edit** is no longer in the toolbar; it stays in the properties panel (and the `E` key).
 
 ### Fixed
+- **Stations just below a full km showed as `12+1000.000`.** They are rounded first, so they show as `13+000.000`.
 - **Break points could be placed on a line under the outline** (e.g. on the terrain under an
   embankment) where a short segment lay above two crossing lines.
 - **Cross sections in curves sat up to 11 cm off the axis.** web-ifc tessellates circular arcs
@@ -35,6 +40,11 @@ https://github.com/vispecta-app/vispecta/releases
   cut anything yet.
 
 ### Added
+- **Several alignments in a model: on/off and alias per alignment.** The model's card lists its
+  alignments with their stationing; each can be switched on or off, renamed with an alias and zoomed
+  to. The alias is shown wherever an alignment is chosen; hidden ones are marked there. Parallel
+  alignments put their station labels on their outer sides. Saved in projects, undo covers it.
+  ([#89](https://github.com/vispecta-app/vispecta/issues/89))
 - **New sample: a double-track railway after Banedanmark norms.** *Double-track railway with a
   bridge* on the start screen opens a fictitious 1 km line (12+000–13+000) for 180 km/h, one IFC 4.3
   file per discipline in three groups:

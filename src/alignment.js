@@ -269,7 +269,8 @@ export function setStationFormat(fmt) {
 export function formatStation(station, fmt = stationFormat.value) {
   fmt ||= stationFormat.value;
   const sign = station < 0 ? '-' : '';
-  const a = Math.abs(station);
+  // round to the shown precision first, so 12+999.9999 becomes 13+000.000, not 12+1000.000
+  const a = fmt === 'hm' ? Math.round(Math.abs(station) * 100) / 100 : Math.round(Math.abs(station) * 1000) / 1000;
   if (fmt === 'm') return `${station.toFixed(3)} m`;
   if (fmt === 'kmdot') return `${sign}${(a / 1000).toFixed(3)}`;
   if (fmt === 'kmtxt') return `km ${sign}${(a / 1000).toFixed(3).replace('.', ',')}`;
@@ -330,8 +331,23 @@ export class AlignmentLayer {
     for (const l of this.labels) l.el.remove();
     this.labels = [];
     if (!this.visible) return;
+    // Several alignments side by side (two tracks, #89): every alignment puts its station labels on
+    // its outer side – away from its nearest neighbour – so the labels of parallel tracks don't
+    // collide. Without a neighbour within 60 m they go to the left.
+    const sideOf = new Map();
+    for (const al of this.alignments) {
+      let side = 1, best = 60;
+      const mid = pointAt(al, al.length / 2);
+      for (const o of this.alignments) {
+        if (o === al) continue;
+        const r = project(o, { x: mid.x, y: mid.y });   // where this alignment's middle lies relative to the other
+        if (Math.abs(r.offset) < best) { best = Math.abs(r.offset); side = r.offset >= 0 ? 1 : -1; }
+      }
+      sideOf.set(al, side);
+    }
     for (const al of this.alignments) {
       const zOf = (s) => heightAt(al, s) ?? 0;
+      const side = sideOf.get(al) || 1;
       const pts = al.poly.map((p, k) => this.viewer.fromIfc(p[0], p[1], zOf(al.cum[k])));
       const g = new THREE.BufferGeometry().setFromPoints(pts);
       const line = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xf08a24, depthTest: false, transparent: true, opacity: 0.95 }));
@@ -361,7 +377,8 @@ export class AlignmentLayer {
         el.className = 'm-label align';
         el.textContent = formatStation(st, this.format || stationFormat.value);
         this.layer.append(el);
-        this.labels.push({ el, at: this.viewer.fromIfc(p.x + nx * half * 1.5, p.y + ny * half * 1.5, z) });
+        const off = half * 1.5 + 1.2; // a little beyond the tick, on the outer side
+        this.labels.push({ el, at: this.viewer.fromIfc(p.x + side * nx * off, p.y + side * ny * off, z) });
       }
       }
       if (ticks.length) {

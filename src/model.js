@@ -6,6 +6,14 @@ import { fmtValue, prettyTypeName, prettyRawName, decodeIfcString } from './ifc.
 import { t } from './i18n.js';
 import { ramp, percentiles } from './pointcloud.js';
 
+// a natural ramp for terrain heights (#90): green lowland, ochre, brown, white tops
+const EARTH = [[70, 125, 70], [150, 170, 90], [200, 180, 110], [150, 110, 70], [235, 235, 230]];
+function rampEarth(t) {
+  t = Math.max(0, Math.min(1, t)) * (EARTH.length - 1);
+  const i = Math.min(EARTH.length - 2, Math.floor(t)), f = t - i, a = EARTH[i], b = EARTH[i + 1];
+  return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+}
+
 let nextUid = 1;
 const XRAY_OPACITY = 0.12;
 const PICK_MATERIAL = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
@@ -173,7 +181,7 @@ export class IfcModel {
     const ramp = !!this.heightColors && !this.overrideColor && !!b.geometry.getAttribute('color');
     if (m.vertexColors !== ramp) { m.vertexColors = ramp; m.needsUpdate = true; }
     if (ramp) m.color.set(0xffffff);
-    else m.color.copy(this.overrideColor || styledColor(b.color));
+    else m.color.copy(this.overrideColor || this.baseColor || styledColor(b.color));
     const op = b.opacity * this.opacity * (this.xrayKeep ? XRAY_OPACITY : 1);
     const transparent = op < 0.999;
     if (m.transparent !== transparent) m.needsUpdate = true;
@@ -192,9 +200,12 @@ export class IfcModel {
    * Colours the surfaces by height (terrain, #45): a ramp between the 2 % and 98 % heights of the
    * model. A model colour chosen in the browser still wins.
    */
-  setHeightColors(on) {
-    this.heightColors = on;
-    if (on) {
+  setHeightColors(mode) {
+    // false: off; 'default' (or true): blue - teal - yellow - red; 'earth': green - ochre - brown - white (#90)
+    mode = mode === true ? 'default' : mode || false;
+    this.heightColors = mode;
+    const rampOf = mode === 'earth' ? rampEarth : ramp;
+    if (mode) {
       let n = 0;
       for (const b of this.buckets) n += b.positions.length / 3;
       const ys = new Float32Array(n);
@@ -206,7 +217,7 @@ export class IfcModel {
       for (const b of this.buckets) {
         const P = b.positions, col = new Float32Array(P.length);
         for (let i = 0; i < P.length; i += 3) {
-          const [r, g, bb] = ramp((P[i + 1] - lo) / span);
+          const [r, g, bb] = rampOf((P[i + 1] - lo) / span);
           c.setRGB(r / 255, g / 255, bb / 255, THREE.SRGBColorSpace);
           col[i] = c.r; col[i + 1] = c.g; col[i + 2] = c.b;
         }
@@ -214,6 +225,12 @@ export class IfcModel {
       }
       this.heightRange = [lo, hi];
     }
+    for (const b of this.buckets) this.#applyMaterial(b);
+  }
+
+  /** A colour used instead of the file's colours, below a colour chosen in the browser (terrain: green, #90). */
+  setBaseColor(color) {
+    this.baseColor = color ? new THREE.Color(color) : null;
     for (const b of this.buckets) this.#applyMaterial(b);
   }
 
