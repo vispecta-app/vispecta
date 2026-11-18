@@ -5,6 +5,8 @@ https://github.com/vispecta-app/vispecta/releases
 
 ## Unreleased
 
+## v0.0.4 – 18.11.2026
+
 ### Changed
 - **Terrain opens in a calm green.** Height colours are now a choice on the terrain's card:
   off (terrain green), blue – red, or green – brown – white. The choice is saved in projects, and
