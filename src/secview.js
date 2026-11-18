@@ -21,6 +21,8 @@ export class SectionViewer {
     this.win = null;
     try { this.showPoints = localStorage.getItem('onlineifc.sv.points') === '1'; } catch { this.showPoints = false; }
     try { this.showKey = localStorage.getItem('onlineifc.sv.key') !== '0'; } catch { this.showKey = true; }
+    try { this.sheet = localStorage.getItem('onlineifc.sv.sheet') === '1'; } catch { this.sheet = false; }
+    this.sheetView = { s: 1, x: 0, y: 0 };
     this.busy = false;
     this.pending = false;
     this.#build();
@@ -47,6 +49,12 @@ export class SectionViewer {
         this.cutBtn = btn('✂', t('planes.cut3d'), () => this.plane && this.ctx.toggleCut?.(this.plane)),
         this.ptsBtn = btn('⌖', t('sv.points'), () => { this.showPoints = !this.showPoints; try { localStorage.setItem('onlineifc.sv.points', this.showPoints ? '1' : ''); } catch { /* ignore */ } this.update(); }),
         this.resetPtsBtn = btn('↺', t('sv.resetPoints'), () => { if (this.plane) { this.ctx.resetPoints?.(this.plane); this.update(); } }),
+        this.sheetBtn = btn('📄', t('sv.sheet'), () => {
+          this.sheet = !this.sheet;
+          try { localStorage.setItem('onlineifc.sv.sheet', this.sheet ? '1' : ''); } catch { /* ignore */ }
+          this.sheetView = { s: 1, x: 0, y: 0 };
+          this.update();
+        }),
         this.keyBtn = btn('▦', t('sv.keyPlan'), () => { this.showKey = !this.showKey; try { localStorage.setItem('onlineifc.sv.key', this.showKey ? '1' : '0'); } catch { /* ignore */ } this.renderKey(); }),
         this.popBtn,
         btn('✕', t('common.close'), () => this.close())));
@@ -55,7 +63,10 @@ export class SectionViewer {
     this.body = h('div', { class: 'sv-body' });
     this.keySvg = document.createElementNS(SVG, 'svg');
     this.keySvg.setAttribute('class', 'sv-key');
-    this.body.append(this.svg, this.keySvg);
+    // the sheet as it will be exported (#51): the same SVG the drawing export writes
+    this.sheetEl = h('div', { class: 'sv-sheet' });
+    this.sheetEl.hidden = true;
+    this.body.append(this.svg, this.sheetEl, this.keySvg);
     this.coord = h('span', { class: 'sv-coord' });
     this.info = h('span', { class: 'sv-info' });
     this.el = h('div', { class: 'secview', tabindex: '0' }, this.head, this.body, h('div', { class: 'sv-foot' }, this.coord, this.info));
@@ -80,17 +91,18 @@ export class SectionViewer {
     // The zoom is kept while stepping through the stations.
     this.body.addEventListener('wheel', (e) => {
       e.preventDefault();
+      if (this.sheetShown) { this.#sheetZoom(e.clientX, e.clientY, Math.pow(1.0015, -e.deltaY)); return; }
       if (!this.view) return;
       this.#zoomAt(this.#toModel(e), Math.pow(1.0015, e.deltaY));
     }, { passive: false });
-    this.body.addEventListener('dblclick', (e) => { e.preventDefault(); this.fit(); this.render(); });
+    this.body.addEventListener('dblclick', (e) => { e.preventDefault(); this.sheetView = { s: 1, x: 0, y: 0 }; this.fit(); this.render(); });
     const ptrs = new Map(); // pointerId -> {x, y}
     let drag = null, pinch = null;
     const startDrag = () => {
       const [a, b] = [...ptrs.values()];
       drag = null; pinch = null;
       if (a && b) pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, v: { ...this.view } };
-      else if (a) drag = { x: a.x, y: a.y, v: { ...this.view } };
+      else if (a) drag = { x: a.x, y: a.y, v: { ...this.view }, sx: this.sheetView.x, sy: this.sheetView.y };
     };
     this.body.addEventListener('pointerdown', (e) => {
       if (!this.view) return;
@@ -106,6 +118,12 @@ export class SectionViewer {
       if (!ptrs.has(e.pointerId)) return;
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
       const r = this.body.getBoundingClientRect();
+      if (this.sheetShown && drag) {
+        const sv = this.sheetView;
+        this.sheetView = { ...sv, x: drag.sx + (e.clientX - drag.x), y: drag.sy + (e.clientY - drag.y) };
+        this.#sheetTransform();
+        return;
+      }
       if (pinch) {
         const [a, b] = [...ptrs.values()];
         const d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
@@ -123,7 +141,7 @@ export class SectionViewer {
       // a click (not a drag) with the points shown: remove or add an annotated point (#48)
       const pr = this.press;
       this.press = null;
-      if (e.type === 'pointerup' && pr && !ptrs.size && Math.hypot(e.clientX - pr.x, e.clientY - pr.y) < 4 && this.showPoints) this.#pointClick(e);
+      if (e.type === 'pointerup' && pr && !ptrs.size && Math.hypot(e.clientX - pr.x, e.clientY - pr.y) < 4 && this.showPoints && !this.sheetShown) this.#pointClick(e);
       startDrag();
     };
     this.body.addEventListener('pointerup', lift);
@@ -206,6 +224,9 @@ export class SectionViewer {
         console.error(e);
         this.section = null;
       }
+      // the sheet view: the exported drawing itself (#51)
+      this.sheetSvg = null;
+      if (this.sheet) { try { this.sheetSvg = this.ctx.sheetSvg?.(this.plane) || null; } catch (e) { console.warn('sheet', e); } }
       if (!this.view) this.fit();
       this.render();
       this.busy = false;
@@ -268,7 +289,47 @@ export class SectionViewer {
     return { x: this.view.x + (e.clientX - r.left - ox) / k, y: this.view.y + (e.clientY - r.top - oy) / k };
   }
 
+  /** Shows the sheet (the SVG of the export) instead of the live cut, when on (#51). */
+  #renderSheet() {
+    this.sheetBtn.classList.toggle('on', !!this.sheet);
+    this.sheetShown = !!(this.sheet && this.sheetSvg);
+    this.svg.style.display = this.sheetShown ? 'none' : '';
+    if (this.sheetShown) this.keySvg.style.display = 'none'; else this.renderKey(); // the sheet has its own title block
+    this.sheetEl.hidden = !this.sheetShown;
+    if (!this.sheetShown) return false;
+    if (this.sheetEl.dataset.src !== this.sheetSvg) {
+      this.sheetEl.innerHTML = this.sheetSvg.replace(/^<\?xml[^>]*>\s*/, '');
+      this.sheetEl.dataset.src = this.sheetSvg;
+      const s = this.sheetEl.querySelector('svg');
+      if (s) { s.setAttribute('width', '100%'); s.setAttribute('height', '100%'); Object.assign(s.style, { width: '100%', height: '100%', position: 'absolute', left: '0', top: '0' }); }
+    }
+    this.#sheetTransform();
+    return true;
+  }
+
+  #sheetTransform() {
+    const s = this.sheetEl.querySelector('svg');
+    if (s) s.style.transform = `translate(${this.sheetView.x}px, ${this.sheetView.y}px) scale(${this.sheetView.s})`;
+  }
+
+  #sheetZoom(cx, cy, f) {
+    const r = this.sheetEl.getBoundingClientRect();
+    const v = this.sheetView;
+    const s = Math.min(40, Math.max(0.5, v.s * f));
+    const k = s / v.s;
+    const px = cx - r.left, py = cy - r.top;
+    this.sheetView = { s, x: px - (px - v.x) * k, y: py - (py - v.y) * k };
+    this.#sheetTransform();
+  }
+
   render() {
+    if (this.isOpen && this.#renderSheet()) {
+      const sec = this.section;
+      let n = 0;
+      for (const L of sec?.layers?.values() || []) n += L.elements;
+      this.info.textContent = sec ? this.ctx.t('sv.sheetInfo', { n }) : '';
+      return;
+    }
     if (!this.isOpen || !this.view) return;
     const v = this.view;
     const svg = this.svg;
