@@ -36,18 +36,18 @@ https://github.com/vispecta-app/vispecta/releases
 
 ### Added
 - **New sample: a double-track railway after Banedanmark norms.** *Double-track railway with a
-  bridge and a crossover* on the start screen opens a fictitious 2.5 km line for 180 km/h, one IFC 4.3
+  bridge* on the start screen opens a fictitious 1 km line (12+000–13+000) for 180 km/h, one IFC 4.3
   file per discipline in three groups:
-  - alignments;
-  - track: 60E1, S99 sleepers, welds, a crossover 60E1-500-1:12 with point heating, frispormærker and km marks;
+  - alignment;
+  - track: 60E1, S99 sleepers, welds and km marks;
   - earthworks with transition wedges and topsoil, and drainage with ditches, wells and outlets;
-  - a 20 m bridge, overhead contact line (Sicat SX), cables;
+  - a 20 m bridge with stairs and handrails, the overhead contact line (Sicat SX) and cables;
   - terrain and landscape.
 
-  It comes with a survey point cloud (LAZ in UTM coordinates) and is made with
-  `scripts/samples/make_bn_dobbeltspor.py`. Samples can now include point clouds. A model counts as a
-  terrain (coloured by height) only when all its geographic elements are of the type TERRAIN, so trees
-  keep their colours.
+  It comes with a survey point cloud (LAZ in UTM coordinates), about 5 MB to download, and is made
+  with `scripts/samples/make_double_track_railway.py`. Samples can now include point clouds. A model
+  counts as a terrain (coloured by height) only when all its geographic elements are of the type
+  TERRAIN, so trees keep their colours.
 - **Terrain (TIN) from point clouds and LandXML.** *Terrain (TIN)…* on a point cloud's card builds
   a terrain surface from the ground points (class 2), or from the lowest point per grid cell when
   the file has no classes (a simple ground filter). The points are thinned on a grid in plan
