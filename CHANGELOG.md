@@ -21,6 +21,8 @@ https://github.com/vispecta-app/vispecta/releases
 - **Edit** is no longer in the toolbar; it stays in the properties panel (and the `E` key).
 
 ### Fixed
+- **Break points could be placed on a line under the outline** (e.g. on the terrain under an
+  embankment) where a short segment lay above two crossing lines.
 - **Cross sections in curves sat up to 11 cm off the axis.** web-ifc tessellates circular arcs
   with chords of tens of metres; the horizontal alignment is now computed from its design
   parameters (lines, arcs, clothoids) to within about 1 mm.
@@ -39,6 +41,21 @@ https://github.com/vispecta-app/vispecta/releases
   everything. The compass ring shows north (IFC +Y); its letters look from that side. Works with
   the orthographic camera and in the dark theme; *View → View cube* turns it off (remembered).
   ([#84](https://github.com/vispecta-app/vispecta/issues/84))
+- **Drawing presets and a sheet view in the section window** (#51). The drawing dialog has
+  presets at the top: two built-in ones (*Rail cross section A3 1:100* and *Overview*) and your
+  own, saved with all drawing, annotation and label settings, the excluded classes and the
+  section width. They are kept in the browser and in the project, and can be exported and
+  imported as `*.vispecta-preset.json` to share with colleagues. 📄 in the section window shows
+  the section as the sheet it will be exported as (paper, scale, title block, annotation,
+  hatching) – it follows the stations and every change in the drawing dialog. Zoom with the
+  wheel, pan by dragging, double-click to fit.
+- **Cross-section drawings: layout, styles and hatching.** Hatched cut faces in PDF, SVG and DXF
+  (DXF: a layer `<CLASS>_HATCH` per class); line weight thin / normal / thick; the band under or
+  over the section; text size 80–150 %; labels that would overlap are spread out with kinked
+  leaders instead of being left out; a dimension chain between the annotated points (or overall);
+  DXF layers ANNOTATION_BAND, ANNOTATION_POINTS, ANNOTATION_SLOPES and DIMENSIONS with their own
+  colours, and the DXF annotation sized for the same scale as the PDF.
+  ([#50](https://github.com/vispecta-app/vispecta/issues/50))
 - **Undo and redo.** Ctrl+Z (Cmd+Z) and ↶ in the toolbar undo the last change – hiding,
   isolating, colours, models switched off, sections added, moved or removed, measurements, drawn
   lines, the corridor; Ctrl+Y / Ctrl+Shift+Z and ↷ redo it. A message says what was undone. The

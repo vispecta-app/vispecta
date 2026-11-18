@@ -878,3 +878,8 @@ fieldset.annot .annot-row .chk { margin-bottom: 6px; color: var(--text); }
 .viewcube .vc-cw { right: 4px; bottom: 6px; }
 :root { --vc-face: rgba(246, 249, 249, .92); --vc-edge: #9db3b2; --vc-text: #0C2A30; --vc-hover: #0E8C84; --vc-ring: rgba(157, 179, 178, .45); }
 :root[data-theme='dark'] { --vc-face: rgba(32, 44, 48, .92); --vc-edge: #4f6a6c; --vc-text: #dce8e8; --vc-hover: #12a89e; --vc-ring: rgba(79, 106, 108, .5); }
+/* drawing presets and the sheet view of the section window (#51) */
+.preset-row { display: flex; align-items: flex-end; gap: 6px; flex-wrap: wrap; margin: 6px 0 10px; padding: 8px; border-radius: 8px; background: var(--panel-2, #f3f6f6); }
+.preset-row .field { flex: 1 1 220px; margin: 0; }
+.sv-sheet { position: absolute; inset: 0; overflow: hidden; background: #8a9497; }
+.sv-sheet > svg { stroke: none; stroke-width: 1; fill: #000; font-weight: 400;  display: block; transform-origin: 0 0; box-shadow: 0 2px 12px rgba(0,0,0,.35); background: #fff; }

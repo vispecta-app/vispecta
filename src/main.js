@@ -2113,6 +2113,18 @@ function openSecView(p, { popOut = false } = {}) {
     hatch: () => $('#plane-hatch').checked,
     cut3d: (pl) => (pl.station ? pl.cut3d !== false : null),
     editPoint: (pl, op, x, y) => editAnnotPoint(pl, op, x, y),
+    // the sheet as the drawing export would write it (#51): same section, options and layout
+    sheetSvg: (pl) => {
+      const plan = planeAxes(pl).horizontal;
+      if (pl.station) pl.stationLabel = `${t('st.axis')} ${stationText(pl)}`;
+      const section = computeSection(viewer, pl, { marks: plan ? planMarks : [], annot: plan ? null : annotOptions() });
+      if (!section.layers.size) return null;
+      const opts = drawingOpts();
+      const lay = layout(section, opts);
+      const name = viewer.models[0]?.name.replace(/\.ifc$/i, '') || 'Model';
+      const info = { title: `${name} – ${planeLabel(pl, viewer.planes.indexOf(pl))}`, subtitle: viewer.models.filter((m) => m.visible).map((m) => m.name).join(', '), date: new Date().toISOString().slice(0, 10) };
+      return toSvg(section, lay, info, opts);
+    },
     resetPoints: (pl) => resetAnnotPoints(pl),
     toggleCut: (pl) => togglePlaneCut(pl),
     onClose: () => viewer.setPlaneHighlight(null),
@@ -2875,9 +2887,13 @@ const projects = new ProjectManager({
     models: viewer.models.map((m) => ({ key: projects.keys.get(m) || null, name: m.name, alias: m.alias || null, group: m.groupId || null, color: m.overrideColor ? `#${m.overrideColor.getHexString()}` : null })),
     stationFormat: stationFormat.value, // the client's stationing format stays with the project (#29)
     annotEdits: annotEdits.size ? [...annotEdits] : undefined, // points chosen by hand (#48)
+    drawingPresets: userPresets.length ? userPresets : undefined, // drawing presets (#51)
     corridor: corridor.def ? { path: corridor.def.al.name, drawn: !!corridor.def.al.drawn, offsets: corridor.def.offsets, from: corridor.def.from, to: corridor.def.to } : null, // (#26)
   }),
   setExtra: (x) => {
+    // drawing presets of the project join the ones in this browser (#51)
+    for (const pr of x?.drawingPresets || []) if (pr?.name && !userPresets.some((q) => q.name === pr.name)) userPresets.push(pr);
+    renderPresetSelect();
     annotEdits.clear();
     for (const [k, e] of x?.annotEdits || []) annotEdits.set(k, { removed: e.removed || [], added: e.added || [] });
     drawnPaths.length = 0;
@@ -3090,7 +3106,7 @@ function openDrawingDialog(plane = null) {
   const planes = viewer.planes.filter((p) => p.enabled);
   if (!planes.length) return toast(t('drw.noPlane'));
   $('#drw-plane').replaceChildren(...planes.map((p, i) => h('option', { value: String(p.id), text: planeLabel(p, i), selected: plane ? p === plane : i === 0 })));
-  $('#drw-scale').replaceChildren(h('option', { value: 'fit', text: t('drw.fit') }), ...SCALES.map((sc) => h('option', { value: String(sc), text: `1:${sc}` })));
+  fillScaleOptions();
   const m = viewer.models[0];
   const pSel = plane || planes[0];
   $('#drw-name').value = `${m ? m.name.replace(/\.ifc$/i, '') : 'Model'} – ${pSel.station ? `${t('st.section')} ${sectionLetter(pSel)}–${sectionLetter(pSel)} (${stationText(pSel)})` : t(AXIS_LABEL[pSel.axis] || 'planes.face')}`;
@@ -3127,6 +3143,8 @@ function updateAnnotUi() {
   box.classList.toggle('off', !$('#ann-on').checked);
 }
 $('#drw-plane').addEventListener('change', updateAnnotUi);
+// the section window follows the drawing settings (its sheet view and its points, #51)
+$('#drawing-dialog').addEventListener('change', (e) => { if (e.target.id !== 'drw-preset-file' && secViewer?.isOpen) secViewer.update(); });
 $('#ann-on').addEventListener('change', updateAnnotUi);
 
 // ------------------------------------------------- annotated points chosen by hand (#48)
@@ -3174,6 +3192,136 @@ function restoreDrawingOptions() {
   updateAnnotFormatUi();
 }
 
+/** The scale choices of the drawing dialog (also at start: the section window's sheet view uses them). */
+function fillScaleOptions() {
+  const sel = $('#drw-scale'), was = sel.value;
+  sel.replaceChildren(h('option', { value: 'fit', text: t('drw.fit') }), ...SCALES.map((sc) => h('option', { value: String(sc), text: `1:${sc}` })));
+  if ([...sel.options].some((o) => o.value === was)) sel.value = was;
+}
+
+/** The paper options of the drawing dialog, as toSvg / toPdf / toDxf take them. */
+function drawingOpts() {
+  const scaleVal = $('#drw-scale').value || 'fit';
+  return {
+    paper: $('#drw-paper').value, scale: scaleVal === 'fit' ? 'fit' : +scaleVal, fill: $('#drw-fill').checked,
+    mono: $('#drw-colors').value === 'mono', colors: $('#drw-colors').value,
+    hatch: $('#drw-hatch').checked, lw: +$('#drw-lw').value || 0.35, // hatching and line weight (#50)
+  };
+}
+
+// ------------------------------------------------- drawing presets (#51)
+/**
+ * A preset holds every setting of the drawing dialog (paper, scale, colours, hatching, line weight,
+ * the annotation with its points, label content, number formats and layout), the classes left out
+ * of the annotation and the section width (#66). Built-in presets come first; your own are kept in
+ * this browser and in the project, and can be exported / imported as a small JSON file.
+ */
+const PRESET_KEY = 'onlineifc.drawingPresets';
+const presetIds = () => ['drw-format', 'drw-paper', 'drw-scale', 'drw-colors', 'drw-fill', 'drw-bg', 'drw-hatch', 'drw-lw',
+  'ann-on', 'ann-mode', 'ann-slopes', 'ann-outline', 'ann-angle', 'ann-mindist', 'ann-band', 'ann-text', 'ann-dims', ...ANN_FMT_IDS];
+const BUILTIN_PRESETS = [
+  { name: 'preset.rail', builtin: true, values: { 'drw-format': 'pdf', 'drw-paper': 'A3', 'drw-scale': '100', 'drw-colors': 'shown', 'drw-fill': true, 'drw-bg': false, 'drw-hatch': true, 'drw-lw': '0.35',
+    'ann-on': true, 'ann-mode': 'band', 'ann-slopes': true, 'ann-outline': 'top', 'ann-angle': '10', 'ann-mindist': '0', 'ann-band': 'under', 'ann-text': '1', 'ann-dims': 'chain',
+    'ann-row-off': true, 'ann-row-h': true, 'ann-row-dist': false, 'ann-dec': 'auto', 'ann-off-ref': 'axis', 'ann-off-dec': '3', 'ann-off-unit': 'm', 'ann-off-plus': true,
+    'ann-h-ref': 'abs', 'ann-h-dec': '3', 'ann-h-unit': 'm', 'ann-sl-fmt': 'auto', 'ann-sl-min': '0' } },
+  { name: 'preset.overview', builtin: true, values: { 'drw-format': 'pdf', 'drw-paper': 'A3', 'drw-scale': 'fit', 'drw-colors': 'shown', 'drw-fill': true, 'drw-bg': true, 'drw-hatch': true, 'drw-lw': '0.35', 'ann-on': false } },
+];
+let userPresets = [];
+try { userPresets = JSON.parse(localStorage.getItem(PRESET_KEY) || '[]').filter((p) => p?.name && p.values); } catch { userPresets = []; }
+const presetName = (p) => (p.builtin ? t(p.name) : p.name);
+function savePresets() {
+  try { localStorage.setItem(PRESET_KEY, JSON.stringify(userPresets)); } catch { /* ignore */ }
+  projects.touch?.();
+}
+function renderPresetSelect(selected = null) {
+  const sel = $('#drw-preset');
+  if (!sel) return;
+  const cur = selected ?? sel.value;
+  sel.replaceChildren(h('option', { value: '', text: t('preset.none') }),
+    ...BUILTIN_PRESETS.map((p, i) => h('option', { value: `b${i}`, text: presetName(p) })),
+    ...userPresets.map((p, i) => h('option', { value: `u${i}`, text: p.name })));
+  if ([...sel.options].some((o) => o.value === cur)) sel.value = cur;
+  $('#drw-preset-del').disabled = !sel.value.startsWith('u');
+  $('#drw-preset-export').disabled = !sel.value;
+}
+const presetOf = (v) => (v?.startsWith('b') ? BUILTIN_PRESETS[+v.slice(1)] : v?.startsWith('u') ? userPresets[+v.slice(1)] : null);
+/** The dialog's settings as a preset. */
+function currentPreset(name) {
+  const values = {};
+  for (const id of presetIds()) { const el = $(`#${id}`); if (el) values[id] = el.type === 'checkbox' ? el.checked : el.value; }
+  const excluded = $$('#ann-classes input').filter((b) => !b.checked).map((b) => b.value);
+  return { name, values, excluded, sectionWidth: viewer.sectionWidth || null };
+}
+/** Puts a preset into the dialog (and its section width into the Sections panel). */
+function applyPreset(p) {
+  if (!p) return;
+  for (const [id, v] of Object.entries(p.values || {})) {
+    const el = $(`#${id}`);
+    if (!el) continue;
+    if (el.type === 'checkbox') el.checked = !!v;
+    else if (el.tagName === 'SELECT') { if ([...el.options].some((o) => o.value === String(v))) el.value = String(v); } else el.value = v ?? '';
+  }
+  if (p.excluded) for (const b of $$('#ann-classes input')) b.checked = !p.excluded.includes(b.value);
+  if ('sectionWidth' in p) {
+    const w = p.sectionWidth;
+    $('#plane-wl').value = w?.left || ''; $('#plane-wr').value = w?.right || '';
+    viewer.setSectionWidth(w || null);
+    try { localStorage.setItem('onlineifc.secWidth', JSON.stringify(w || null)); } catch { /* ignore */ }
+  }
+  updateAnnotUi?.();
+  updateAnnotFormatUi();
+  updateSeriesUi?.();
+  saveDrawingOptions();
+  if (secViewer?.isOpen) { secViewer.view = null; secViewer.update(); }
+}
+$('#drw-preset').addEventListener('change', () => { applyPreset(presetOf($('#drw-preset').value)); renderPresetSelect(); });
+$('#drw-preset-save').addEventListener('click', () => {
+  const cur = presetOf($('#drw-preset').value);
+  const name = prompt(t('preset.namePrompt'), cur && !cur.builtin ? cur.name : '')?.trim();
+  if (!name) return;
+  const p = currentPreset(name);
+  const i = userPresets.findIndex((q) => q.name === name);
+  if (i >= 0) userPresets[i] = p; else userPresets.push(p);
+  savePresets();
+  renderPresetSelect(`u${i >= 0 ? i : userPresets.length - 1}`);
+  toast(t('preset.saved', { name }));
+});
+$('#drw-preset-del').addEventListener('click', () => {
+  const v = $('#drw-preset').value;
+  if (!v.startsWith('u')) return;
+  const p = userPresets[+v.slice(1)];
+  if (!confirm(t('preset.deleteConfirm', { name: p.name }))) return;
+  userPresets.splice(+v.slice(1), 1);
+  savePresets();
+  renderPresetSelect('');
+});
+$('#drw-preset-export').addEventListener('click', () => {
+  const p = presetOf($('#drw-preset').value);
+  if (!p) return;
+  const out = { vispectaDrawingPresets: 1, presets: [{ ...p, name: presetName(p), builtin: undefined }] };
+  download(`${presetName(p).replace(/[^\w\-æøåÆØÅ ]+/g, '').trim().replace(/\s+/g, '_') || 'preset'}.vispecta-preset.json`, JSON.stringify(out, null, 2), 'application/json');
+});
+$('#drw-preset-import').addEventListener('click', () => $('#drw-preset-file').click());
+$('#drw-preset-file').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    const list = (data?.presets || []).filter((p) => p?.name && p.values);
+    if (!list.length) throw new Error('no presets');
+    for (const p of list) {
+      let name = String(p.name), n = 2;
+      while (userPresets.some((q) => q.name === name)) name = `${p.name} (${n++})`;
+      userPresets.push({ name, values: p.values, excluded: p.excluded || undefined, sectionWidth: p.sectionWidth ?? null });
+    }
+    savePresets();
+    renderPresetSelect(`u${userPresets.length - 1}`);
+    applyPreset(userPresets[userPresets.length - 1]);
+    toast(t('preset.imported', { n: list.length }));
+  } catch { toast(t('preset.importFailed')); }
+});
+
 /** A number from a field (comma or point), 0 when empty. */
 const numIn = (sel) => { const v = +String($(sel).value).replace(',', '.'); return Number.isFinite(v) ? v : 0; };
 /** Decimals from a field, 0–4. */
@@ -3184,7 +3332,9 @@ function updateAnnotFormatUi() {
   $('#ann-h-zero').hidden = $('#ann-h-ref').value !== 'custom';
 }
 for (const id of ['#ann-off-ref', '#ann-h-ref']) $(id).addEventListener('change', updateAnnotFormatUi);
+fillScaleOptions();
 restoreDrawingOptions();
+renderPresetSelect();
 // the section window shows the same texts: update it when a format changes
 $('#ann-format').addEventListener('change', () => { if (secViewer?.isOpen) secViewer.update(); });
 
@@ -3195,6 +3345,10 @@ function annotOptions({ force = false } = {}) {
   return {
     mode: $('#ann-mode').value,
     slopes: $('#ann-slopes').checked,
+    // layout on paper (#50)
+    band: $('#ann-band').value,
+    textScale: +$('#ann-text').value || 1,
+    dims: $('#ann-dims').value,
     classes: boxes.length ? new Set(boxes.filter((b) => b.checked).map((b) => b.value)) : null,
     // which points (#48): outline, smallest bend, smallest distance, and the points edited by hand
     outline: $('#ann-outline').value,
@@ -3224,7 +3378,7 @@ function annotOptions({ force = false } = {}) {
 function saveDrawingOptions() {
   try { localStorage.setItem(ANN_EXCLUDED, JSON.stringify($$('#ann-classes input').filter((b) => !b.checked).map((b) => b.value))); } catch { /* ignore */ }
   const out = {};
-  for (const id of ['drw-format', 'drw-paper', 'drw-scale', 'drw-colors', 'drw-fill', 'drw-bg', 'ann-on', 'ann-mode', 'ann-slopes', 'ann-outline', 'ann-angle', 'ann-mindist', ...ANN_FMT_IDS]) {
+  for (const id of ['drw-format', 'drw-paper', 'drw-scale', 'drw-colors', 'drw-fill', 'drw-bg', 'ann-on', 'ann-mode', 'ann-slopes', 'ann-outline', 'ann-angle', 'ann-mindist', 'drw-hatch', 'drw-lw', 'ann-band', 'ann-text', 'ann-dims', ...ANN_FMT_IDS]) {
     const el = $(`#${id}`);
     if (el) out[id] = el.type === 'checkbox' ? el.checked : el.value;
   }
@@ -3235,8 +3389,7 @@ async function exportDrawing() {
   const entry = viewer.planes.find((p) => String(p.id) === $('#drw-plane').value);
   if (!entry) return;
   const format = $('#drw-format').value;
-  const scaleVal = $('#drw-scale').value;
-  const opts = { paper: $('#drw-paper').value, scale: scaleVal === 'fit' ? 'fit' : +scaleVal, fill: $('#drw-fill').checked, mono: $('#drw-colors').value === 'mono', colors: $('#drw-colors').value };
+  const opts = drawingOpts();
   $('#drawing-dialog').close();
   saveDrawingOptions();
   if (entry.station && $('#ser-on').checked) {
@@ -3260,7 +3413,8 @@ async function exportDrawing() {
   };
   const file = name.replace(/[^\w\-æøåÆØÅäöüÄÖÜß ]+/g, '').trim().replace(/\s+/g, '_') || 'section';
   if (format === 'dxf') {
-    download(`${file}.dxf`, toDxf(section, info), 'application/dxf');
+    // the annotation and the hatching sized for the scale the PDF would get (#50)
+    download(`${file}.dxf`, toDxf(section, info, { scale: layout(section, opts).scale, hatch: opts.hatch }), 'application/dxf');
   } else {
     const lay = layout(section, opts);
     if (!lay.fits) toast(t('drw.tooBig', { scale: lay.scale }));

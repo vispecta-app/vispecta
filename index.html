@@ -474,6 +474,14 @@
     <dialog id="drawing-dialog">
       <h2 data-i18n="drw.title"></h2>
       <p class="muted small" data-i18n="drw.intro"></p>
+      <div class="preset-row">
+        <label class="field"><span data-i18n="preset.label"></span><select id="drw-preset"></select></label>
+        <button type="button" class="btn sm" id="drw-preset-save" data-i18n="preset.save" data-i18n-title="preset.saveTitle"></button>
+        <button type="button" class="btn sm" id="drw-preset-del" data-i18n="preset.delete"></button>
+        <button type="button" class="btn sm" id="drw-preset-export" data-i18n="preset.export" data-i18n-title="preset.exportTitle"></button>
+        <button type="button" class="btn sm" id="drw-preset-import" data-i18n="preset.import" data-i18n-title="preset.importTitle"></button>
+        <input type="file" id="drw-preset-file" accept=".json,application/json" hidden />
+      </div>
       <label class="field"><span data-i18n="drw.plane"></span><select id="drw-plane"></select></label>
       <label class="field"><span data-i18n="drw.name"></span><input id="drw-name" type="text" /></label>
       <div class="grid3">
@@ -484,6 +492,9 @@
         <label class="field"><span data-i18n="drw.scale"></span><select id="drw-scale"></select></label>
       </div>
       <label class="chk"><input type="checkbox" id="drw-fill" checked /> <span data-i18n="drw.fill"></span></label>
+      <label class="chk"><input type="checkbox" id="drw-hatch" checked /> <span data-i18n="drw.hatch"></span></label>
+      <label class="field drw-inline"><span data-i18n="drw.lw"></span>
+        <select id="drw-lw"><option value="0.25" data-i18n="drw.lwThin"></option><option value="0.35" selected data-i18n="drw.lwNormal"></option><option value="0.5" data-i18n="drw.lwThick"></option></select></label>
       <label class="chk"><input type="checkbox" id="drw-bg" checked /> <span data-i18n="drw.background"></span></label>
       <label class="field"><span data-i18n="drw.colors"></span>
         <select id="drw-colors">
@@ -499,6 +510,14 @@
             <label class="field"><span data-i18n="ann.mode"></span>
               <select id="ann-mode"><option value="band" data-i18n="ann.band"></option><option value="point" data-i18n="ann.point"></option><option value="both" data-i18n="ann.both"></option></select></label>
             <label class="chk"><input type="checkbox" id="ann-slopes" /> <span data-i18n="ann.slopes"></span></label>
+          </div>
+          <div class="annot-row">
+            <label class="field"><span data-i18n="ann.bandPos"></span>
+              <select id="ann-band"><option value="under" data-i18n="ann.bandUnder"></option><option value="over" data-i18n="ann.bandOver"></option></select></label>
+            <label class="field"><span data-i18n="ann.textSize"></span>
+              <select id="ann-text"><option value="0.8">80 %</option><option value="1" selected>100 %</option><option value="1.25">125 %</option><option value="1.5">150 %</option></select></label>
+            <label class="field" data-i18n-title="ann.dimsTitle"><span data-i18n="ann.dims"></span>
+              <select id="ann-dims"><option value="off" data-i18n="ann.dimsOff"></option><option value="chain" data-i18n="ann.dimsChain"></option><option value="overall" data-i18n="ann.dimsOverall"></option></select></label>
           </div>
           <div class="annot-row">
             <label class="field"><span data-i18n="ann.outline"></span>
