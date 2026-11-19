@@ -1328,7 +1328,7 @@ export function toDxf(section, info, opts = {}) {
   const hatchSp = opts.hatch ? (HATCH_MM * (opts.scale || 100)) / 1000 : 0;
   const hatches = hatchSp ? [...section.layers].map(([cls, L]) => [cls, hatchSegments(L.loops, hatchSp)]).filter(([, h]) => h.length) : [];
   // layer colours (AutoCAD colour index): band 7, points 4, slopes 3, dimensions 5, axis/marks 1, hatch 8
-  const MARK_ACI = { ANNOTATION_BAND: 7, ANNOTATION_POINTS: 4, ANNOTATION_SLOPES: 3, DIMENSIONS: 5, ALIGNMENT_AXIS: 1, OFFSET_LINES: 6, SECTION_MARKS: 1 };
+  const MARK_ACI = { ANNOTATION_BAND: 7, ANNOTATION_POINTS: 4, ANNOTATION_SLOPES: 3, DIMENSIONS: 5, ALIGNMENT_AXIS: 1, OFFSET_LINES: 6, SECTION_MARKS: 1, CONTOURS: 32 };
   const markLayers = [...new Set(dxfMarks.map((mk) => mk.layer || 'ANNOTATION'))];
   g(0, 'SECTION'); g(2, 'HEADER'); g(9, '$ACADVER'); g(1, 'AC1009');
   g(9, '$EXTMIN'); g(10, section.bounds.minX); g(20, section.bounds.minY);

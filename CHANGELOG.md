@@ -5,6 +5,11 @@ https://github.com/vispecta-app/vispecta/releases
 
 ## Unreleased
 
+### Added
+- **Contours on terrain** ([#92](https://github.com/vispecta-app/vispecta/issues/92)): choose *Auto* or an
+  interval (0.25 – 5 m) on the terrain's card. Every 5th contour is thicker. Contours show in 3D and in plan
+  drawings, with the height on the thick ones (PDF, SVG, DXF layer `CONTOURS`), and are saved in the project.
+
 ### Changed
 - **The view cube is in the top left corner**, instead of the X/Y/Z axis cross, which is gone (the
   cube and its compass ring show the directions). The top right corner of the 3D view is free.

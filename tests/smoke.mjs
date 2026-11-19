@@ -141,6 +141,21 @@ async function main() {
     await idle(page2);
     const rail = await page2.evaluate(() => ({ cloud: window.onlineIfc.viewer.clouds[0].placement, terrain: window.onlineIfc.viewer.models.filter((m) => m.terrain).length }));
     check('railway sample: 9 models and a LAZ survey placed in map coordinates', rail.cloud === 'map', `terrain models: ${rail.terrain}`);
+    // contours on the terrain (#92)
+    await page2.click('.tab[data-tab="models"]');
+    await page2.evaluate(() => {
+      const card = [...document.querySelectorAll('.model-card')].find((c) => /08-Terrain/.test(c.textContent));
+      if (card && !card.classList.contains('open')) card.querySelector('.mg-caret').click();
+    });
+    await page2.waitForTimeout(300);
+    const cont = await page2.evaluate(() => {
+      const sel = [...document.querySelectorAll('.model-card.open select')].find((s) => [...s.options].some((o) => o.value === '0.25'));
+      if (!sel) return { dbg: [...document.querySelectorAll('.model-card')].map((c) => c.className + ':' + c.textContent.slice(0, 30)).join(' / ') };
+      sel.value = 'auto'; sel.dispatchEvent(new Event('change', { bubbles: true }));
+      const m = window.onlineIfc.viewer.models.find((x) => x.terrain);
+      return m.contourData ? { levels: m.contourData.levels.length, interval: m.contourData.interval } : null;
+    });
+    check('terrain contours (auto)', !!cont && cont.levels > 5, cont?.dbg || (cont ? `${cont.levels} levels every ${cont.interval} m` : 'no contour option'));
     await page2.context().close();
   } catch (e) {
     check('smoke test ran to the end', false, e.message.split('\n')[0]);

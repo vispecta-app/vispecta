@@ -39,6 +39,7 @@ import { loadPointCloud, LAS_CLASSES, classColor as lasClassColor } from './poin
 import { Corridor } from './corridor.js';
 import { computeSection, computeProfile, planeAxes, layout, toSvg, toPdf, toPdfPages, toDxf, renderBackground, SCALES, AXIS_COLOR } from './drawing.js';
 import { ViewCube } from './viewcube.js';
+import { contourLines, planLength } from './contours.js';
 import { runIdsCheck, colorIdsResult, idsCsv, specSummary, setIdsColors, IDS_EXAMPLES } from './ids.js';
 import { compareModels, showComparison, clearComparison, comparisonCsv, geomText, summaryText, CMP_COLORS, setCompareColors } from './compare.js';
 
@@ -513,6 +514,92 @@ function runTerrainWorker(msg, label) {
     w.onerror = (e) => { w.terminate(); reject(new Error(e.message || 'Terrain worker failed')); };
     w.postMessage(msg);
   }));
+}
+
+// ------------------------------------------------------------- contour lines (#92)
+// A terrain can show contour lines: thin every interval, thicker every fifth (with its height in
+// plan drawings). They are computed from the triangles in IFC heights, shown in 3D, drawn in plans
+// (PDF/SVG/DXF layer CONTOURS) and kept in the project. mode: false | 'auto' | interval in m.
+const CONTOUR_INTERVALS = ['off', 'auto', 0.25, 0.5, 1, 2, 5];
+const CONTOUR_COLOR = '#7a5a32';
+function terrainTriangles(m) {
+  m.group.updateMatrixWorld(true);
+  const mw = m.group.matrixWorld, v = new THREE.Vector3();
+  let n = 0;
+  for (const b of m.buckets) n += b.index.length;
+  const out = new Float64Array(n * 3);
+  let k = 0;
+  for (const b of m.buckets) {
+    const P = b.positions, I = b.index;
+    for (let i = 0; i < I.length; i++) {
+      const j = I[i] * 3;
+      const q = viewer.toIfc(v.set(P[j], P[j + 1], P[j + 2]).applyMatrix4(mw));
+      out[k++] = q.x; out[k++] = q.y; out[k++] = q.z;
+    }
+  }
+  return out;
+}
+function setContours(m, mode) {
+  if (m.contourObj) { m.group.remove(m.contourObj); m.contourObj.geometry.dispose(); m.contourObj.material.dispose(); m.contourObj = null; }
+  m.contours = mode || false;
+  m.contourData = null;
+  if (!mode) { viewer.invalidate(); return; }
+  const data = contourLines(terrainTriangles(m), mode === 'auto' ? 0 : +mode);
+  if (data.tooMany) toast(t('ter.cTooMany'));
+  m.contourData = data;
+  // 3D: lines a few cm above the surface, in the model's own coordinates
+  const inv = m.group.matrixWorld.clone().invert();
+  const pos = [], col = [];
+  const minor = new THREE.Color(CONTOUR_COLOR), major = new THREE.Color('#3d2a12');
+  for (const lv of data.levels) for (const line of lv.lines) for (let i = 1; i < line.length; i++) {
+    for (const p of [line[i - 1], line[i]]) {
+      const w = viewer.fromIfc(p[0], p[1], p[2] + 0.03).applyMatrix4(inv);
+      pos.push(w.x, w.y, w.z);
+      const c = lv.major ? major : minor;
+      col.push(c.r, c.g, c.b);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  const obj = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ vertexColors: true }));
+  obj.name = 'contours';
+  obj.raycast = () => {}; // not picked
+  m.contourObj = obj;
+  m.group.add(obj);
+  viewer.invalidate();
+}
+/** Contours of visible terrain models inside a plan drawing, as marks (layer CONTOURS). */
+function planContourMarks(box) {
+  const out = [];
+  const size = Math.max(box.maxX - box.minX, box.maxY - box.minY, 1);
+  for (const m of viewer.models) {
+    if (!m.terrain || !m.visible || !m.contourData) continue;
+    for (const lv of m.contourData.levels) for (const line of lv.lines) {
+      // runs of the polyline inside the drawing
+      let run = null;
+      const runs = [];
+      for (let k = 1; k < line.length; k++) {
+        const a = line[k - 1], c = line[k];
+        const tt = clipSegment(a, c, box);
+        if (!tt) { run = null; continue; }
+        const at = (f) => [a[0] + (c[0] - a[0]) * f, a[1] + (c[1] - a[1]) * f];
+        if (!run || tt[0] > 1e-9) { run = [at(tt[0])]; runs.push(run); }
+        run.push(at(tt[1]));
+        if (tt[1] < 1 - 1e-9) run = null;
+      }
+      for (const r of runs) {
+        if (r.length < 2) continue;
+        out.push({ line: r, color: CONTOUR_COLOR, w: lv.major ? 0.35 : 0.13, layer: 'CONTOURS' });
+        // the height on major contours that are long enough, at the middle of the run
+        if (lv.major && planLength(r) > size / 12) {
+          const mid = r[Math.floor(r.length / 2)];
+          out.push({ text: fmtNum(+lv.z.toFixed(2)), at: mid, dx: 0, dy: -0.6, size: 2, anchor: 'middle', color: CONTOUR_COLOR, layer: 'CONTOURS' });
+        }
+      }
+    }
+  }
+  return out;
 }
 
 /** The georeference written into the terrain file: the map conversion the models use. */
@@ -1525,6 +1612,9 @@ function modelCard(m) {
         h('select', { title: t('ter.heightTitle'), onchange: (e) => { m.setHeightColors(e.target.value === 'off' ? false : e.target.value); viewer.invalidate(); renderModels(); projects.touch?.(); } },
           ['off', 'default', 'earth'].map((v) => h('option', { value: v, text: t(`ter.hc.${v}`), selected: (m.heightColors || 'off') === v }))),
         m.heightColors && m.heightRange ? h('span', { class: 'muted', text: m.heightRange.map((y) => fmtNum(+viewer.toIfc(new THREE.Vector3(0, y, 0).applyMatrix4(m.group.matrixWorld)).z.toFixed(1))).join(' – ') + ' m' }) : null) : null,
+      m.terrain ? h('div', { class: 'card-row' }, h('label', { text: t('ter.contours') }),
+        h('select', { title: t('ter.contoursTitle'), onchange: (e) => { setContours(m, e.target.value === 'off' ? false : e.target.value === 'auto' ? 'auto' : +e.target.value); renderModels(); projects.touch?.(); } },
+          CONTOUR_INTERVALS.map((v) => h('option', { value: String(v), text: v === 'off' ? t('ter.c.off') : v === 'auto' ? (m.contours === 'auto' && m.contourData ? `${t('ter.c.auto')} (${fmtNum(m.contourData.interval)} m)` : t('ter.c.auto')) : `${fmtNum(v)} m`, selected: String(m.contours || 'off') === String(v) })))) : null,
       h('div', { class: 'card-row' }, h('label', { text: t('mg.group') }), groupSel),
       m.alignments?.length ? h('div', { class: 'aln-list' }, h('div', { class: 'aln-head muted', text: t('aln.list', { n: m.alignments.length }) }), m.alignments.map(alignmentRow)) : null,
       h('div', { class: 'card-btns' },
@@ -2405,7 +2495,7 @@ function planMarks(bounds) {
     box.minX = Math.min(box.minX, p[0]); box.maxX = Math.max(box.maxX, p[0]);
     box.minY = Math.min(box.minY, p[1]); box.maxY = Math.max(box.maxY, p[1]);
   }
-  return [...planAlignmentMarks(box), ...sec];
+  return [...planContourMarks({ ...bounds }), ...planAlignmentMarks(box), ...sec];
 }
 
 /** Row of a cross section at a station: alignment, ‹ slider › station. */
@@ -3054,7 +3144,7 @@ const projects = new ProjectManager({
     models: viewer.models.map((m) => ({ key: projects.keys.get(m) || null, name: m.name, alias: m.alias || null, group: m.groupId || null, color: m.overrideColor ? `#${m.overrideColor.getHexString()}` : null,
       // alignments: alias and visibility per alignment (#89); terrain: height colours on or off (#90)
       alignments: (m.alignments || []).some((a) => a.alias || a.hidden) ? m.alignments.map((a) => ({ alias: a.alias || null, hidden: !!a.hidden })) : undefined,
-      heightColors: m.terrain ? m.heightColors || false : undefined })),
+      heightColors: m.terrain ? m.heightColors || false : undefined, contours: m.terrain ? m.contours || false : undefined })),
     stationFormat: stationFormat.value, // the client's stationing format stays with the project (#29)
     annotEdits: annotEdits.size ? [...annotEdits] : undefined, // points chosen by hand (#48)
     drawingPresets: userPresets.length ? userPresets : undefined, // drawing presets (#51)
@@ -3078,6 +3168,7 @@ const projects = new ProjectManager({
         a.hidden = !!ai?.hidden; a.alias = ai?.alias || null; a.name = a.alias || a.ifcName || a.name;
       });
       if (m.terrain && info && 'heightColors' in info) m.setHeightColors(info.heightColors || false);
+      if (m.terrain && info && 'contours' in info && (info.contours || false) !== (m.contours || false)) setContours(m, info.contours || false);
       if (info && 'color' in info) m.setColor(info.color || null);
       const g = groupOf(m);
       m.setGroupHidden(g ? !g.visible : false);
