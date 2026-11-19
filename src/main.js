@@ -40,6 +40,7 @@ import { Corridor } from './corridor.js';
 import { computeSection, computeProfile, planeAxes, layout, toSvg, toPdf, toPdfPages, toDxf, renderBackground, SCALES, AXIS_COLOR } from './drawing.js';
 import { ViewCube } from './viewcube.js';
 import { contourLines, planLength } from './contours.js';
+import { SurfaceIndex, cutFill } from './volumes.js';
 import { runIdsCheck, colorIdsResult, idsCsv, specSummary, setIdsColors, IDS_EXAMPLES } from './ids.js';
 import { compareModels, showComparison, clearComparison, comparisonCsv, geomText, summaryText, CMP_COLORS, setCompareColors } from './compare.js';
 
@@ -600,6 +601,121 @@ function planContourMarks(box) {
     }
   }
   return out;
+}
+
+// ------------------------------------------------------------- cut and fill (#92)
+// The existing terrain against a design surface (the top of the chosen models, e.g. the earthworks),
+// sampled on a grid along an alignment: cut and fill per station range, a table, CSV and a
+// difference map in 3D (red: cut, blue: fill).
+let volResult = null;
+let volMap = null;
+// chosen by default: models with an embankment (not the track, whose ballast and sleepers are no earthworks)
+function isDesignDefault(m) {
+  for (const id of m.elementIds) if (/^IfcEarthworksFill$/i.test(m.typeName(id) || '')) return true;
+  return false;
+}
+function openVolumeDialog(terrain) {
+  const terrains = viewer.models.filter((m) => m.terrain);
+  if (!terrains.length) return toast(t('vol.noTerrain'));
+  const list = allAlignments();
+  if (!list.length) return toast(t('aln.none'));
+  $('#vol-existing').replaceChildren(...terrains.map((m) => h('option', { value: String(m.uid), text: modelTitle(m), selected: m === terrain })));
+  const others = viewer.models.filter((m) => !m.terrain && m.elementIds.size);
+  const picked = volResult?.designUids;
+  $('#vol-design').replaceChildren(...others.map((m) => h('label', { class: 'chk' },
+    h('input', { type: 'checkbox', value: String(m.uid), checked: picked ? picked.includes(m.uid) : isDesignDefault(m) }), h('span', { text: modelTitle(m) }))));
+  const sel = $('#vol-path');
+  const cur = volResult?.al || list.find((a) => !a.hidden) || list[0];
+  sel.replaceChildren(...list.map((a, i) => h('option', { value: String(i), text: alnLabel(a), selected: a === cur })));
+  if (!volResult) volRange();
+  renderVolumes();
+  $('#volume-dialog').showModal();
+}
+function volRange() {
+  const al = allAlignments()[+$('#vol-path').value];
+  if (al) { $('#vol-from').value = formatStation(al.station0); $('#vol-to').value = formatStation(al.station0 + al.length); }
+}
+$('#vol-path').addEventListener('change', volRange);
+
+async function runVolumes() {
+  const al = allAlignments()[+$('#vol-path').value];
+  const existing = viewer.models.find((m) => m.uid === +$('#vol-existing').value);
+  const design = $$('#vol-design input:checked').map((i) => viewer.models.find((m) => m.uid === +i.value)).filter(Boolean);
+  if (!al || !existing) return;
+  if (!design.length) return toast(t('vol.noDesign'));
+  const from = parseStation($('#vol-from').value), to = parseStation($('#vol-to').value);
+  if (from === null || to === null) return toast(t('st.bad', { v: from === null ? $('#vol-from').value : $('#vol-to').value }));
+  const num = (id, d) => { const v = +String($(id).value).replace(',', '.'); return Number.isFinite(v) && v >= 0 ? v : d; };
+  const grid = Math.max(0.1, num('#vol-grid', 0.5)), bin = Math.max(1, num('#vol-bin', 20));
+  const s0 = Math.max(0, Math.min(from, to) - al.station0), s1 = Math.min(al.length, Math.max(from, to) - al.station0);
+  if (!(s1 > s0)) return toast(t('vol.empty'));
+  const res = await withLoading(async (progress) => {
+    progress(t('vol.running'), 0.2); await new Promise((r) => setTimeout(r, 30));
+    const ex = new SurfaceIndex(terrainTriangles(existing));
+    const tris = design.map((m) => terrainTriangles(m));
+    const all = new Float64Array(tris.reduce((n, a) => n + a.length, 0));
+    let k = 0;
+    for (const a of tris) { all.set(a, k); k += a.length; }
+    progress(t('vol.running'), 0.5); await new Promise((r) => setTimeout(r, 0));
+    return cutFill({ al, s0, s1, left: num('#vol-left', 25), right: num('#vol-right', 25), ds: grid, dOff: grid, bin, existing: ex, design: new SurfaceIndex(all) });
+  });
+  volResult = { ...res, al, existing: modelTitle(existing), design: design.map(modelTitle), designUids: design.map((m) => m.uid), grid };
+  showVolumeMap($('#vol-map').checked);
+  renderVolumes();
+}
+
+function showVolumeMap(on) {
+  if (volMap) { viewer.scene.remove(volMap); volMap.geometry.dispose(); volMap.material.dispose(); volMap = null; }
+  if (on && volResult?.samples.length) {
+    const S = volResult.samples;
+    const pos = new Float32Array(S.length * 3), col = new Float32Array(S.length * 3);
+    const c = new THREE.Color(), cutC = new THREE.Color('#d1495b'), fillC = new THREE.Color('#2e86de'), zero = new THREE.Color('#e9ecef');
+    S.forEach((p, i) => {
+      const w = viewer.fromIfc(p.x, p.y, p.z + 0.05);
+      pos[3 * i] = w.x; pos[3 * i + 1] = w.y; pos[3 * i + 2] = w.z;
+      c.copy(zero).lerp(p.d > 0 ? fillC : cutC, Math.min(1, Math.abs(p.d) / 1.5) * 0.85 + 0.15);
+      col[3 * i] = c.r; col[3 * i + 1] = c.g; col[3 * i + 2] = c.b;
+    });
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    volMap = new THREE.Points(g, new THREE.PointsMaterial({ size: volResult.grid * 1.4, vertexColors: true, sizeAttenuation: true }));
+    volMap.name = 'cut-fill';
+    volMap.raycast = () => {};
+    viewer.scene.add(volMap);
+  }
+  viewer.invalidate();
+}
+
+function renderVolumes() {
+  const box = $('#vol-results');
+  const r = volResult;
+  if (!r) { box.replaceChildren(h('p', { class: 'muted small', text: t('vol.hint') })); return; }
+  if (!r.area) { box.replaceChildren(h('p', { class: 'muted small', text: t('vol.none') })); return; }
+  const m3 = (v) => fmtNum(Math.round(v));
+  let cc = 0, cf = 0;
+  box.replaceChildren(
+    h('p', { class: 'small', text: t('vol.summary', { cut: m3(r.cut), fill: m3(r.fill), net: m3(r.fill - r.cut), area: m3(r.area) }) }),
+    h('div', { class: 'vol-scroll' }, h('table', { class: 'cor-table' },
+      h('tr', {}, ...[t('vol.colFrom'), t('vol.colTo'), t('vol.colCut'), t('vol.colFill'), t('vol.colNet'), t('vol.colCumCut'), t('vol.colCumFill')].map((x) => h('th', { text: x }))),
+      r.bins.map((b) => {
+        cc += b.cut; cf += b.fill;
+        return h('tr', {},
+          h('td', { text: formatStation(r.al.station0 + b.from) }), h('td', { text: formatStation(r.al.station0 + b.to) }),
+          h('td', { text: m3(b.cut) }), h('td', { text: m3(b.fill) }), h('td', { text: m3(b.fill - b.cut) }), h('td', { text: m3(cc) }), h('td', { text: m3(cf) }));
+      }))),
+    h('p', { class: 'muted small', text: t('vol.note', { ex: r.existing, de: r.design.join(', '), g: fmtNum(r.grid) }) }));
+}
+
+function volumeCsv() {
+  const r = volResult;
+  if (!r) return toast(t('vol.hint'));
+  const q = (v) => (typeof v === 'number' ? v.toFixed(3) : `"${String(v).replace(/"/g, '""')}"`);
+  const rows = [['station_from', 'station_to', 'area_m2', 'cut_m3', 'fill_m3', 'net_m3', 'cum_cut_m3', 'cum_fill_m3']];
+  let cc = 0, cf = 0;
+  for (const b of r.bins) { cc += b.cut; cf += b.fill; rows.push([formatStation(r.al.station0 + b.from), formatStation(r.al.station0 + b.to), b.area, b.cut, b.fill, b.fill - b.cut, cc, cf]); }
+  rows.push(['total', '', r.area, r.cut, r.fill, r.fill - r.cut, r.cut, r.fill]);
+  download(`cut-fill-${r.al.name}.csv`, rows.map((x) => x.map(q).join(';')).join('\n'), 'text/csv');
 }
 
 /** The georeference written into the terrain file: the map conversion the models use. */
@@ -1198,6 +1314,9 @@ document.addEventListener('click', (e) => {
     'show-all': () => showAll(),
     'toggle-spaces': () => toggleSpaces(),
     'ter-build': () => buildTerrain(),
+    'vol-run': () => runVolumes(),
+    'vol-csv': () => volumeCsv(),
+    'vol-clear': () => { volResult = null; showVolumeMap(false); renderVolumes(); },
     'toggle-viewcube': () => setViewCube(viewCube.el.hidden),
     'toggle-ortho': () => { if (walk.active) walk.stop(); setOrtho(!viewer.isOrtho); },
     walk: () => walk.toggle(),
@@ -1615,6 +1734,7 @@ function modelCard(m) {
       m.terrain ? h('div', { class: 'card-row' }, h('label', { text: t('ter.contours') }),
         h('select', { title: t('ter.contoursTitle'), onchange: (e) => { setContours(m, e.target.value === 'off' ? false : e.target.value === 'auto' ? 'auto' : +e.target.value); renderModels(); projects.touch?.(); } },
           CONTOUR_INTERVALS.map((v) => h('option', { value: String(v), text: v === 'off' ? t('ter.c.off') : v === 'auto' ? (m.contours === 'auto' && m.contourData ? `${t('ter.c.auto')} (${fmtNum(m.contourData.interval)} m)` : t('ter.c.auto')) : `${fmtNum(v)} m`, selected: String(m.contours || 'off') === String(v) })))) : null,
+      m.terrain ? h('div', { class: 'card-row' }, h('button', { class: 'btn sm', text: t('vol.open'), title: t('vol.intro'), onclick: () => openVolumeDialog(m) })) : null,
       h('div', { class: 'card-row' }, h('label', { text: t('mg.group') }), groupSel),
       m.alignments?.length ? h('div', { class: 'aln-list' }, h('div', { class: 'aln-head muted', text: t('aln.list', { n: m.alignments.length }) }), m.alignments.map(alignmentRow)) : null,
       h('div', { class: 'card-btns' },
