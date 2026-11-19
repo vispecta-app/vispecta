@@ -5,6 +5,16 @@ https://github.com/vispecta-app/vispecta/releases
 
 ## Unreleased
 
+### Changed
+- **The view cube is in the top left corner**, instead of the X/Y/Z axis cross, which is gone (the
+  cube and its compass ring show the directions). The top right corner of the 3D view is free.
+  ([#95](https://github.com/vispecta-app/vispecta/issues/95))
+- **The Chesapeake Bay Bridge-Tunnel sample is hidden** on the start screen; the railway sample and
+  the sample scene stay. ([#95](https://github.com/vispecta-app/vispecta/issues/95))
+- **Export 2D drawing is a wide dialog in two columns:** the drawing on the left, the annotation on
+  the right, the export button always at the bottom; stacked on narrow screens.
+  ([#96](https://github.com/vispecta-app/vispecta/issues/96))
+
 ### Added
 - **Checks on every pull request.** ESLint (undefined names, unused variables), the build and a smoke
   test in headless Chromium: sample scene, a station section with the section window and an SVG
