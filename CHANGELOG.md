@@ -27,6 +27,11 @@ https://github.com/vispecta-app/vispecta/releases
   fails it. `npm run test` runs the same locally.
   ([#57](https://github.com/vispecta-app/vispecta/issues/57))
 
+### Fixed
+- **Cross sections show the axes of all alignments they cross**, not only the one they follow (e.g. both
+  tracks of a double-track line). Each axis is named with its alignment and station, in the section
+  window and in PDF, SVG and DXF (layer `ALIGNMENT_AXIS`).
+
 ## v0.0.4 – 18.11.2026
 
 ### Changed

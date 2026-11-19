@@ -282,6 +282,27 @@ async function openSamples(key = 'scene') {
 // ------------------------------------------------------------- offset lines and corridors (#26)
 const corridor = new Corridor(viewer, $('#viewport'));
 viewer.corridor = corridor; // computeSection draws the offsets in station sections
+// a station section shows the axis of every other alignment it crosses, too (e.g. the other track)
+viewer.sectionAxes = (entry) => {
+  const st = entry.station;
+  if (!st) return [];
+  const P = pointAt(st.al, st.s);
+  const out = [];
+  for (const al of allAlignments()) {
+    if (al === st.al || al.hidden || !al.poly) continue;
+    const f = (q) => (q[0] - P.x) * P.dx + (q[1] - P.y) * P.dy; // distance from the section plane, along the alignment
+    for (let k = 1; k < al.poly.length; k++) {
+      const a = al.poly[k - 1], b = al.poly[k], fa = f(a), fb = f(b);
+      if ((fa > 0) === (fb > 0) || fa === fb) continue;
+      const tt = fa / (fa - fb);
+      const x = a[0] + (b[0] - a[0]) * tt, y = a[1] + (b[1] - a[1]) * tt;
+      if (Math.hypot(x - P.x, y - P.y) > 150) continue; // far away: not part of this cross section
+      const sAt = al.cum[k - 1] + (al.cum[k] - al.cum[k - 1]) * tt;
+      out.push({ p: viewer.fromIfc(x, y, 0), label: `${al.name} ${formatStation(al.station0 + sAt)}` });
+    }
+  }
+  return out;
+};
 let corridorHits = null;
 
 function openCorridorDialog() {

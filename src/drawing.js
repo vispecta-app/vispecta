@@ -111,7 +111,20 @@ export function computeSection(viewer, entry, { marks = [], annot = null } = {})
     bounds.minX = Math.min(bounds.minX, 0); bounds.maxX = Math.max(bounds.maxX, 0);
     const pad = 0.06 * (bounds.maxY - bounds.minY || 1);
     out.push({ line: [[0, bounds.minY - pad], [0, bounds.maxY + pad]], color: AXIS_COLOR, dash: 'dashdot', layer: 'ALIGNMENT_AXIS' });
-    out.push({ text: entry.stationLabel || '', at: [0, bounds.maxY + pad], dx: 1.2, dy: -1, size: 3, color: AXIS_COLOR, layer: 'ALIGNMENT_AXIS' });
+    const crossing = viewer.sectionAxes?.(entry) || [];
+    // with more axes in the section, the own one says which alignment it is
+    const own = crossing.length && entry.station.al?.name ? `${entry.station.al.name} · ${entry.stationLabel || ''}` : entry.stationLabel || '';
+    out.push({ text: own, at: [0, bounds.maxY + pad], dx: 1.2, dy: -1, size: 3, color: AXIS_COLOR, layer: 'ALIGNMENT_AXIS' });
+    // the axes of the other alignments the section crosses (e.g. the other track), with their name and station
+    for (const [i, a] of crossing.entries()) {
+      const [x] = to2d(a.p);
+      if (lim && (x < lim.lo || x > lim.hi)) continue;
+      if (x < bounds.minX - 5 || x > bounds.maxX + 5) continue; // only where the cut is
+      bounds.minX = Math.min(bounds.minX, x); bounds.maxX = Math.max(bounds.maxX, x);
+      out.push({ line: [[x, bounds.minY - pad], [x, bounds.maxY + pad]], color: AXIS_COLOR, dash: 'dashdot', layer: 'ALIGNMENT_AXIS' });
+      // a step higher for each further axis, so names of near axes don't overlap at small scales
+      out.push({ text: a.label, at: [x, bounds.maxY + pad], dx: 1.2, dy: -1 - 3.6 * (i + 1), size: 2.6, color: AXIS_COLOR, layer: 'ALIGNMENT_AXIS' });
+    }
   }
   // offset lines (#26): vertical lines at the offsets of the corridor, labelled at the top
   if (entry.station && Number.isFinite(bounds.minX)) {
