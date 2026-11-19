@@ -482,13 +482,18 @@ details.batch[open] > summary { margin-bottom: 6px; }
 body.dragging .drop-overlay { display: flex; }
 
 /* floating panels over the 3D view: one look. Places: sections bottom left, measure top right,
-   compare / IDS top left, drive and hints top centre, section window bottom right. */
+   compare / IDS top left, drive and hints top centre, section window bottom right; the view cube top
+   right with measure under it. All can be moved by their header (floating.js). */
 .float {
   position: absolute; z-index: 3; background: var(--panel); color: var(--text);
   border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow); padding: 8px 10px;
 }
 .float-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .float-head b { font-size: var(--fs); }
+/* panels move by their header (floating.js); a double-click puts them back */
+.float > .float-head { cursor: move; }
+.float.dragging { user-select: none; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22); opacity: 0.97; }
+.drive-panel > b, .cmp-panel > :first-child { cursor: move; }
 .mode-hint, .tool-hint {
   position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 6; max-width: 80%; text-align: center;
   background: var(--accent); color: var(--on-accent); border: 0; padding: 6px 14px; border-radius: 16px; box-shadow: var(--shadow); font-size: 12.5px;
@@ -533,7 +538,7 @@ body.py-open .planes-panel { max-height: calc(100% - 60px); }
 .m-label.spot { white-space: pre; text-align: left; line-height: 1.35; }
 .m-label.align { --m-color: #e8590c; font-size: 11px; padding: 2px 6px; }
 .m-label.align.name { font-size: 12px; }
-.measure-panel { right: 12px; top: 12px; width: 300px; max-height: calc(100% - 60px); overflow: hidden; display: flex; flex-direction: column; }
+.measure-panel { right: 12px; top: 160px; width: 300px; max-height: calc(100% - 200px); overflow: hidden; display: flex; flex-direction: column; }
 .measure-panel > :not(#measure-list) { flex: none; }
 #measure-list { overflow: auto; min-height: 0; flex: 1 1 auto; }
 .measure-opts { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 6px 0 4px; }
@@ -860,7 +865,7 @@ fieldset.annot .annot-row .chk { margin-bottom: 6px; color: var(--text); }
 .ann-fmt-table select { max-width: 150px; }
 
 /* ------------------------------------------------------------- view cube (#84) */
-.viewcube { position: absolute; top: 10px; left: 12px; width: 130px; height: 140px; z-index: 5; user-select: none; -webkit-user-select: none; touch-action: none; }
+.viewcube { position: absolute; top: 10px; right: 12px; width: 130px; height: 140px; z-index: 5; user-select: none; -webkit-user-select: none; touch-action: none; }
 .viewcube .vc-stage { position: absolute; left: 0; top: 0; width: 130px; height: 130px; display: grid; place-items: center; cursor: pointer; }
 .viewcube .vc-cube { position: relative; width: 64px; height: 64px; transform-style: preserve-3d; pointer-events: none; }
 .viewcube .vc-cell, .viewcube .vc-dir { pointer-events: auto; }

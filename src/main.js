@@ -39,6 +39,7 @@ import { loadPointCloud, LAS_CLASSES, classColor as lasClassColor } from './poin
 import { Corridor } from './corridor.js';
 import { computeSection, computeProfile, planeAxes, layout, toSvg, toPdf, toPdfPages, toDxf, renderBackground, SCALES, AXIS_COLOR } from './drawing.js';
 import { ViewCube } from './viewcube.js';
+import { initFloating } from './floating.js';
 import { contourLines, planLength } from './contours.js';
 import { SurfaceIndex, cutFill } from './volumes.js';
 import { runIdsCheck, colorIdsResult, idsCsv, specSummary, setIdsColors, IDS_EXAMPLES } from './ids.js';
@@ -88,8 +89,11 @@ const measure = new MeasureTool(viewer, $('#viewport'));
 // view cube (#84): top right corner, can be turned off under View (remembered)
 const VIEWCUBE_KEY = 'onlineifc.viewcube';
 const viewCube = new ViewCube(viewer, { onHome: () => viewer.setView('iso') });
+// floating panels can be moved by their header, and stay clear of the view cube
+const floating = initFloating($('#viewport'), { avoid: () => [viewCube.el] });
 function setViewCube(on) {
   viewCube.setVisible(on);
+  floating.settleAll();
   try { localStorage.setItem(VIEWCUBE_KEY, on ? '1' : '0'); } catch { /* ignore */ }
   const c = document.getElementById('viewcube-check');
   if (c) c.textContent = on ? '☑' : '☐';
