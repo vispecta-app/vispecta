@@ -21,6 +21,8 @@ https://github.com/vispecta-app/vispecta/releases
   the cloud has no ground class.
 
 ### Changed
+- **The installed app is called just "Vispecta"** (manifest name, app title on iOS/Android, and the
+  window title when it runs as an app), instead of "Vispecta – free IFC viewer …".
 - **The X/Y/Z axis cross is gone**; the view cube and its compass ring show the directions. The view
   cube stays in the top right corner, and the measure panel opens under it instead of on top of it.
   ([#95](https://github.com/vispecta-app/vispecta/issues/95))
