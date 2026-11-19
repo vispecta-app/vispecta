@@ -224,7 +224,17 @@ npm install
 npm run dev      # dev server at http://localhost:5173
 npm run build    # static build in dist/
 npm run preview  # preview the build
+npm run lint     # ESLint: undefined names and unused variables
+npm run test     # lint, build and the smoke test (needs `npx playwright install chromium` once)
 ```
+
+**Checks on pull requests (#57):** `.github/workflows/ci.yml` runs the lint, the build and a smoke test (`tests/smoke.mjs`) in headless Chromium with software GL on every pull request and push to `main`. The smoke test serves `dist/` like GitHub Pages and:
+- opens the sample scene (11 models, both alignments), adds a cross section on *Track*, checks the section window and exports an SVG drawing;
+- loads a point cloud and opens every tab;
+- loads an empty file, a text file and a cut-off IFC, and expects the right messages;
+- opens the railway sample (9 models and a LAZ survey in map coordinates).
+
+It fails on any page or console error. It takes about half a minute.
 
 Built with [three.js](https://threejs.org), [three-mesh-bvh](https://github.com/gkjohnson/three-mesh-bvh), [web-ifc](https://github.com/ThatOpen/engine_web-ifc) (viewing and metadata editing), [Pyodide](https://pyodide.org) + [IfcOpenShell](https://ifcopenshell.org) (Python and IDS), [fflate](https://github.com/101arrowz/fflate), [Delaunator](https://github.com/mapbox/delaunator) (terrain) and [CodeMirror](https://codemirror.net). It is a static site with no backend.
 

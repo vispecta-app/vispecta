@@ -17,7 +17,10 @@
     "build": "node scripts/fetch-python.mjs && vite build",
     "build:app": "vite build",
     "fetch-python": "node scripts/fetch-python.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lint": "eslint .",
+    "test:smoke": "node tests/smoke.mjs",
+    "test": "npm run lint && npm run build:app && npm run test:smoke"
   },
   "dependencies": {
     "@codemirror/commands": "6.11.1",
@@ -36,6 +39,10 @@
     "web-ifc": "0.0.78"
   },
   "devDependencies": {
+    "@eslint/js": "9.39.1",
+    "eslint": "9.39.1",
+    "globals": "17.14.0",
+    "playwright": "1.63.0",
     "pyodide": "0.29.5",
     "vite": "8.1.6"
   },
