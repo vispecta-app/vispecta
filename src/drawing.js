@@ -113,7 +113,8 @@ export function computeSection(viewer, entry, { marks = [], annot = null } = {})
     out.push({ line: [[0, bounds.minY - pad], [0, bounds.maxY + pad]], color: AXIS_COLOR, dash: 'dashdot', layer: 'ALIGNMENT_AXIS' });
     const crossing = viewer.sectionAxes?.(entry) || [];
     // with more axes in the section, the own one says which alignment it is
-    const own = crossing.length && entry.station.al?.name ? `${entry.station.al.name} · ${entry.stationLabel || ''}` : entry.stationLabel || '';
+    // the own axis says which alignment (track) it is
+    const own = entry.station.al?.name ? `${entry.station.al.name} · ${entry.stationLabel || ''}` : entry.stationLabel || '';
     out.push({ text: own, at: [0, bounds.maxY + pad], dx: 1.2, dy: -1, size: 3, color: AXIS_COLOR, layer: 'ALIGNMENT_AXIS' });
     // the axes of the other alignments the section crosses (e.g. the other track), with their name and station
     for (const [i, a] of crossing.entries()) {
@@ -296,6 +297,23 @@ export function breakPoints(layers, { classes = null, angle = 10, facet = 0.25, 
       if (da >= angle && !(short && da < facetAngle)) kept.push({ ...q, sig: da });
     }
     kept.push({ ...r[r.length - 1], sig: 180 });
+    // peaks: the top of a narrow bump (top of rail, a crest) is a point even when the shape is
+    // round and all its facets were left out above – the highest point that stands at least
+    // 3 cm above the outline 12 cm to either side
+    const cand = [];
+    for (let i = 1; i < r.length - 1; i++) {
+      const q = r[i];
+      const yl = top(q.x - 0.12), yr = top(q.x + 0.12);
+      if (yl !== null && yr !== null && q.y - Math.max(yl, yr) > 0.03) cand.push(q);
+    }
+    cand.sort((a, b) => b.y - a.y);
+    const peaks = [];
+    for (const q of cand) if (!peaks.some((p) => Math.abs(p.x - q.x) < 0.12)) peaks.push(q);
+    for (const q of peaks) {
+      if (kept.some((p) => Math.abs(p.x - q.x) < 1e-3 && Math.abs(p.y - q.y) < 1e-3)) continue;
+      const at = kept.findIndex((p) => p.x > q.x); // in order along x, steps keep their order
+      kept.splice(at < 0 ? kept.length - 1 : at, 0, { ...q, sig: 200, peak: true }); // before corners when points are thinned
+    }
     out.push(kept);
   }
   return out;
