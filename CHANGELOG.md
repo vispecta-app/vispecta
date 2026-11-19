@@ -37,6 +37,10 @@ https://github.com/vispecta-app/vispecta/releases
   fails it. `npm run test` runs the same locally.
   ([#57](https://github.com/vispecta-app/vispecta/issues/57))
 
+### Fixed
+- **Fold arrows in the model browser are larger** (a 26 px button with a hover state), and a terrain's height
+  colour list no longer runs out of its card; the height range sits under it.
+
 ## v0.0.4 – 18.11.2026
 
 ### Changed
