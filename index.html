@@ -330,10 +330,10 @@
               <div class="sample-btns">
                 <button class="btn sample" data-action="open-samples" data-sample="scene"><span class="sample-name"><span aria-hidden="true">▶</span> <span data-i18n="samples.scene">Bridge, road, rail and a house</span></span><small data-i18n="samples.sceneInfo">IFC 4.3 sample scene · 2 alignments · 6 MB</small></button>
                 <button class="btn sample" data-action="open-samples" data-sample="rail"><span class="sample-name"><span aria-hidden="true">▶</span> <span data-i18n="samples.rail">Double-track railway with a bridge</span></span><small data-i18n="samples.railInfo">Fictitious 1 km, after Banedanmark norms · 9 disciplines + point cloud · 5 MB</small></button>
-                <button class="btn sample" data-action="open-samples" data-sample="cbbt"><span class="sample-name"><span aria-hidden="true">▶</span> Chesapeake Bay Bridge-Tunnel</span><small data-i18n="samples.cbbtInfo">Synthetic 31 km corridor · 2 alignments · 26 MB</small></button>
+                <button class="btn sample" data-action="open-samples" data-sample="cbbt" hidden><span class="sample-name"><span aria-hidden="true">▶</span> Chesapeake Bay Bridge-Tunnel</span><small data-i18n="samples.cbbtInfo">Synthetic 31 km corridor · 2 alignments · 26 MB</small></button>
               </div>
               <span class="muted small samples-credit"><a href="https://github.com/buildingSMART/Sample-Test-Files" target="_blank" rel="noopener" data-i18n="samples.credit">IFC 4.3 sample scene © buildingSMART International</a> · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a></span>
-              <span class="muted small samples-credit"><a href="https://github.com/buildingsmart-community/Community-Sample-Test-Files/tree/main/IFC%204.3.2.0%20(IFC%204.3)/Chesapeake%20Bay%20Bridge-Tunnel%20IFC%20Model" target="_blank" rel="noopener" data-i18n="samples.cbbtCredit">Chesapeake test model © buildingSMART Community Projects – synthetic, not by the CBBT District</a> · MIT · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a></span>
+              <span class="muted small samples-credit" id="cbbt-credit" hidden><a href="https://github.com/buildingsmart-community/Community-Sample-Test-Files/tree/main/IFC%204.3.2.0%20(IFC%204.3)/Chesapeake%20Bay%20Bridge-Tunnel%20IFC%20Model" target="_blank" rel="noopener" data-i18n="samples.cbbtCredit">Chesapeake test model © buildingSMART Community Projects – synthetic, not by the CBBT District</a> · MIT · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a></span>
             </div>
             <div class="recent-projects" id="recent-projects" hidden>
               <div class="recent-head"><b data-i18n="proj.recent"></b><button class="link" data-action="projects" data-i18n="proj.all"></button></div>
@@ -472,7 +472,7 @@
     </dialog>
 
 
-    <dialog id="drawing-dialog">
+    <dialog id="drawing-dialog" class="xwide">
       <h2 data-i18n="drw.title"></h2>
       <p class="muted small" data-i18n="drw.intro"></p>
       <div class="preset-row">
@@ -483,6 +483,8 @@
         <button type="button" class="btn sm" id="drw-preset-import" data-i18n="preset.import" data-i18n-title="preset.importTitle"></button>
         <input type="file" id="drw-preset-file" accept=".json,application/json" hidden />
       </div>
+      <div class="drw-cols">
+      <div class="drw-col">
       <label class="field"><span data-i18n="drw.plane"></span><select id="drw-plane"></select></label>
       <label class="field"><span data-i18n="drw.name"></span><input id="drw-name" type="text" /></label>
       <div class="grid3">
@@ -504,6 +506,18 @@
           <option value="original" data-i18n="drw.colOriginal"></option>
           <option value="mono" data-i18n="drw.mono"></option>
         </select></label>
+      <fieldset class="series" id="drw-series" hidden>
+        <label class="chk"><input type="checkbox" id="ser-on" /> <b data-i18n="ser.on"></b></label>
+        <div class="grid3">
+          <label class="field"><span data-i18n="ser.from"></span><input id="ser-from" type="text" inputmode="decimal" /></label>
+          <label class="field"><span data-i18n="ser.to"></span><input id="ser-to" type="text" inputmode="decimal" /></label>
+          <label class="field"><span data-i18n="ser.step"></span><input id="ser-step" type="number" min="0.1" step="any" value="25" /></label>
+        </div>
+        <p class="muted small" data-i18n="ser.note"></p>
+      </fieldset>
+      <p class="muted small" data-i18n="drw.note"></p>
+      </div>
+      <div class="drw-col">
       <fieldset class="annot" id="drw-annot">
         <label class="chk"><input type="checkbox" id="ann-on" /> <b data-i18n="ann.on"></b></label>
         <div class="annot-body" id="ann-body">
@@ -563,16 +577,8 @@
           <p class="muted small" data-i18n="ann.note"></p>
         </div>
       </fieldset>
-      <fieldset class="series" id="drw-series" hidden>
-        <label class="chk"><input type="checkbox" id="ser-on" /> <b data-i18n="ser.on"></b></label>
-        <div class="grid3">
-          <label class="field"><span data-i18n="ser.from"></span><input id="ser-from" type="text" inputmode="decimal" /></label>
-          <label class="field"><span data-i18n="ser.to"></span><input id="ser-to" type="text" inputmode="decimal" /></label>
-          <label class="field"><span data-i18n="ser.step"></span><input id="ser-step" type="number" min="0.1" step="any" value="25" /></label>
-        </div>
-        <p class="muted small" data-i18n="ser.note"></p>
-      </fieldset>
-      <p class="muted small" data-i18n="drw.note"></p>
+      </div>
+      </div>
       <div class="dialog-btns">
         <button class="btn primary" data-action="drawing-run" data-i18n="drw.export"></button>
       </div>
