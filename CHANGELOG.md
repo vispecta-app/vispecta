@@ -21,6 +21,9 @@ https://github.com/vispecta-app/vispecta/releases
   the cloud has no ground class.
 
 ### Changed
+- **The cut and fill dialog is laid out in two columns:** the settings on the left, the result on the right.
+  The result has key figures (cut, fill, net, area) and a table that scrolls on its own, with a fixed header
+  and a total row.
 - **The installed app is called just "Vispecta"** (manifest name, app title on iOS/Android, and the
   window title when it runs as an app), instead of "Vispecta – free IFC viewer …".
 - **The X/Y/Z axis cross is gone**; the view cube and its compass ring show the directions. The view

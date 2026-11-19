@@ -161,7 +161,7 @@ async function main() {
     await page2.waitForSelector('#volume-dialog[open]');
     await page2.evaluate(() => document.querySelector('[data-action="vol-run"]').click());
     await page2.waitForFunction(() => document.querySelector('#vol-results table'));
-    const vol = await page2.evaluate(() => document.querySelector('#vol-results p').textContent);
+    const vol = await page2.evaluate(() => document.querySelector('#vol-results .vol-tiles').title);
     const fillM3 = +(/fill ([\d,.]+) m³/.exec(vol)?.[1] || '0').replace(/[,.]/g, '');
     check('cut and fill: the embankment of the railway sample', fillM3 > 20000 && fillM3 < 60000, vol);
     await page2.keyboard.press('Escape');

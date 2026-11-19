@@ -651,24 +651,32 @@
       </div>
     </dialog>
 
-    <dialog id="volume-dialog" class="wide">
+    <dialog id="volume-dialog" class="xwide">
       <h2 data-i18n="vol.title"></h2>
       <p class="muted small" data-i18n="vol.intro"></p>
-      <div class="grid2">
-        <label class="field"><span data-i18n="vol.existing"></span><select id="vol-existing"></select></label>
-        <label class="field"><span data-i18n="prof.path"></span><select id="vol-path"></select></label>
+      <div class="vol-cols">
+        <div class="vol-col">
+          <fieldset>
+            <legend data-i18n="vol.surfaces"></legend>
+            <label class="field"><span data-i18n="vol.existing"></span><select id="vol-existing"></select></label>
+            <div class="field"><span data-i18n="vol.design"></span><div id="vol-design" class="merge-models"></div></div>
+          </fieldset>
+          <fieldset>
+            <legend data-i18n="vol.where"></legend>
+            <label class="field"><span data-i18n="prof.path"></span><select id="vol-path"></select></label>
+            <div class="grid3">
+              <label class="field"><span data-i18n="prof.from"></span><input id="vol-from" type="text" inputmode="decimal" /></label>
+              <label class="field"><span data-i18n="prof.to"></span><input id="vol-to" type="text" inputmode="decimal" /></label>
+              <label class="field"><span data-i18n="vol.bin"></span><input id="vol-bin" type="number" min="1" max="1000" step="1" value="20" /></label>
+              <label class="field"><span data-i18n="vol.left"></span><input id="vol-left" type="number" min="0" max="500" step="0.5" value="25" /></label>
+              <label class="field"><span data-i18n="vol.right"></span><input id="vol-right" type="number" min="0" max="500" step="0.5" value="25" /></label>
+              <label class="field"><span data-i18n="vol.grid"></span><input id="vol-grid" type="number" min="0.1" max="10" step="0.1" value="0.5" data-i18n-title="vol.gridTitle" /></label>
+            </div>
+          </fieldset>
+          <label class="chk"><input type="checkbox" id="vol-map" checked /> <span data-i18n="vol.map"></span></label>
+        </div>
+        <div class="vol-col" id="vol-results"></div>
       </div>
-      <div class="field"><span data-i18n="vol.design"></span><div id="vol-design" class="merge-models"></div></div>
-      <div class="grid3">
-        <label class="field"><span data-i18n="prof.from"></span><input id="vol-from" type="text" inputmode="decimal" /></label>
-        <label class="field"><span data-i18n="prof.to"></span><input id="vol-to" type="text" inputmode="decimal" /></label>
-        <label class="field"><span data-i18n="vol.bin"></span><input id="vol-bin" type="number" min="1" max="1000" step="1" value="20" /></label>
-        <label class="field"><span data-i18n="cor.left"></span><input id="vol-left" type="number" min="0" max="500" step="0.5" value="25" /></label>
-        <label class="field"><span data-i18n="cor.right"></span><input id="vol-right" type="number" min="0" max="500" step="0.5" value="25" /></label>
-        <label class="field"><span data-i18n="vol.grid"></span><input id="vol-grid" type="number" min="0.1" max="10" step="0.1" value="0.5" data-i18n-title="vol.gridTitle" /></label>
-      </div>
-      <label class="chk"><input type="checkbox" id="vol-map" checked /> <span data-i18n="vol.map"></span></label>
-      <div id="vol-results"></div>
       <div class="dialog-btns">
         <button class="btn" data-action="vol-clear" data-i18n="vol.clear"></button>
         <button class="btn" data-action="vol-csv">CSV</button>
