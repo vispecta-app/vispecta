@@ -155,6 +155,15 @@ async function main() {
       const m = window.onlineIfc.viewer.models.find((x) => x.terrain);
       return m.contourData ? { levels: m.contourData.levels.length, interval: m.contourData.interval } : null;
     });
+    // cut and fill between the terrain and the earthworks (#92)
+    await page2.evaluate(() => [...document.querySelectorAll('.model-card.open button')].find((b) => /Cut and fill/.test(b.textContent)).click());
+    await page2.waitForSelector('#volume-dialog[open]');
+    await page2.evaluate(() => document.querySelector('[data-action="vol-run"]').click());
+    await page2.waitForFunction(() => document.querySelector('#vol-results table'));
+    const vol = await page2.evaluate(() => document.querySelector('#vol-results p').textContent);
+    const fillM3 = +(/fill ([\d,.]+) m³/.exec(vol)?.[1] || '0').replace(/[,.]/g, '');
+    check('cut and fill: the embankment of the railway sample', fillM3 > 20000 && fillM3 < 60000, vol);
+    await page2.keyboard.press('Escape');
     check('terrain contours (auto)', !!cont && cont.levels > 5, cont?.dbg || (cont ? `${cont.levels} levels every ${cont.interval} m` : 'no contour option'));
     await page2.context().close();
   } catch (e) {
