@@ -39,6 +39,7 @@ import { loadPointCloud, LAS_CLASSES, classColor as lasClassColor } from './poin
 import { Corridor } from './corridor.js';
 import { computeSection, computeProfile, planeAxes, layout, toSvg, toPdf, toPdfPages, toDxf, renderBackground, SCALES, AXIS_COLOR } from './drawing.js';
 import { ViewCube } from './viewcube.js';
+import { initFloating } from './floating.js';
 import { contourLines, planLength } from './contours.js';
 import { SurfaceIndex, cutFill } from './volumes.js';
 import { runIdsCheck, colorIdsResult, idsCsv, specSummary, setIdsColors, IDS_EXAMPLES } from './ids.js';
@@ -88,8 +89,11 @@ const measure = new MeasureTool(viewer, $('#viewport'));
 // view cube (#84): top right corner, can be turned off under View (remembered)
 const VIEWCUBE_KEY = 'onlineifc.viewcube';
 const viewCube = new ViewCube(viewer, { onHome: () => viewer.setView('iso') });
+// floating panels can be moved by their header, and stay clear of the view cube
+const floating = initFloating($('#viewport'), { avoid: () => [viewCube.el] });
 function setViewCube(on) {
   viewCube.setVisible(on);
+  floating.settleAll();
   try { localStorage.setItem(VIEWCUBE_KEY, on ? '1' : '0'); } catch { /* ignore */ }
   const c = document.getElementById('viewcube-check');
   if (c) c.textContent = on ? '☑' : '☐';
@@ -456,7 +460,7 @@ function cloudCard(c) {
   })) : null;
   return h('div', { class: `card model-card cloud-card${open ? ' open' : ''}${c.visible ? '' : ' off'}` },
     h('div', { class: 'card-head' },
-      h('button', { class: 'mg-caret', text: open ? '▾' : '▸', 'aria-label': t('models.details'), onclick: () => { c.cardOpen = !open; renderModels(); } }),
+      h('button', { class: `mg-caret${open ? ' open' : ''}`, 'aria-expanded': String(open), 'aria-label': t('models.details'), onclick: () => { c.cardOpen = !open; renderModels(); } }),
       vis, h('span', { class: 'pc-icon', 'aria-hidden': 'true', text: '⁘' }),
       h('span', { class: 'card-title' }, label, sub),
       h('button', { class: 'icon-btn', title: t('models.aliasTitle'), text: '✎', onclick: editAlias })),
@@ -1712,7 +1716,7 @@ function groupSection(g, models) {
     const rename = () => inlineEdit(name, g.name, t('mg.defaultName', { n: '' }), (v) => { if (v) g.name = v; renderModels(); projects.touch?.(); });
     name.addEventListener('dblclick', rename);
     sec.append(h('div', { class: 'mg-head' },
-      h('button', { class: 'mg-caret', text: g.open ? '▾' : '▸', 'aria-label': t('mg.toggle'), onclick: () => { g.open = !g.open; renderModels(); } }),
+      h('button', { class: `mg-caret${g.open ? ' open' : ''}`, 'aria-expanded': String(!!g.open), 'aria-label': t('mg.toggle'), onclick: () => { g.open = !g.open; renderModels(); } }),
       vis, name,
       h('span', { class: 'mg-count', text: String(models.length) }),
       h('button', { class: 'icon-btn mg-zoom', title: t('mg.zoom'), text: '⤢', onclick: () => { const b = new THREE.Box3(); for (const m of models) if (m.visible) b.union(m.getBox()); if (!b.isEmpty()) viewer.fitBox(b); } }),
@@ -1788,7 +1792,7 @@ function modelCard(m) {
 
   const card = h('div', { class: `card model-card${open ? ' open' : ''}${m.visible ? '' : ' off'}`, draggable: 'true' },
     h('div', { class: 'card-head' },
-      h('button', { class: 'mg-caret', text: open ? '▾' : '▸', 'aria-label': t('models.details'), onclick: () => { m.cardOpen = !open; renderModels(); } }),
+      h('button', { class: `mg-caret${open ? ' open' : ''}`, 'aria-expanded': String(open), 'aria-label': t('models.details'), onclick: () => { m.cardOpen = !open; renderModels(); } }),
       vis, dot,
       h('span', { class: 'card-title' }, label, sub),
       m.coordWarning && !m.coordWarning.dismissed ? h('button', {
@@ -1807,7 +1811,7 @@ function modelCard(m) {
       m.terrain ? h('div', { class: 'card-row' }, h('label', { text: t('ter.heightColors') }),
         h('select', { title: t('ter.heightTitle'), onchange: (e) => { m.setHeightColors(e.target.value === 'off' ? false : e.target.value); viewer.invalidate(); renderModels(); projects.touch?.(); } },
           ['off', 'default', 'earth'].map((v) => h('option', { value: v, text: t(`ter.hc.${v}`), selected: (m.heightColors || 'off') === v }))),
-        m.heightColors && m.heightRange ? h('span', { class: 'muted', text: m.heightRange.map((y) => fmtNum(+viewer.toIfc(new THREE.Vector3(0, y, 0).applyMatrix4(m.group.matrixWorld)).z.toFixed(1))).join(' – ') + ' m' }) : null) : null,
+        m.heightColors && m.heightRange ? h('span', { class: 'muted card-note', title: t('ter.rangeTitle'), text: m.heightRange.map((y) => fmtNum(+viewer.toIfc(new THREE.Vector3(0, y, 0).applyMatrix4(m.group.matrixWorld)).z.toFixed(1))).join(' – ') + ' m' }) : null) : null,
       m.terrain ? h('div', { class: 'card-row' }, h('label', { text: t('ter.contours') }),
         h('select', { title: t('ter.contoursTitle'), onchange: (e) => { setContours(m, e.target.value === 'off' ? false : e.target.value === 'auto' ? 'auto' : +e.target.value); renderModels(); projects.touch?.(); } },
           CONTOUR_INTERVALS.map((v) => h('option', { value: String(v), text: v === 'off' ? t('ter.c.off') : v === 'auto' ? (m.contours === 'auto' && m.contourData ? `${t('ter.c.auto')} (${fmtNum(m.contourData.interval)} m)` : t('ter.c.auto')) : `${fmtNum(v)} m`, selected: String(m.contours || 'off') === String(v) })))) : null,

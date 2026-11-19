@@ -23,9 +23,12 @@ https://github.com/vispecta-app/vispecta/releases
 ### Changed
 - **The installed app is called just "Vispecta"** (manifest name, app title on iOS/Android, and the
   window title when it runs as an app), instead of "Vispecta – free IFC viewer …".
-- **The view cube is in the top left corner**, instead of the X/Y/Z axis cross, which is gone (the
-  cube and its compass ring show the directions). The top right corner of the 3D view is free.
+- **The X/Y/Z axis cross is gone**; the view cube and its compass ring show the directions. The view
+  cube stays in the top right corner, and the measure panel opens under it instead of on top of it.
   ([#95](https://github.com/vispecta-app/vispecta/issues/95))
+- **Floating panels can be moved:** drag sections, measure, drive, compare and IDS by their header. They
+  are remembered per panel, kept inside the 3D view, and pushed clear of the view cube. A double-click
+  on the header puts a panel back in its place.
 - **The Chesapeake Bay Bridge-Tunnel sample is hidden** on the start screen; the railway sample and
   the sample scene stay. ([#95](https://github.com/vispecta-app/vispecta/issues/95))
 - **Export 2D drawing is a wide dialog in two columns:** the drawing on the left, the annotation on
@@ -38,6 +41,10 @@ https://github.com/vispecta-app/vispecta/releases
   export, a point cloud, all tabs, bad files, and the railway sample. Any page or console error
   fails it. `npm run test` runs the same locally.
   ([#57](https://github.com/vispecta-app/vispecta/issues/57))
+
+### Fixed
+- **Fold arrows in the model browser are larger** (a 26 px button with a hover state), and a terrain's height
+  colour list no longer runs out of its card; the height range sits under it.
 
 ## v0.0.4 – 18.11.2026
 

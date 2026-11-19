@@ -482,13 +482,18 @@ details.batch[open] > summary { margin-bottom: 6px; }
 body.dragging .drop-overlay { display: flex; }
 
 /* floating panels over the 3D view: one look. Places: sections bottom left, measure top right,
-   compare / IDS top left, drive and hints top centre, section window bottom right. */
+   compare / IDS top left, drive and hints top centre, section window bottom right; the view cube top
+   right with measure under it. All can be moved by their header (floating.js). */
 .float {
   position: absolute; z-index: 3; background: var(--panel); color: var(--text);
   border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow); padding: 8px 10px;
 }
 .float-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .float-head b { font-size: var(--fs); }
+/* panels move by their header (floating.js); a double-click puts them back */
+.float > .float-head { cursor: move; }
+.float.dragging { user-select: none; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22); opacity: 0.97; }
+.drive-panel > b, .cmp-panel > :first-child { cursor: move; }
 .mode-hint, .tool-hint {
   position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 6; max-width: 80%; text-align: center;
   background: var(--accent); color: var(--on-accent); border: 0; padding: 6px 14px; border-radius: 16px; box-shadow: var(--shadow); font-size: 12.5px;
@@ -533,7 +538,7 @@ body.py-open .planes-panel { max-height: calc(100% - 60px); }
 .m-label.spot { white-space: pre; text-align: left; line-height: 1.35; }
 .m-label.align { --m-color: #e8590c; font-size: 11px; padding: 2px 6px; }
 .m-label.align.name { font-size: 12px; }
-.measure-panel { right: 12px; top: 12px; width: 300px; max-height: calc(100% - 60px); overflow: hidden; display: flex; flex-direction: column; }
+.measure-panel { right: 12px; top: 160px; width: 300px; max-height: calc(100% - 200px); overflow: hidden; display: flex; flex-direction: column; }
 .measure-panel > :not(#measure-list) { flex: none; }
 #measure-list { overflow: auto; min-height: 0; flex: 1 1 auto; }
 .measure-opts { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 6px 0 4px; }
@@ -794,8 +799,13 @@ fieldset.annot .annot-row .chk { margin-bottom: 6px; color: var(--text); }
 .mgroup.off .mg-body { opacity: 0.5; }
 .mgroup.loose .mg-body { padding-left: 0; border-left: 0; margin-left: 0; }
 .mg-empty { font-size: var(--fs-sm); color: var(--muted); padding: 8px; border: 1px dashed var(--border-strong); border-radius: var(--r-sm); text-align: center; }
-.mg-caret { border: 0; background: none; color: var(--muted); width: 16px; padding: 0; font-size: 11px; flex: none; }
-.mg-caret:hover { color: var(--accent); }
+/* fold / unfold (cards and groups): a clear chevron in a 26 px button that shows it can be clicked */
+.mg-caret { border: 1px solid transparent; background: none; color: var(--muted); width: 26px; height: 26px; padding: 0; flex: none;
+  display: inline-grid; place-items: center; border-radius: var(--r-sm); cursor: pointer; font-size: 0; transition: background .12s, color .12s; }
+.mg-caret::before { content: ''; width: 7px; height: 7px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
+  transform: translateX(-1px) rotate(-45deg); transition: transform .15s; }
+.mg-caret.open::before { transform: translateY(-2px) rotate(45deg); }
+.mg-caret:hover, .mg-caret:focus-visible { color: var(--accent); background: var(--accent-soft); border-color: var(--border); }
 .model-card { padding: 6px 8px; margin-bottom: 6px; cursor: grab; }
 .model-card.dragging { opacity: 0.5; }
 .model-card.off .card-title { opacity: 0.55; }
@@ -805,7 +815,10 @@ fieldset.annot .annot-row .chk { margin-bottom: 6px; color: var(--text); }
 .card-title .card-name { font-family: var(--display); font-weight: 600; letter-spacing: -0.01em; }
 .card-file { font-size: var(--fs-xs); color: var(--muted); overflow-wrap: anywhere; line-height: 1.35; }
 .card-body { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
-.card-body .card-row select { flex: 1; }
+.card-body .card-row select { flex: 1; min-width: 0; text-overflow: ellipsis; }
+/* a note under a row (e.g. the height range of a terrain), indented under the field, so the field keeps its width */
+.card-row { flex-wrap: wrap; }
+.card-row .card-note { flex-basis: 100%; padding-left: 90px; margin-top: -2px; font-size: var(--fs-xs); }
 .inline-edit { width: 100%; height: 24px; font: inherit; font-weight: 600; }
 
 /* point clouds (#27) */
@@ -852,7 +865,7 @@ fieldset.annot .annot-row .chk { margin-bottom: 6px; color: var(--text); }
 .ann-fmt-table select { max-width: 150px; }
 
 /* ------------------------------------------------------------- view cube (#84) */
-.viewcube { position: absolute; top: 10px; left: 12px; width: 130px; height: 140px; z-index: 5; user-select: none; -webkit-user-select: none; touch-action: none; }
+.viewcube { position: absolute; top: 10px; right: 12px; width: 130px; height: 140px; z-index: 5; user-select: none; -webkit-user-select: none; touch-action: none; }
 .viewcube .vc-stage { position: absolute; left: 0; top: 0; width: 130px; height: 130px; display: grid; place-items: center; cursor: pointer; }
 .viewcube .vc-cube { position: relative; width: 64px; height: 64px; transform-style: preserve-3d; pointer-events: none; }
 .viewcube .vc-cell, .viewcube .vc-dir { pointer-events: auto; }
