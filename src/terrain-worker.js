@@ -4,19 +4,25 @@
 //   {cloud: {positions (Float32, local), classes (Uint8 or null), hidden: [class], toIfc: [16]
 //            (column-major, local -> IFC metres)}, grid, maxEdge, source: 'ground'|'lowest', name, georef}
 //   or {landxml: text, toIfc: [16] (map E N H -> IFC) or null, maxEdge, name, georef}
+//   or {geotiff: ArrayBuffer, toIfc: [16] or null, clip: [e0, n0, e1, n1] (map) or null, maxCells, name, georef}
+//      – a height model such as the Danish DHM/Terræn (#92): the raster, resampled to at most maxCells
+//      cells, as a regular TIN (two triangles per cell, none where there is no data)
 // Output: {done: {ifc: string, points, triangles, source, origin, min, max}} or {error}.
 //
 // Steps for a cloud: the ground points (class 2 when the file has it, else the shown points) are
 // moved to IFC coordinates, thinned on a grid in plan (classified ground: the point nearest the
-// middle of the cell; otherwise the lowest point of the cell, a simple ground filter), triangulated
+// middle of the cell; otherwise the lowest point of the cell, and with source 'filter' a progressive
+// morphological filter (#92) drops the cells that stand above the opened surface: trees, buildings,
+// vehicles), triangulated
 // in plan with Delaunator, and triangles with an edge longer than maxEdge are dropped so there are
 // holes where there is no data. The result is written as an IFC 4.3 file: an IfcGeographicElement
 // (TERRAIN) with an IfcTriangulatedFaceSet, which Vispecta then opens like any model.
 import Delaunator from 'delaunator';
+import { fromArrayBuffer } from 'geotiff';
 
-self.onmessage = ({ data }) => {
+self.onmessage = async ({ data }) => {
   try {
-    const res = data.landxml ? fromLandXml(data) : fromCloud(data);
+    const res = data.landxml ? fromLandXml(data) : data.geotiff ? await fromGeoTiff(data) : fromCloud(data);
     self.postMessage({ done: res });
   } catch (e) {
     self.postMessage({ error: e.message || String(e) });
@@ -55,6 +61,7 @@ function fromCloud({ cloud, grid, maxEdge, source, name, georef }) {
       if ((x - cx) ** 2 + (y - cy) ** 2 < (X[cur] - cx) ** 2 + (Y[cur] - cy) ** 2) cells.set(key, i);
     } else if (z < Z[cur]) cells.set(key, i);
   }
+  if (!useGround && source === 'filter') morphologicalFilter(cells, Z, g);
   const k = cells.size;
   if (k < 3) throw new Error('too few ground points');
   const xy = new Float64Array(k * 2), zs = new Float64Array(k);
@@ -64,7 +71,108 @@ function fromCloud({ cloud, grid, maxEdge, source, name, georef }) {
   const d = new Delaunator(xy);
   progress(0.75);
   const tris = dropLong(d.triangles, xy, maxEdge);
-  return write({ xy, zs, tris, ox, oy, name, georef, source: useGround ? 'ground' : 'lowest', grid: g, maxEdge, total: n });
+  return write({ xy, zs, tris, ox, oy, name, georef, source: useGround ? 'ground' : source === 'filter' ? 'filter' : 'lowest', grid: g, maxEdge, total: n });
+}
+
+/**
+ * Progressive morphological filter (after Zhang et al. 2003) on the grid of the lowest points:
+ * the surface is opened (erosion, then dilation) with growing square windows up to about 20 m;
+ * a cell that lies more than dh above the opened surface is no ground. dh grows with the window
+ * (slope 0.3, from 0.3 m up to 2.5 m), so slopes stay and objects go. Removes those cells from `cells`.
+ */
+function morphologicalFilter(cells, Z, g) {
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  const pos = [];
+  for (const [key, i] of cells) {
+    const ix = Math.round(key / 4194304), iy = key - ix * 4194304; // key = ix · 2^22 + iy, |iy| < 2^21
+    pos.push([ix, iy, key, i]);
+    if (ix < x0) x0 = ix; if (ix > x1) x1 = ix; if (iy < y0) y0 = iy; if (iy > y1) y1 = iy;
+  }
+  const W = x1 - x0 + 1, H = y1 - y0 + 1;
+  if (W * H > 4e7) return; // too large a grid: keep the lowest points
+  let cur = new Float64Array(W * H).fill(NaN);
+  for (const [ix, iy, , i] of pos) cur[(iy - y0) * W + (ix - x0)] = Z[i];
+  const orig = cur.slice();
+  const ground = new Uint8Array(W * H).fill(1);
+  // separable min / max over a square window of 2r+1 cells; empty cells (NaN) are skipped
+  const pass = (src, r, isMin) => {
+    const tmp = new Float64Array(W * H), out = new Float64Array(W * H);
+    const better = isMin ? (a, b) => a < b : (a, b) => a > b;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      let v = NaN;
+      for (let d = Math.max(0, x - r); d <= Math.min(W - 1, x + r); d++) { const q = src[y * W + d]; if (q === q && (v !== v || better(q, v))) v = q; }
+      tmp[y * W + x] = v;
+    }
+    for (let x = 0; x < W; x++) for (let y = 0; y < H; y++) {
+      let v = NaN;
+      for (let d = Math.max(0, y - r); d <= Math.min(H - 1, y + r); d++) { const q = tmp[d * W + x]; if (q === q && (v !== v || better(q, v))) v = q; }
+      out[y * W + x] = v;
+    }
+    return out;
+  };
+  const slope = 0.3, dh0 = 0.3, dhMax = 2.5;
+  let prevW = 1;
+  for (let r = 1; (2 * r + 1) * g <= 21 || r === 1; r = r < 4 ? r + 1 : r * 2) {
+    const w = 2 * r + 1;
+    const opened = pass(pass(cur, r, true), r, false);
+    const dh = Math.min(dhMax, dh0 + slope * (w - prevW) * g);
+    for (let k = 0; k < W * H; k++) if (orig[k] === orig[k] && opened[k] === opened[k] && cur[k] - opened[k] > dh) ground[k] = 0;
+    cur = opened;
+    prevW = w;
+    progress(0.4 + 0.08 * Math.min(1, (w * g) / 21));
+  }
+  for (const [ix, iy, key] of pos) if (!ground[(iy - y0) * W + (ix - x0)]) cells.delete(key);
+}
+
+/** A raster height model (GeoTIFF, e.g. DHM/Terræn) as a regular TIN in IFC coordinates. */
+async function fromGeoTiff({ geotiff, toIfc, clip, maxCells = 1500000, name, georef }) {
+  const tiff = await fromArrayBuffer(geotiff);
+  const img = await tiff.getImage();
+  const W = img.getWidth(), H = img.getHeight();
+  const [oe, on] = img.getOrigin();
+  const [re, rn] = img.getResolution(); // rn is negative for north-up rasters
+  const nodata = img.getGDALNoData();
+  // the window in pixels: the clip (the models with a margin) when it overlaps the raster, else all of it
+  let px0 = 0, py0 = 0, px1 = W, py1 = H;
+  if (clip) {
+    const cx = [(clip[0] - oe) / re, (clip[2] - oe) / re], cy = [(clip[1] - on) / rn, (clip[3] - on) / rn];
+    const a = Math.max(0, Math.floor(Math.min(...cx))), b = Math.min(W, Math.ceil(Math.max(...cx)));
+    const c = Math.max(0, Math.floor(Math.min(...cy))), d = Math.min(H, Math.ceil(Math.max(...cy)));
+    if (b - a >= 2 && d - c >= 2) { px0 = a; px1 = b; py0 = c; py1 = d; }
+  }
+  const step = Math.max(1, Math.ceil(Math.sqrt(((px1 - px0) * (py1 - py0)) / maxCells)));
+  const outW = Math.max(2, Math.floor((px1 - px0) / step)), outH = Math.max(2, Math.floor((py1 - py0) / step));
+  progress(0.15);
+  const [band] = await img.readRasters({ window: [px0, py0, px1, py1], width: outW, height: outH, resampleMethod: 'nearest', samples: [0] });
+  progress(0.45);
+  const sx = ((px1 - px0) / outW) * re, sy = ((py1 - py0) / outH) * rn;
+  const m = toIfc;
+  const n = outW * outH;
+  const X = new Float64Array(n), Y = new Float64Array(n), Zs = new Float64Array(n), ok = new Uint8Array(n);
+  for (let j = 0; j < outH; j++) for (let i = 0; i < outW; i++) {
+    const k = j * outW + i, h = band[k];
+    if (!Number.isFinite(h) || (nodata !== null && Math.abs(h - nodata) < 1e-6) || h < -1e4 || h > 1e5) continue;
+    const E = oe + px0 * re + (i + 0.5) * sx, N = on + py0 * rn + (j + 0.5) * sy;
+    ok[k] = 1;
+    if (m) { X[k] = m[0] * E + m[4] * N + m[8] * h + m[12]; Y[k] = m[1] * E + m[5] * N + m[9] * h + m[13]; Zs[k] = m[2] * E + m[6] * N + m[10] * h + m[14]; }
+    else { X[k] = E; Y[k] = N; Zs[k] = h; }
+  }
+  const first = ok.indexOf(1);
+  if (first < 0) throw new Error('the raster has no heights (only no-data)');
+  const ox = Math.round(X[first]), oy = Math.round(Y[first]);
+  const xy = new Float64Array(n * 2);
+  for (let k = 0; k < n; k++) { xy[2 * k] = X[k] - ox; xy[2 * k + 1] = Y[k] - oy; }
+  // two triangles per cell of four valid pixels, one where three are valid
+  const tris = [];
+  for (let j = 0; j + 1 < outH; j++) for (let i = 0; i + 1 < outW; i++) {
+    const a = j * outW + i, b = a + 1, c = a + outW, d = c + 1;
+    const v = ok[a] + ok[b] + ok[c] + ok[d];
+    if (v === 4) tris.push(a, c, b, b, c, d);
+    else if (v === 3) { const q = [a, b, d, c].filter((x) => ok[x]); tris.push(q[0], q[2], q[1]); }
+  }
+  progress(0.7);
+  const res = write({ xy, zs: Zs, tris: Uint32Array.from(tris), ox, oy, name, georef, source: 'geotiff', grid: Math.abs(sx), total: W * H });
+  return { ...res, raster: [W, H], cell: Math.abs(sx) };
 }
 
 /** Keeps the triangles whose edges are all at most maxEdge long (in plan). */

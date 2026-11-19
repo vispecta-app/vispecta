@@ -82,7 +82,7 @@
       <div class="brand"><svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><circle class="mark-dot" cx="32" cy="14" r="6"/><path class="mark-line" d="M6 30H19L28 48H36L45 30H58"/></svg><span class="brand-name">Vispecta</span><button class="beta-badge" data-action="about" data-i18n-title="beta.title">Beta</button></div>
 
       <label class="btn primary" data-i18n-title="tb.openTitle">
-        <input id="file-input" type="file" accept=".ifc,.IFC,.json,.bcf,.bcfzip,.ids,.xml,.las,.laz,.ply,.xyz,.pts,.csv,.txt" multiple hidden />
+        <input id="file-input" type="file" accept=".ifc,.IFC,.json,.bcf,.bcfzip,.ids,.xml,.las,.laz,.ply,.xyz,.pts,.csv,.txt,.tif,.tiff" multiple hidden />
         <svg viewBox="0 0 24 24"><path d="M4 20h16M12 4v12m0 0-5-5m5 5 5-5"/></svg>
         <span data-i18n="tb.open"></span>
       </label>
@@ -318,7 +318,7 @@
               </section>
             </noscript>
             <label class="drop-zone" id="drop-zone">
-              <input id="file-input-2" type="file" accept=".ifc,.IFC,.json,.bcf,.bcfzip,.ids,.xml,.las,.laz,.ply,.xyz,.pts,.csv,.txt" multiple hidden />
+              <input id="file-input-2" type="file" accept=".ifc,.IFC,.json,.bcf,.bcfzip,.ids,.xml,.las,.laz,.ply,.xyz,.pts,.csv,.txt,.tif,.tiff" multiple hidden />
               <svg class="mark drop-icon" viewBox="0 0 64 64" aria-hidden="true"><circle class="mark-dot" cx="32" cy="14" r="6"/><path class="mark-line" d="M6 30H19L28 48H36L45 30H58"/></svg>
               <h1 data-i18n="welcome.drop">Drag and drop IFC files here</h1>
               <p class="muted" data-i18n="welcome.or">or</p>
@@ -636,6 +636,7 @@
       <p class="small" id="ter-cloud"></p>
       <label class="field"><span data-i18n="ter.source"></span><select id="ter-source">
         <option value="ground" data-i18n="ter.srcGround"></option>
+        <option value="filter" data-i18n="ter.srcFilter"></option>
         <option value="lowest" data-i18n="ter.srcLowest"></option>
       </select></label>
       <div class="grid2">
@@ -645,6 +646,31 @@
       <p class="muted small" id="ter-estimate"></p>
       <div class="dialog-btns">
         <button class="btn primary" data-action="ter-build" data-i18n="ter.build"></button>
+      </div>
+    </dialog>
+
+    <dialog id="volume-dialog" class="wide">
+      <h2 data-i18n="vol.title"></h2>
+      <p class="muted small" data-i18n="vol.intro"></p>
+      <div class="grid2">
+        <label class="field"><span data-i18n="vol.existing"></span><select id="vol-existing"></select></label>
+        <label class="field"><span data-i18n="prof.path"></span><select id="vol-path"></select></label>
+      </div>
+      <div class="field"><span data-i18n="vol.design"></span><div id="vol-design" class="merge-models"></div></div>
+      <div class="grid3">
+        <label class="field"><span data-i18n="prof.from"></span><input id="vol-from" type="text" inputmode="decimal" /></label>
+        <label class="field"><span data-i18n="prof.to"></span><input id="vol-to" type="text" inputmode="decimal" /></label>
+        <label class="field"><span data-i18n="vol.bin"></span><input id="vol-bin" type="number" min="1" max="1000" step="1" value="20" /></label>
+        <label class="field"><span data-i18n="cor.left"></span><input id="vol-left" type="number" min="0" max="500" step="0.5" value="25" /></label>
+        <label class="field"><span data-i18n="cor.right"></span><input id="vol-right" type="number" min="0" max="500" step="0.5" value="25" /></label>
+        <label class="field"><span data-i18n="vol.grid"></span><input id="vol-grid" type="number" min="0.1" max="10" step="0.1" value="0.5" data-i18n-title="vol.gridTitle" /></label>
+      </div>
+      <label class="chk"><input type="checkbox" id="vol-map" checked /> <span data-i18n="vol.map"></span></label>
+      <div id="vol-results"></div>
+      <div class="dialog-btns">
+        <button class="btn" data-action="vol-clear" data-i18n="vol.clear"></button>
+        <button class="btn" data-action="vol-csv">CSV</button>
+        <button class="btn primary" data-action="vol-run" data-i18n="vol.run"></button>
       </div>
     </dialog>
 

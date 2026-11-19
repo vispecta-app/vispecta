@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { writeArrayBuffer } from 'geotiff';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = path.join(ROOT, 'dist');
@@ -155,6 +156,32 @@ async function main() {
       const m = window.onlineIfc.viewer.models.find((x) => x.terrain);
       return m.contourData ? { levels: m.contourData.levels.length, interval: m.contourData.interval } : null;
     });
+    // cut and fill between the terrain and the earthworks (#92)
+    await page2.evaluate(() => [...document.querySelectorAll('.model-card.open button')].find((b) => /Cut and fill/.test(b.textContent)).click());
+    await page2.waitForSelector('#volume-dialog[open]');
+    await page2.evaluate(() => document.querySelector('[data-action="vol-run"]').click());
+    await page2.waitForFunction(() => document.querySelector('#vol-results table'));
+    const vol = await page2.evaluate(() => document.querySelector('#vol-results p').textContent);
+    const fillM3 = +(/fill ([\d,.]+) m³/.exec(vol)?.[1] || '0').replace(/[,.]/g, '');
+    check('cut and fill: the embankment of the railway sample', fillM3 > 20000 && fillM3 < 60000, vol);
+    await page2.keyboard.press('Escape');
+    // LandXML export of the terrain (#92)
+    const [lx] = await Promise.all([page2.waitForEvent('download'), page2.evaluate(() => [...document.querySelectorAll('.model-card.open button')].find((b) => /LandXML/.test(b.textContent)).click())]);
+    const lxml = fs.readFileSync(await lx.path(), 'utf8');
+    const nP = (lxml.match(/<P id=/g) || []).length, nF = (lxml.match(/<F>/g) || []).length;
+    check('LandXML export of the terrain', /<LandXML\b/.test(lxml) && nP > 1000 && nF > 1000 && /EPSG:25832/.test(lxml), `${nP} points, ${nF} faces`);
+    // a height model as GeoTIFF (#92): 60 × 40 m at 1 m by the bridge, one no-data pixel
+    const W = 60, H = 40, hv = new Float32Array(W * H);
+    for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) hv[j * W + i] = 20 + i * 0.05 + j * 0.02;
+    hv[0] = -9999;
+    const tif = writeArrayBuffer(hv, { width: W, height: H, ModelPixelScale: [1, 1, 0], ModelTiepoint: [0, 0, 0, 680180, 6150040, 0], ProjectedCSTypeGeoKey: 25832, GDAL_NODATA: '-9999', BitsPerSample: [32], SampleFormat: [3] });
+    const nModels = await page2.evaluate(() => window.onlineIfc.viewer.models.length);
+    await page2.setInputFiles('#file-input', { name: 'dhm.tif', mimeType: 'image/tiff', buffer: Buffer.from(tif) });
+    await page2.waitForFunction((n) => window.onlineIfc.viewer.models.length === n + 1, nModels);
+    await idle(page2);
+    const dhm = await page2.evaluate(() => { const m = window.onlineIfc.viewer.models.at(-1); return { terrain: !!m.terrain, tris: m.buckets.reduce((n, b) => n + b.index.length / 3, 0) }; });
+    // 59 × 39 cells, two triangles each, less the cell with the no-data corner (one triangle left)
+    check('GeoTIFF height model opens as terrain', dhm.terrain && dhm.tris === 59 * 39 * 2 - 1, `${dhm.tris} triangles`);
     check('terrain contours (auto)', !!cont && cont.levels > 5, cont?.dbg || (cont ? `${cont.levels} levels every ${cont.interval} m` : 'no contour option'));
     await page2.context().close();
   } catch (e) {

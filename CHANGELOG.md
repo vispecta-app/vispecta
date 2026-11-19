@@ -9,11 +9,24 @@ https://github.com/vispecta-app/vispecta/releases
 - **Contours on terrain** ([#92](https://github.com/vispecta-app/vispecta/issues/92)): choose *Auto* or an
   interval (0.25 – 5 m) on the terrain's card. Every 5th contour is thicker. Contours show in 3D and in plan
   drawings, with the height on the thick ones (PDF, SVG, DXF layer `CONTOURS`), and are saved in the project.
+- **Cut and fill** ([#92](https://github.com/vispecta-app/vispecta/issues/92)): the terrain against the top of
+  chosen models (by default the embankment), on a grid along an alignment. The result is a table per station range, a CSV
+  and a difference map in 3D (red: cut, blue: fill).
+- **Height models as GeoTIFF** ([#92](https://github.com/vispecta-app/vispecta/issues/92)), e.g. DHM/Terræn: drop
+  a `.tif` and it opens as a terrain, cut to the models and placed in map coordinates.
+- **LandXML export of a terrain** ([#92](https://github.com/vispecta-app/vispecta/issues/92)): *Download LandXML*
+  on its card.
+- **Ground filter for point clouds without classes** ([#92](https://github.com/vispecta-app/vispecta/issues/92)): a
+  morphological filter removes trees, buildings and vehicles before triangulation. It is the default when
+  the cloud has no ground class.
 
 ### Changed
-- **The view cube is in the top left corner**, instead of the X/Y/Z axis cross, which is gone (the
-  cube and its compass ring show the directions). The top right corner of the 3D view is free.
+- **The X/Y/Z axis cross is gone**; the view cube and its compass ring show the directions. The view
+  cube stays in the top right corner, and the measure panel opens under it instead of on top of it.
   ([#95](https://github.com/vispecta-app/vispecta/issues/95))
+- **Floating panels can be moved:** drag sections, measure, drive, compare and IDS by their header. They
+  are remembered per panel, kept inside the 3D view, and pushed clear of the view cube. A double-click
+  on the header puts a panel back in its place.
 - **The Chesapeake Bay Bridge-Tunnel sample is hidden** on the start screen; the railway sample and
   the sample scene stay. ([#95](https://github.com/vispecta-app/vispecta/issues/95))
 - **Export 2D drawing is a wide dialog in two columns:** the drawing on the left, the annotation on
@@ -34,6 +47,8 @@ https://github.com/vispecta-app/vispecta/releases
 - **Top of rail is annotated in cross sections.** Round shapes such as a rail head were thinned away as
   facets, so only the rail foot got points. Now the top of a narrow bump (3 cm above the outline 12 cm to
   each side) is always a point and wins over nearby corners: offset and height of the rail head.
+- **Fold arrows in the model browser are larger** (a 26 px button with a hover state), and a terrain's height
+  colour list no longer runs out of its card; the height range sits under it.
 
 ## v0.0.4 – 18.11.2026
 
