@@ -11,9 +11,12 @@ https://github.com/vispecta-app/vispecta/releases
   drawings, with the height on the thick ones (PDF, SVG, DXF layer `CONTOURS`), and are saved in the project.
 
 ### Changed
-- **The view cube is in the top left corner**, instead of the X/Y/Z axis cross, which is gone (the
-  cube and its compass ring show the directions). The top right corner of the 3D view is free.
+- **The X/Y/Z axis cross is gone**; the view cube and its compass ring show the directions. The view
+  cube stays in the top right corner, and the measure panel opens under it instead of on top of it.
   ([#95](https://github.com/vispecta-app/vispecta/issues/95))
+- **Floating panels can be moved:** drag sections, measure, drive, compare and IDS by their header. They
+  are remembered per panel, kept inside the 3D view, and pushed clear of the view cube. A double-click
+  on the header puts a panel back in its place.
 - **The Chesapeake Bay Bridge-Tunnel sample is hidden** on the start screen; the railway sample and
   the sample scene stay. ([#95](https://github.com/vispecta-app/vispecta/issues/95))
 - **Export 2D drawing is a wide dialog in two columns:** the drawing on the left, the annotation on
