@@ -33,6 +33,7 @@
     "codemirror": "6.0.2",
     "delaunator": "5.0.1",
     "fflate": "0.8.3",
+    "geotiff": "3.0.5",
     "laz-perf": "^0.0.7",
     "three": "0.186.1",
     "three-mesh-bvh": "0.9.16",

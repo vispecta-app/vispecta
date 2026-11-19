@@ -27,7 +27,7 @@ import { ViewsPanel } from './views.js';
 import { QtoTable } from './qto.js';
 import { mergeIfcBlobs } from './merge.js';
 import { ContextMenu } from './contextmenu.js';
-import { renderVersion } from './version.js';
+import { renderVersion, BUILD } from './version.js';
 import { ProjectManager } from './projects.js';
 import { SectionViewer } from './secview.js';
 import { LineEditor } from './lineedit.js';
@@ -40,6 +40,7 @@ import { Corridor } from './corridor.js';
 import { computeSection, computeProfile, planeAxes, layout, toSvg, toPdf, toPdfPages, toDxf, renderBackground, SCALES, AXIS_COLOR } from './drawing.js';
 import { ViewCube } from './viewcube.js';
 import { contourLines, planLength } from './contours.js';
+import { SurfaceIndex, cutFill } from './volumes.js';
 import { runIdsCheck, colorIdsResult, idsCsv, specSummary, setIdsColors, IDS_EXAMPLES } from './ids.js';
 import { compareModels, showComparison, clearComparison, comparisonCsv, geomText, summaryText, CMP_COLORS, setCompareColors } from './compare.js';
 
@@ -187,12 +188,14 @@ async function openFiles(files) {
   for (const f of xmls) { try { if (/<LandXML\b/i.test(await f.slice(0, 4096).text())) landxmls.push(f); } catch { /* not readable */ } }
   const idss = all.filter((f) => /\.ids$/i.test(f.name) || (/\.xml$/i.test(f.name) && $('#ids-dialog').open));
   const clouds = all.filter((f) => CLOUD_FILE.test(f.name)); // point clouds (#27)
-  const rest = all.filter((f) => ![list, workspaces, bcfs, idss, clouds, landxmls].some((g) => g.includes(f)));
+  const tiffs = all.filter((f) => /\.tiff?$/i.test(f.name)); // height models (DHM GeoTIFF, #92)
+  const rest = all.filter((f) => ![list, workspaces, bcfs, idss, clouds, landxmls, tiffs].some((g) => g.includes(f)));
   if (rest.length) toast(t('msg.unknownFiles', { names: rest.map((f) => f.name).join(', ') }));
-  if (!list.length && !workspaces.length && !bcfs.length && !idss.length && !clouds.length && !landxmls.length) return;
+  if (!list.length && !workspaces.length && !bcfs.length && !idss.length && !clouds.length && !landxmls.length && !tiffs.length) return;
   if (list.length) await openIfcFiles(list);
   if (clouds.length) await openCloudFiles(clouds);
   for (const f of landxmls) await terrainFromLandXml(f);
+  for (const f of tiffs) await terrainFromGeoTiff(f);
   for (const w of workspaces) await views.openWorkspace(w);
   for (const b of bcfs) {
     await issues.importFile(b);
@@ -602,6 +605,121 @@ function planContourMarks(box) {
   return out;
 }
 
+// ------------------------------------------------------------- cut and fill (#92)
+// The existing terrain against a design surface (the top of the chosen models, e.g. the earthworks),
+// sampled on a grid along an alignment: cut and fill per station range, a table, CSV and a
+// difference map in 3D (red: cut, blue: fill).
+let volResult = null;
+let volMap = null;
+// chosen by default: models with an embankment (not the track, whose ballast and sleepers are no earthworks)
+function isDesignDefault(m) {
+  for (const id of m.elementIds) if (/^IfcEarthworksFill$/i.test(m.typeName(id) || '')) return true;
+  return false;
+}
+function openVolumeDialog(terrain) {
+  const terrains = viewer.models.filter((m) => m.terrain);
+  if (!terrains.length) return toast(t('vol.noTerrain'));
+  const list = allAlignments();
+  if (!list.length) return toast(t('aln.none'));
+  $('#vol-existing').replaceChildren(...terrains.map((m) => h('option', { value: String(m.uid), text: modelTitle(m), selected: m === terrain })));
+  const others = viewer.models.filter((m) => !m.terrain && m.elementIds.size);
+  const picked = volResult?.designUids;
+  $('#vol-design').replaceChildren(...others.map((m) => h('label', { class: 'chk' },
+    h('input', { type: 'checkbox', value: String(m.uid), checked: picked ? picked.includes(m.uid) : isDesignDefault(m) }), h('span', { text: modelTitle(m) }))));
+  const sel = $('#vol-path');
+  const cur = volResult?.al || list.find((a) => !a.hidden) || list[0];
+  sel.replaceChildren(...list.map((a, i) => h('option', { value: String(i), text: alnLabel(a), selected: a === cur })));
+  if (!volResult) volRange();
+  renderVolumes();
+  $('#volume-dialog').showModal();
+}
+function volRange() {
+  const al = allAlignments()[+$('#vol-path').value];
+  if (al) { $('#vol-from').value = formatStation(al.station0); $('#vol-to').value = formatStation(al.station0 + al.length); }
+}
+$('#vol-path').addEventListener('change', volRange);
+
+async function runVolumes() {
+  const al = allAlignments()[+$('#vol-path').value];
+  const existing = viewer.models.find((m) => m.uid === +$('#vol-existing').value);
+  const design = $$('#vol-design input:checked').map((i) => viewer.models.find((m) => m.uid === +i.value)).filter(Boolean);
+  if (!al || !existing) return;
+  if (!design.length) return toast(t('vol.noDesign'));
+  const from = parseStation($('#vol-from').value), to = parseStation($('#vol-to').value);
+  if (from === null || to === null) return toast(t('st.bad', { v: from === null ? $('#vol-from').value : $('#vol-to').value }));
+  const num = (id, d) => { const v = +String($(id).value).replace(',', '.'); return Number.isFinite(v) && v >= 0 ? v : d; };
+  const grid = Math.max(0.1, num('#vol-grid', 0.5)), bin = Math.max(1, num('#vol-bin', 20));
+  const s0 = Math.max(0, Math.min(from, to) - al.station0), s1 = Math.min(al.length, Math.max(from, to) - al.station0);
+  if (!(s1 > s0)) return toast(t('vol.empty'));
+  const res = await withLoading(async (progress) => {
+    progress(t('vol.running'), 0.2); await new Promise((r) => setTimeout(r, 30));
+    const ex = new SurfaceIndex(terrainTriangles(existing));
+    const tris = design.map((m) => terrainTriangles(m));
+    const all = new Float64Array(tris.reduce((n, a) => n + a.length, 0));
+    let k = 0;
+    for (const a of tris) { all.set(a, k); k += a.length; }
+    progress(t('vol.running'), 0.5); await new Promise((r) => setTimeout(r, 0));
+    return cutFill({ al, s0, s1, left: num('#vol-left', 25), right: num('#vol-right', 25), ds: grid, dOff: grid, bin, existing: ex, design: new SurfaceIndex(all) });
+  });
+  volResult = { ...res, al, existing: modelTitle(existing), design: design.map(modelTitle), designUids: design.map((m) => m.uid), grid };
+  showVolumeMap($('#vol-map').checked);
+  renderVolumes();
+}
+
+function showVolumeMap(on) {
+  if (volMap) { viewer.scene.remove(volMap); volMap.geometry.dispose(); volMap.material.dispose(); volMap = null; }
+  if (on && volResult?.samples.length) {
+    const S = volResult.samples;
+    const pos = new Float32Array(S.length * 3), col = new Float32Array(S.length * 3);
+    const c = new THREE.Color(), cutC = new THREE.Color('#d1495b'), fillC = new THREE.Color('#2e86de'), zero = new THREE.Color('#e9ecef');
+    S.forEach((p, i) => {
+      const w = viewer.fromIfc(p.x, p.y, p.z + 0.05);
+      pos[3 * i] = w.x; pos[3 * i + 1] = w.y; pos[3 * i + 2] = w.z;
+      c.copy(zero).lerp(p.d > 0 ? fillC : cutC, Math.min(1, Math.abs(p.d) / 1.5) * 0.85 + 0.15);
+      col[3 * i] = c.r; col[3 * i + 1] = c.g; col[3 * i + 2] = c.b;
+    });
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    volMap = new THREE.Points(g, new THREE.PointsMaterial({ size: volResult.grid * 1.4, vertexColors: true, sizeAttenuation: true }));
+    volMap.name = 'cut-fill';
+    volMap.raycast = () => {};
+    viewer.scene.add(volMap);
+  }
+  viewer.invalidate();
+}
+
+function renderVolumes() {
+  const box = $('#vol-results');
+  const r = volResult;
+  if (!r) { box.replaceChildren(h('p', { class: 'muted small', text: t('vol.hint') })); return; }
+  if (!r.area) { box.replaceChildren(h('p', { class: 'muted small', text: t('vol.none') })); return; }
+  const m3 = (v) => fmtNum(Math.round(v));
+  let cc = 0, cf = 0;
+  box.replaceChildren(
+    h('p', { class: 'small', text: t('vol.summary', { cut: m3(r.cut), fill: m3(r.fill), net: m3(r.fill - r.cut), area: m3(r.area) }) }),
+    h('div', { class: 'vol-scroll' }, h('table', { class: 'cor-table' },
+      h('tr', {}, ...[t('vol.colFrom'), t('vol.colTo'), t('vol.colCut'), t('vol.colFill'), t('vol.colNet'), t('vol.colCumCut'), t('vol.colCumFill')].map((x) => h('th', { text: x }))),
+      r.bins.map((b) => {
+        cc += b.cut; cf += b.fill;
+        return h('tr', {},
+          h('td', { text: formatStation(r.al.station0 + b.from) }), h('td', { text: formatStation(r.al.station0 + b.to) }),
+          h('td', { text: m3(b.cut) }), h('td', { text: m3(b.fill) }), h('td', { text: m3(b.fill - b.cut) }), h('td', { text: m3(cc) }), h('td', { text: m3(cf) }));
+      }))),
+    h('p', { class: 'muted small', text: t('vol.note', { ex: r.existing, de: r.design.join(', '), g: fmtNum(r.grid) }) }));
+}
+
+function volumeCsv() {
+  const r = volResult;
+  if (!r) return toast(t('vol.hint'));
+  const q = (v) => (typeof v === 'number' ? v.toFixed(3) : `"${String(v).replace(/"/g, '""')}"`);
+  const rows = [['station_from', 'station_to', 'area_m2', 'cut_m3', 'fill_m3', 'net_m3', 'cum_cut_m3', 'cum_fill_m3']];
+  let cc = 0, cf = 0;
+  for (const b of r.bins) { cc += b.cut; cf += b.fill; rows.push([formatStation(r.al.station0 + b.from), formatStation(r.al.station0 + b.to), b.area, b.cut, b.fill, b.fill - b.cut, cc, cf]); }
+  rows.push(['total', '', r.area, r.cut, r.fill, r.fill - r.cut, r.cut, r.fill]);
+  download(`cut-fill-${r.al.name}.csv`, rows.map((x) => x.map(q).join(';')).join('\n'), 'text/csv');
+}
+
 /** The georeference written into the terrain file: the map conversion the models use. */
 function terrainGeoref() {
   const mm = viewer.mapModel();
@@ -627,7 +745,7 @@ function openTerrainDialog(cloud) {
   const srcSel = $('#ter-source');
   srcSel.options[0].disabled = !ground;
   srcSel.options[0].textContent = `${t('ter.srcGround')}${ground ? ` · ${fmtNum(ground)}` : ` – ${t('ter.noGround')}`}`;
-  srcSel.value = ground ? 'ground' : 'lowest';
+  srcSel.value = ground ? 'ground' : 'filter';
   updateTerrainEstimate();
   $('#terrain-dialog').showModal();
 }
@@ -686,6 +804,81 @@ async function terrainFromLandXml(file) {
     console.error(err);
     toast(t('ter.failed', { name: file.name, error: err.message || err }));
   }
+}
+
+/**
+ * A height model as GeoTIFF (e.g. the Danish DHM/Terræn from Dataforsyningen, #92): read in the
+ * worker, cut to the models with 50 m around them when the raster covers them, resampled to at most
+ * 1.5 million cells, and opened as a terrain like a TIN from a point cloud.
+ */
+async function terrainFromGeoTiff(file) {
+  const name = file.name.replace(/\.tiff?$/i, '');
+  try {
+    const buf = await file.arrayBuffer();
+    const toIfc = viewer.mapToIfcMatrix();
+    let clip = null;
+    const box = viewer.sceneBox({ visibleOnly: false, clouds: true });
+    if (toIfc && !box.isEmpty()) {
+      const inv = toIfc.clone().invert();
+      const a = viewer.toIfc(box.min).applyMatrix4(inv), b = viewer.toIfc(box.max).applyMatrix4(inv);
+      clip = [Math.min(a.x, b.x) - 50, Math.min(a.y, b.y) - 50, Math.max(a.x, b.x) + 50, Math.max(a.y, b.y) + 50];
+    }
+    const res = await runTerrainWorker({ geotiff: buf, toIfc: toIfc?.elements || null, clip, maxCells: 1500000, name, georef: terrainGeoref() },
+      t('ter.reading', { name: file.name }));
+    await openTerrain(res, name);
+    toast(t('ter.rasterInfo', { w: fmtNum(res.raster[0]), h: fmtNum(res.raster[1]), c: fmtNum(+res.cell.toFixed(2)) }), true);
+  } catch (err) {
+    console.error(err);
+    toast(t('ter.failed', { name: file.name, error: err.message || err }));
+  }
+}
+
+/**
+ * A terrain model as LandXML 1.2 (#92): its triangles as a TIN surface, in map coordinates (N E H)
+ * when the models are georeferenced, else in IFC coordinates.
+ */
+function terrainLandXml(m) {
+  const tris = terrainTriangles(m);
+  const fromIfc = viewer.mapToIfcMatrix()?.invert() || null;
+  const v = new THREE.Vector3();
+  const ids = new Map(), pts = [], faces = [];
+  const r3 = (x) => (Math.round(x * 1000) / 1000).toFixed(3);
+  for (let i = 0; i < tris.length; i += 9) {
+    const f = [];
+    for (let k = 0; k < 3; k++) {
+      v.set(tris[i + 3 * k], tris[i + 3 * k + 1], tris[i + 3 * k + 2]);
+      if (fromIfc) v.applyMatrix4(fromIfc);
+      const key = `${r3(v.y)} ${r3(v.x)} ${r3(v.z)}`; // LandXML: northing easting elevation
+      let id = ids.get(key);
+      if (id === undefined) { id = pts.length + 1; ids.set(key, id); pts.push(key); }
+      f.push(id);
+    }
+    if (f[0] !== f[1] && f[1] !== f[2] && f[0] !== f[2]) faces.push(f.join(' '));
+  }
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  const nm = esc(m.alias || m.name.replace(/\.ifc$/i, ''));
+  const crs = viewer.mapModel()?.georef?.map?.crs;
+  const now = new Date();
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<LandXML xmlns="http://www.landxml.org/schema/LandXML-1.2" version="1.2" date="${now.toISOString().slice(0, 10)}" time="${now.toISOString().slice(11, 19)}">
+  <Units><Metric linearUnit="meter" areaUnit="squareMeter" volumeUnit="cubicMeter" angularUnit="decimal degrees" directionUnit="decimal degrees"/></Units>
+${crs && fromIfc ? `  <CoordinateSystem name="${esc(crs)}"/>\n` : ''}  <Application name="Vispecta" manufacturer="Vispecta" version="${esc(BUILD.version || '')}"/>
+  <Surfaces>
+    <Surface name="${nm}">
+      <Definition surfType="TIN">
+        <Pnts>
+${pts.map((p, i) => `          <P id="${i + 1}">${p}</P>`).join('\n')}
+        </Pnts>
+        <Faces>
+${faces.map((f) => `          <F>${f}</F>`).join('\n')}
+        </Faces>
+      </Definition>
+    </Surface>
+  </Surfaces>
+</LandXML>
+`;
+  download(`${m.name.replace(/\.ifc$/i, '')}.xml`, xml, 'application/xml');
+  toast(t('ter.lxDone', { p: fmtNum(pts.length), f: fmtNum(faces.length), crs: fromIfc ? t('ter.lxMap') : t('ter.lxIfc') }), true);
 }
 
 async function openIfcFiles(list, keys = null, { fit = true } = {}) {
@@ -1198,6 +1391,9 @@ document.addEventListener('click', (e) => {
     'show-all': () => showAll(),
     'toggle-spaces': () => toggleSpaces(),
     'ter-build': () => buildTerrain(),
+    'vol-run': () => runVolumes(),
+    'vol-csv': () => volumeCsv(),
+    'vol-clear': () => { volResult = null; showVolumeMap(false); renderVolumes(); },
     'toggle-viewcube': () => setViewCube(viewCube.el.hidden),
     'toggle-ortho': () => { if (walk.active) walk.stop(); setOrtho(!viewer.isOrtho); },
     walk: () => walk.toggle(),
@@ -1615,6 +1811,8 @@ function modelCard(m) {
       m.terrain ? h('div', { class: 'card-row' }, h('label', { text: t('ter.contours') }),
         h('select', { title: t('ter.contoursTitle'), onchange: (e) => { setContours(m, e.target.value === 'off' ? false : e.target.value === 'auto' ? 'auto' : +e.target.value); renderModels(); projects.touch?.(); } },
           CONTOUR_INTERVALS.map((v) => h('option', { value: String(v), text: v === 'off' ? t('ter.c.off') : v === 'auto' ? (m.contours === 'auto' && m.contourData ? `${t('ter.c.auto')} (${fmtNum(m.contourData.interval)} m)` : t('ter.c.auto')) : `${fmtNum(v)} m`, selected: String(m.contours || 'off') === String(v) })))) : null,
+      m.terrain ? h('div', { class: 'card-row' }, h('button', { class: 'btn sm', text: t('vol.open'), title: t('vol.intro'), onclick: () => openVolumeDialog(m) }),
+        h('button', { class: 'btn sm', text: t('ter.lxExport'), title: t('ter.lxTitle'), onclick: () => terrainLandXml(m) })) : null,
       h('div', { class: 'card-row' }, h('label', { text: t('mg.group') }), groupSel),
       m.alignments?.length ? h('div', { class: 'aln-list' }, h('div', { class: 'aln-head muted', text: t('aln.list', { n: m.alignments.length }) }), m.alignments.map(alignmentRow)) : null,
       h('div', { class: 'card-btns' },

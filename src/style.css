@@ -905,3 +905,5 @@ fieldset.annot .annot-row .chk { margin-bottom: 6px; color: var(--text); }
 .aln-list { margin: 6px 0 4px; display: flex; flex-direction: column; gap: 2px; }
 .aln-list .aln-head { font-size: var(--fs-sm); margin-bottom: 2px; }
 .aln-row .line-len { font-variant-numeric: tabular-nums; }
+.vol-scroll { max-height: 320px; overflow: auto; }
+#vol-design { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 2px 12px; }

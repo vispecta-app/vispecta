@@ -9,6 +9,16 @@ https://github.com/vispecta-app/vispecta/releases
 - **Contours on terrain** ([#92](https://github.com/vispecta-app/vispecta/issues/92)): choose *Auto* or an
   interval (0.25 – 5 m) on the terrain's card. Every 5th contour is thicker. Contours show in 3D and in plan
   drawings, with the height on the thick ones (PDF, SVG, DXF layer `CONTOURS`), and are saved in the project.
+- **Cut and fill** ([#92](https://github.com/vispecta-app/vispecta/issues/92)): the terrain against the top of
+  chosen models (by default the embankment), on a grid along an alignment. The result is a table per station range, a CSV
+  and a difference map in 3D (red: cut, blue: fill).
+- **Height models as GeoTIFF** ([#92](https://github.com/vispecta-app/vispecta/issues/92)), e.g. DHM/Terræn: drop
+  a `.tif` and it opens as a terrain, cut to the models and placed in map coordinates.
+- **LandXML export of a terrain** ([#92](https://github.com/vispecta-app/vispecta/issues/92)): *Download LandXML*
+  on its card.
+- **Ground filter for point clouds without classes** ([#92](https://github.com/vispecta-app/vispecta/issues/92)): a
+  morphological filter removes trees, buildings and vehicles before triangulation. It is the default when
+  the cloud has no ground class.
 
 ### Changed
 - **The view cube is in the top left corner**, instead of the X/Y/Z axis cross, which is gone (the
