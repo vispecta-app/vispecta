@@ -41,6 +41,12 @@ https://github.com/vispecta-app/vispecta/releases
   ([#57](https://github.com/vispecta-app/vispecta/issues/57))
 
 ### Fixed
+- **Cross sections show the axes of all alignments they cross**, not only the one they follow (e.g. both
+  tracks of a double-track line). Each axis, also the own one, is named with its alignment (track) and station, in the section
+  window and in PDF, SVG and DXF (layer `ALIGNMENT_AXIS`).
+- **Top of rail is annotated in cross sections.** Round shapes such as a rail head were thinned away as
+  facets, so only the rail foot got points. Now the top of a narrow bump (3 cm above the outline 12 cm to
+  each side) is always a point and wins over nearby corners: offset and height of the rail head.
 - **Fold arrows in the model browser are larger** (a 26 px button with a hover state), and a terrain's height
   colour list no longer runs out of its card; the height range sits under it.
 
