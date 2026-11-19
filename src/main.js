@@ -717,20 +717,26 @@ function showVolumeMap(on) {
 function renderVolumes() {
   const box = $('#vol-results');
   const r = volResult;
-  if (!r) { box.replaceChildren(h('p', { class: 'muted small', text: t('vol.hint') })); return; }
-  if (!r.area) { box.replaceChildren(h('p', { class: 'muted small', text: t('vol.none') })); return; }
+  if (!r) { box.replaceChildren(h('p', { class: 'muted small vol-hint', text: t('vol.hint') })); return; }
+  if (!r.area) { box.replaceChildren(h('p', { class: 'muted small vol-hint', text: t('vol.none') })); return; }
   const m3 = (v) => fmtNum(Math.round(v));
+  const tile = (cls, label, value, unit) => h('div', { class: `vol-tile ${cls}` }, h('small', { text: label }), h('b', { text: `${value} ${unit}`, title: `${value} ${unit}` }));
   let cc = 0, cf = 0;
   box.replaceChildren(
-    h('p', { class: 'small', text: t('vol.summary', { cut: m3(r.cut), fill: m3(r.fill), net: m3(r.fill - r.cut), area: m3(r.area) }) }),
+    h('div', { class: 'vol-tiles', title: t('vol.summary', { cut: m3(r.cut), fill: m3(r.fill), net: m3(r.fill - r.cut), area: m3(r.area) }) },
+      tile('cut', t('vol.tCut'), m3(r.cut), 'm³'), tile('fill', t('vol.tFill'), m3(r.fill), 'm³'),
+      Object.assign(tile('net', t('vol.tNet'), m3(r.fill - r.cut), 'm³'), { title: t('vol.netTitle') }), tile('area', t('vol.tArea'), m3(r.area), 'm²')),
     h('div', { class: 'vol-scroll' }, h('table', { class: 'cor-table' },
-      h('tr', {}, ...[t('vol.colFrom'), t('vol.colTo'), t('vol.colCut'), t('vol.colFill'), t('vol.colNet'), t('vol.colCumCut'), t('vol.colCumFill')].map((x) => h('th', { text: x }))),
-      r.bins.map((b) => {
-        cc += b.cut; cf += b.fill;
-        return h('tr', {},
-          h('td', { text: formatStation(r.al.station0 + b.from) }), h('td', { text: formatStation(r.al.station0 + b.to) }),
-          h('td', { text: m3(b.cut) }), h('td', { text: m3(b.fill) }), h('td', { text: m3(b.fill - b.cut) }), h('td', { text: m3(cc) }), h('td', { text: m3(cf) }));
-      }))),
+      h('thead', {}, h('tr', {}, ...[t('vol.colFrom'), t('vol.colTo'), t('vol.colCut'), t('vol.colFill'), t('vol.colNet'), t('vol.colCumCut'), t('vol.colCumFill')].map((x) => h('th', { text: x })))),
+      h('tbody', {},
+        r.bins.map((b) => {
+          cc += b.cut; cf += b.fill;
+          return h('tr', {},
+            h('td', { text: formatStation(r.al.station0 + b.from) }), h('td', { text: formatStation(r.al.station0 + b.to) }),
+            h('td', { text: m3(b.cut) }), h('td', { text: m3(b.fill) }), h('td', { text: m3(b.fill - b.cut) }), h('td', { text: m3(cc) }), h('td', { text: m3(cf) }));
+        }),
+        h('tr', { class: 'vol-total' }, h('td', { text: t('vol.total') }), h('td', { text: '' }),
+          h('td', { text: m3(r.cut) }), h('td', { text: m3(r.fill) }), h('td', { text: m3(r.fill - r.cut) }), h('td', { text: '' }), h('td', { text: '' }))))),
     h('p', { class: 'muted small', text: t('vol.note', { ex: r.existing, de: r.design.join(', '), g: fmtNum(r.grid) }) }));
 }
 
