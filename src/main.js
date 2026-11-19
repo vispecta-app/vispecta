@@ -4437,4 +4437,10 @@ document.addEventListener('keydown', (e) => {
 });
 history.commit();
 
+// installed as an app (standalone window): the window and the taskbar say just "Vispecta"; the long
+// title stays for search engines and browser tabs
+const standalone = window.matchMedia?.('(display-mode: standalone), (display-mode: window-controls-overlay)');
+const appTitle = () => { if (standalone?.matches || navigator.standalone) document.title = 'Vispecta'; };
+appTitle();
+standalone?.addEventListener?.('change', appTitle);
 window.onlineIfc = { viewer, state, openFiles, python, measure, views, walk, drawnPaths, projects, history, get secViewer() { return secViewer; } };
