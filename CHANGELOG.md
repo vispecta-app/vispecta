@@ -40,6 +40,10 @@ https://github.com/vispecta-app/vispecta/releases
   the cloud has no ground class.
 
 ### Changed
+- **`main.js` split into modules** ([#63](https://github.com/vispecta-app/vispecta/issues/63)): from 4,700 to
+  2,100 lines. A core module and ten modules for the larger areas live in `src/app/`, with no change in
+  behaviour. Station labels in 3D now have dark text on the orange (7.4:1 instead of 2.5:1).
+- **Fixed:** closing a project now also resets its coordinate system (#107).
 - **IFC geometry is built in a worker** ([#58](https://github.com/vispecta-app/vispecta/issues/58)): opening a model no
   longer freezes the page while its geometry is read. On the Chesapeake sample (26 MB), the page was blocked in 13
   long tasks for 2.1 s; it is now 2 tasks and 1.0 s. What is left is the page opening the file itself for properties

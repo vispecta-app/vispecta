@@ -5,7 +5,8 @@ import { keyLabel } from '../filters.js';
 import { runIdsCheck, colorIdsResult, idsCsv, specSummary, IDS_EXAMPLES } from '../ids.js';
 import { compareModels, showComparison, clearComparison, comparisonCsv, geomText, summaryText, CMP_COLORS } from '../compare.js';
 import { $, $$, download, h, state, toast, viewer, withLoading } from './core.js';
-import { applySelection, modelTitle, python, refreshVisibilityUi, renderModels, select } from '../main.js';
+import { applySelection, python, refreshVisibilityUi, select } from '../main.js';
+import { modelTitle, renderModels } from './browser.js';
 
 // ========================================================================== IDS
 let idsResults = null; // [{model, report}]

@@ -789,7 +789,7 @@ fieldset.annot .annot-row .chk { margin-bottom: 6px; color: var(--text); }
 /* stations, heights and measured values in mono, so figures line up */
 .m-label, .m-value, .m-lines td:last-child, .station-input, .pl-pos .val input, .sv-station, .sv-foot, #drive-station, .qto-table .num { font-family: var(--mono); font-size: 0.95em; }
 .m-label { font-weight: 500; }
-.m-label.align { --m-color: var(--trace); }
+.m-label.align { --m-color: var(--trace); color: #1A1205; } /* dark on the orange of the stationing: 7.4:1 (#62) */
 
 /* ---------- model groups and compact model cards ---------- */
 .mgroup { margin-bottom: 10px; border-radius: var(--r); }
