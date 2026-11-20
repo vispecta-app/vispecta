@@ -101,7 +101,7 @@
                 <li data-t="f1.l3">Step through stations with the arrow keys</li>
               </ul>
             </div>
-            <figure class="frame clip"><video muted loop playsinline preload="none" poster="vid/cut.webp" width="1110" height="780" aria-label="A cross section sliding along a double track around km 233+100: hatched cut faces of the formation, ballast, sleepers, rails and cable ducts, with section marks A–A"><source src="vid/cut.webm" type="video/webm" /><source src="vid/cut.mp4" type="video/mp4" /></video></figure>
+            <figure class="frame clip"><video muted loop playsinline preload="none" poster="vid/cut.webp" width="1110" height="780" aria-label="A cross section sliding along the double-track sample railway from 12+120 to 12+260, over the bridge: hatched cut faces of the embankment, ballast, sleepers and rails, with the section mark A and the stationing"><source src="vid/cut.webm" type="video/webm" /><source src="vid/cut.mp4" type="video/mp4" /></video></figure>
           </article>
 
           <article class="feature flip">
@@ -115,7 +115,7 @@
                 <li data-t="f2.l3">Opens in its own window if you like</li>
               </ul>
             </div>
-            <figure class="frame clip"><video muted loop playsinline preload="none" poster="vid/secview.webp" width="1280" height="788" aria-label="The section window stepping through stations km 233+040 to 233+180 on alignment 001R, with offsets, levels and a key plan"><source src="vid/secview.webm" type="video/webm" /><source src="vid/secview.mp4" type="video/mp4" /></video></figure>
+            <figure class="frame clip"><video muted loop playsinline preload="none" poster="vid/secview.webp" width="1280" height="788" aria-label="The section window stepping through stations 12+120 to 12+260 on Spor 1 of the double-track sample railway, with offsets, levels and a key plan"><source src="vid/secview.webm" type="video/webm" /><source src="vid/secview.mp4" type="video/mp4" /></video></figure>
           </article>
 
           <article class="feature">
@@ -129,7 +129,7 @@
                 <li data-t="f3.l3">One page per station for a series</li>
               </ul>
             </div>
-            <figure class="frame paper"><img loading="lazy" src="img/drawing.webp" width="1600" height="613" alt="An exported cross-section drawing with a band of offsets and levels" /></figure>
+            <figure class="frame paper"><img loading="lazy" src="img/drawing.webp" width="1600" height="899" alt="An exported cross-section drawing of the double-track sample at 12+120: hatched embankment, ballast and sleepers, slopes and cross-falls, and a band of offsets and levels" /></figure>
           </article>
 
           <article class="feature flip">
@@ -138,7 +138,7 @@
               <h3 data-t="f4.title">Unroll the model along the line</h3>
               <p data-t="f4.text">A longitudinal profile along an alignment or a line you draw from A to B: everything the line passes, unrolled, with stations and levels – and ready to export.</p>
             </div>
-            <figure class="frame"><img loading="lazy" src="img/profile.webp" width="1500" height="1180" alt="The longitudinal profile dialog along alignment 001R from km 233+000 to 233+220" /></figure>
+            <figure class="frame"><img loading="lazy" src="img/profile.webp" width="1440" height="1086" alt="The longitudinal profile dialog along Spor 1 of the double-track sample from 12+100 to 12+300, over the bridge" /></figure>
           </article>
 
           <article class="feature">
@@ -157,6 +157,34 @@
               <p data-t="f6.text">Run IDS checks (buildingSMART Information Delivery Specification) with IfcOpenShell's ifctester, see what passes and fails in the model, and write issues as BCF. Example IDS files are included.</p>
             </div>
             <figure class="frame"><img loading="lazy" src="img/ids.webp" width="1100" height="896" alt="IDS check results with passed elements coloured in the model" /></figure>
+          </article>
+
+          <article class="feature">
+            <div class="feature-text">
+              <span class="tag" data-t="f7.tag">Terrain &amp; earthworks</span>
+              <h3 data-t="f7.title">From survey to cut and fill</h3>
+              <p data-t="f7.text">Build a terrain from a point cloud – with a ground filter that removes trees and buildings – or open a height model (GeoTIFF, e.g. the Danish DHM) or a LandXML surface. Colour it by height, draw contours, and compare it with the embankment: cut and fill per station range, as a table, a CSV and a map in 3D.</p>
+              <ul class="ticks">
+                <li data-t="f7.l1">Terrain (TIN) from point clouds, GeoTIFF and LandXML</li>
+                <li data-t="f7.l2">Contours in 3D and in plan drawings</li>
+                <li data-t="f7.l3">Cut and fill along an alignment, exported as LandXML too</li>
+              </ul>
+            </div>
+            <figure class="frame"><img loading="lazy" src="img/terrain.webp" width="1600" height="1000" alt="The terrain of the double-track sample coloured by height with contours, and the cut and fill map along the embankment in blue" /></figure>
+          </article>
+
+          <article class="feature flip">
+            <div class="feature-text">
+              <span class="tag" data-t="f8.tag">Point clouds &amp; coordinates</span>
+              <h3 data-t="f8.title">Surveys and models in one coordinate system</h3>
+              <p data-t="f8.text">Open laser scans and surveys next to the models: LAS, LAZ, E57 – and cloud-optimised COPC files of billions of points, of which only what you look at is loaded. Their points appear in every section. Models, clouds and terrain in different coordinate systems (UTM 32/33, DKTM, Kp2000, Gauss-Krüger, DB_REF or any EPSG code) are converted into the project's system on the fly.</p>
+              <ul class="ticks">
+                <li data-t="f8.l1">COPC streaming, E57 with several scan positions</li>
+                <li data-t="f8.l2">Point dots in sections, profiles and drawings</li>
+                <li data-t="f8.l3">On-the-fly conversion between coordinate systems</li>
+              </ul>
+            </div>
+            <figure class="frame"><img loading="lazy" src="img/clouds.webp" width="1600" height="1000" alt="The survey point cloud of the double-track sample coloured by class, its points in the section window at 12+140, and the project coordinate system ETRS89 / UTM 32N" /></figure>
           </article>
 
           <div class="grid">

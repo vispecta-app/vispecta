@@ -46,7 +46,8 @@ export class ViewsPanel {
   }
 
   /** The current view as a plain JSON object. */
-  capture(name) {
+  /** thumb: false leaves the picture out (it costs a full render of the scene). */
+  capture(name, { thumb = true } = {}) {
     const { viewer, state } = this.ctx;
     const vp = captureViewpoint({ viewer, selection: state.selection, spacesVisible: state.spacesVisible });
     const models = viewer.models.map((m) => ({
@@ -62,7 +63,7 @@ export class ViewsPanel {
       }
     }
     return {
-      id: uuid(), name, created: new Date().toISOString(), thumb: this.#thumb(),
+      id: uuid(), name, created: new Date().toISOString(), thumb: thumb ? this.#thumb() : null,
       viewpoint: vp, models, opacity, xray: !!state.xray,
     };
   }
