@@ -41,6 +41,7 @@ import { crsOptions, crsName, crsNote, crsKnown, normalizeCrs, defineCrs, custom
 import { Corridor } from './corridor.js';
 import { computeSection, computeProfile, planeAxes, layout, toSvg, toPdf, toPdfPages, toDxf, renderBackground, SCALES, AXIS_COLOR } from './drawing.js';
 import { ViewCube } from './viewcube.js';
+import { initA11y } from './a11y.js';
 import { initFloating } from './floating.js';
 import { contourLines, planLength } from './contours.js';
 import { SurfaceIndex, cutFill } from './volumes.js';
@@ -131,9 +132,12 @@ $('#lang-select').addEventListener('change', (e) => {
   measure.refresh();
   viewCube.relabel();
   renderAll();
+  a11y.relabel();
 });
 for (const d of $$('dialog')) addCloseX(d);
 applyStaticTranslations();
+// roles, keyboard use and names for screen readers (#62)
+const a11y = initA11y({ t, canvas: viewer.renderer.domElement, closeMenus: () => closeMenus() });
 
 // ======================================================================== theme
 const THEME_KEY = 'onlineifc.theme';
@@ -1162,7 +1166,8 @@ function crsRow(src, onChange) {
 /** The project's coordinate system, at the top of the model browser. */
 function projectCrsBar() {
   const sel = crsSelect(viewer.projectCrs, { none: t('crs.projectNone'), onChange: setProjectCrs });
-  return h('div', { class: 'crs-bar' }, h('label', { text: t('crs.project'), title: t('crs.projectTitle') }), sel);
+  sel.id = 'project-crs';
+  return h('div', { class: 'crs-bar' }, h('label', { for: 'project-crs', text: t('crs.project'), title: t('crs.projectTitle') }), sel);
 }
 
 // ------------------------------------------------------------- length units
@@ -2659,7 +2664,7 @@ function togglePlaneCut(p) {
 /** Row of a plan / X / Y / face section or a side of the section box. */
 function axisRow(p) {
   const range = viewer.planeRange(p);
-  const slider = h('input', { type: 'range', min: String(range.min), max: String(range.max), step: String((range.max - range.min) / 1000), value: String(viewer.getPlanePos(p)) });
+  const slider = h('input', { type: 'range', min: String(range.min), max: String(range.max), step: String((range.max - range.min) / 1000), value: String(viewer.getPlanePos(p)), 'aria-label': t('planes.posTitle') });
   // exact position: type it, or step with the arrow buttons / arrow keys in the field
   const posInput = h('input', { type: 'number', step: 'any', title: t('planes.posTitle') });
   const upd = () => { posInput.value = viewer.getPlanePos(p).toFixed(3); slider.value = String(viewer.getPlanePos(p)); };
@@ -2957,7 +2962,7 @@ function planMarks(bounds) {
 /** Row of a cross section at a station: alignment, ‹ slider › station. */
 function stationRow(p) {
   const al = p.station.al;
-  const slider = h('input', { type: 'range', min: '0', max: String(al.length), step: String(Math.max(0.01, al.length / 4000)), value: String(p.station.s) });
+  const slider = h('input', { type: 'range', min: '0', max: String(al.length), step: String(Math.max(0.01, al.length / 4000)), value: String(p.station.s), 'aria-label': t('st.title') });
   const posInput = h('input', { type: 'text', inputmode: 'decimal', title: t('st.title'), class: 'station-input' });
   const upd = () => { posInput.value = formatStation(al.station0 + p.station.s); slider.value = String(p.station.s); };
   const moveTo = (s2) => { setStationPlane(p, p.station.al, s2); upd(); };
