@@ -198,7 +198,11 @@ export class ProjectManager extends EventTarget {
         }
       }
       const files = viewer.models.filter((m) => this.keys.has(m)).map((m) => ({ key: this.keys.get(m), name: m.name, unitFix: m.unitFix, changes: m.changes.slice(-200).map((c) => ({ time: c.time, description: c.description })) }));
-      const current = viewer.models.length || viewer.clouds.length ? views.capture('current') : null;
+      // a new picture for the project list at most once a minute, and not while the page is hidden or
+      // closing: it renders the whole scene once more, which made autosaves of large models stutter
+      const fresh = document.visibilityState === 'visible' && (!this.current.thumb || !(this.thumbAt > Date.now() - 60000));
+      const current = viewer.models.length || viewer.clouds.length ? views.capture('current', { thumb: fresh }) : null;
+      if (current?.thumb) this.thumbAt = Date.now();
       for (const c of [...this.clouds.keys()]) if (!viewer.clouds.includes(c)) this.clouds.delete(c);
       const clouds = viewer.clouds.map((c) => this.clouds.get(c)).filter(Boolean).map(({ name, size, key, handle }) => ({ name, size, key: key || null, handle: handle || null }));
       // clouds of the project that were not found when it was opened stay in it

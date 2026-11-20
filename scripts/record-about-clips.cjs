@@ -1,10 +1,11 @@
 // Records the two railway clips of the about page from the double-track sample (12+000–13+000):
 //   cut      – a cross section sliding along the track, seen in 3D with its section marks
 //   secview  – the section window stepping through stations next to the 3D view
+// and four still images (img/): profile, drawing, terrain and clouds.
 // Frame by frame (move, render, screenshot), so the clip is smooth however slow the rendering is;
 // then ffmpeg makes WebM (VP9), MP4 (H.264) and a WebP poster from the first frame.
 //
-//   npm run build:app && node scripts/record-about-clips.cjs [cut|secview]
+//   npm run build:app && node scripts/record-about-clips.cjs [cut|secview|profile|drawing|terrain|clouds]
 // Needs Playwright's Chromium and ffmpeg (with libvpx-vp9, libx264 and libwebp).
 const { chromium } = require('playwright');
 const { execFileSync } = require('node:child_process');
@@ -30,8 +31,8 @@ function serve() {
   return new Promise((r) => server.listen(0, '127.0.0.1', () => r(server)));
 }
 
-async function openRail(browser, base, viewport) {
-  const page = await browser.newPage({ viewport, deviceScaleFactor: 1 });
+async function openRail(browser, base, viewport, { scale = 1, station = true } = {}) {
+  const page = await browser.newPage({ viewport, deviceScaleFactor: scale });
   await page.addInitScript(() => {
     try {
       localStorage.setItem('onlineifc.lang', 'en');
@@ -47,6 +48,7 @@ async function openRail(browser, base, viewport) {
   await page.waitForFunction(() => window.onlineIfc.viewer.models.length === 9, null, { timeout: 300000 });
   await page.waitForFunction(() => document.querySelector('#loading')?.hidden !== false);
   await page.waitForTimeout(1500);
+  if (!station) return page;
   // a station section on Spor 1
   await page.evaluate(() => document.querySelector('[data-action="plane-station"]').click());
   await page.waitForSelector('.plane-row.station .station-input');
@@ -174,6 +176,164 @@ async function recordSecview(browser, base, tmp) {
 
 const vpBox = async (page) => { const b = await page.locator('#viewport').boundingBox(); return { x: Math.round(b.x), y: Math.round(b.y), width: Math.floor(b.width), height: Math.floor(b.height) }; };
 
+// ------------------------------------------------------------------ still images
+const IMG = path.join(ROOT, 'public/about/img');
+function webp(png, name) {
+  const out = path.join(IMG, `${name}.webp`);
+  execFileSync('ffmpeg', ['-y', '-i', png, '-c:v', 'libwebp', '-quality', '86', out], { stdio: 'ignore' });
+  const { width, height } = sizeOf(png);
+  console.log(`${name}.webp: ${width} × ${height}, ${(fs.statSync(out).size / 1024).toFixed(0)} KB`);
+}
+
+/** The longitudinal profile dialog along Spor 1, 12+000 to 12+400 (embankment and bridge). */
+async function shotProfile(browser, base, tmp) {
+  const page = await openRail(browser, base, { width: 1000, height: 790 }, { scale: 1.5, station: false });
+  await page.evaluate(() => document.querySelector('[data-action="profile"]').click());
+  await page.waitForSelector('#profile-dialog[open]');
+  await page.evaluate(() => {
+    const sel = document.querySelector('#prof-path');
+    const o = [...sel.options].find((x) => /Spor 1/.test(x.textContent)); sel.value = o.value; sel.dispatchEvent(new Event('change'));
+    for (const [id, v] of [['#prof-from', '12+100'], ['#prof-to', '12+300']]) { const el = document.querySelector(id); el.value = v; el.dispatchEvent(new Event('change')); }
+    const ex = document.querySelector('#prof-exag'); ex.value = '10'; ex.dispatchEvent(new Event('change'));
+    const pp = document.querySelector('#prof-paper'); pp.value = 'auto'; pp.dispatchEvent(new Event('change'));
+    document.querySelector('[data-action="prof-show"]').click();
+  });
+  await page.waitForFunction(() => document.querySelector('#prof-preview img')?.complete);
+  await page.waitForTimeout(800);
+  const png = path.join(tmp, 'profile.png');
+  await page.locator('#profile-dialog').screenshot({ path: png });
+  await page.close();
+  webp(png, 'profile');
+}
+
+/** A cross-section drawing (SVG export) at 12+120, as on paper. */
+async function shotDrawing(browser, base, tmp) {
+  const page = await openRail(browser, base, { width: 1400, height: 900 });
+  await page.evaluate(() => { for (const id of ['#plane-wl', '#plane-wr']) { const el = document.querySelector(id); el.value = '16'; el.dispatchEvent(new Event('change', { bubbles: true })); } });
+  await setStation(page, '12+120');
+  await page.waitForTimeout(800);
+  await page.evaluate(() => [...document.querySelectorAll('.plane-row button')].find((b) => b.textContent.trim() === '2D').click());
+  await page.waitForSelector('#drawing-dialog[open]');
+  await page.selectOption('#drw-format', 'svg');
+  await page.selectOption('#drw-paper', 'auto');
+  await page.evaluate(() => {
+    const sc = document.querySelector('#drw-scale'); const o = [...sc.options].find((x) => /100$/.test(x.textContent.trim()) || x.value === '100'); if (o) { sc.value = o.value; sc.dispatchEvent(new Event('change')); }
+    const set = (id, v) => { const el = document.querySelector(id); if (el && el.checked !== v) el.click(); };
+    set('#drw-bg', false); set('#ann-on', true); set('#ann-slopes', true);
+  });
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.evaluate(() => document.querySelector('[data-action="drawing-run"]').click())]);
+  const svg = fs.readFileSync(await dl.path(), 'utf8');
+  await page.close();
+  // the sheet, rendered white at 1600 px wide
+  const p2 = await browser.newPage({ viewport: { width: 1600, height: 1200 }, deviceScaleFactor: 1 });
+  await p2.setContent(`<html><body style="margin:0;background:#fff">${svg.replace(/^<\?xml[^>]*>/, '')}</body></html>`);
+  // only the drawing: everything before the sheet's frame (the first black outline rectangle)
+  await p2.evaluate(() => {
+    const s = document.querySelector('svg');
+    const kids = [...s.children];
+    const frame = kids.findIndex((k) => k.tagName === 'rect' && k.getAttribute('fill') === 'none' && k.getAttribute('stroke') === '#000');
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const k of kids.slice(0, frame)) { try { const b = k.getBBox(); if (!b.width && !b.height) continue; x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y); x1 = Math.max(x1, b.x + b.width); y1 = Math.max(y1, b.y + b.height); } catch { /* not drawn */ } }
+    for (const k of kids.slice(frame)) k.remove();
+    const pad = 4;
+    s.setAttribute('viewBox', `${x0 - pad} ${y0 - pad} ${x1 - x0 + 2 * pad} ${y1 - y0 + 2 * pad}`);
+    s.removeAttribute('height'); s.setAttribute('width', '1600');
+  });
+  const png = path.join(tmp, 'drawing.png');
+  await p2.locator('svg').screenshot({ path: png });
+  await p2.close();
+  webp(png, 'drawing');
+}
+
+/** The terrain coloured by height with contours, and the cut and fill map along Spor 1. */
+async function shotTerrain(browser, base, tmp) {
+  const page = await openRail(browser, base, { width: 1280, height: 800 }, { scale: 1.25, station: false });
+  await page.evaluate(() => document.querySelector('[data-action="toggle-right"]')?.click());
+
+  // the terrain card: height colours and contours every 0.5 m
+  await page.evaluate(() => {
+    const card = [...document.querySelectorAll('.model-card')].find((c) => /08-Terrain/.test(c.textContent));
+    if (!card.classList.contains('open')) card.querySelector('.mg-caret').click();
+  });
+  await page.waitForTimeout(400);
+  await page.evaluate(() => {
+    const card = [...document.querySelectorAll('.model-card')].find((c) => /08-Terrain/.test(c.textContent));
+    const sels = card.querySelectorAll('select');
+    const hc = [...sels].find((s) => [...s.options].some((o) => o.value === 'earth')); hc.value = 'earth'; hc.dispatchEvent(new Event('change'));
+  });
+  await page.waitForTimeout(400);
+  await page.evaluate(() => {
+    const card = [...document.querySelectorAll('.model-card')].find((c) => /08-Terrain/.test(c.textContent));
+    const cs = [...card.querySelectorAll('select')].find((s) => [...s.options].some((o) => o.value === '0.5')); cs.value = '0.5'; cs.dispatchEvent(new Event('change'));
+  });
+  await page.waitForTimeout(800);
+  // cut and fill along Spor 1, its difference map left in 3D
+  await page.evaluate(() => [...document.querySelectorAll('.model-card.open button')].find((b) => /Cut and fill/.test(b.textContent)).click());
+  await page.waitForSelector('#volume-dialog[open]');
+  await page.evaluate(() => document.querySelector('[data-action="vol-run"]').click());
+  await page.waitForFunction(() => document.querySelector('#vol-results table'));
+  await page.waitForTimeout(500);
+  const png1 = path.join(tmp, 'terrain-dialog.png');
+  await page.locator('#volume-dialog').screenshot({ path: png1 });
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => document.querySelector('[data-action="toggle-left"]')?.click());
+  await page.waitForTimeout(400);
+  // only the terrain, the earthworks, the track and the bridge
+  await page.evaluate(() => { for (const m of window.onlineIfc.viewer.models) if (!/02-Track|03-Earth|05-Bridge|08-Terrain/.test(m.name)) m.setVisible(false); for (const c of window.onlineIfc.viewer.clouds) c.setVisible(false); });
+  // a view over the bridge from the side and high up: contours and the cut and fill map
+  await followCamera(page, 12150, { back: 40, side: 110, up: 95, ahead: 70 });
+  await page.evaluate(() => window.onlineIfc.viewer.renderFrame({ still: true }));
+  await page.waitForTimeout(600);
+  const png = path.join(tmp, 'terrain.png');
+  await page.screenshot({ path: png });
+  await page.close();
+  webp(png, 'terrain');
+}
+
+/** The survey point cloud by class, with its dots in the section window, and the coordinate system. */
+async function shotClouds(browser, base, tmp) {
+  const page = await openRail(browser, base, { width: 1280, height: 800 }, { scale: 1.25 });
+  await page.evaluate(() => {
+    document.querySelector('[data-action="toggle-right"]')?.click();
+    const hp = document.querySelector('#plane-helpers'); if (hp.checked) hp.click();
+    for (const id of ['#plane-wl', '#plane-wr']) { const el = document.querySelector(id); el.value = '18'; el.dispatchEvent(new Event('change', { bubbles: true })); }
+    window.onlineIfc.viewer.cloudSlab = 0.5;
+    // only the point cloud and the track
+    for (const m of window.onlineIfc.viewer.models) if (!/02-Track|05-Bridge|06-Overhead/.test(m.name)) m.setVisible(false);
+  });
+  await setStation(page, '12+140');
+  // the cloud card open, coloured by class
+  await page.evaluate(() => {
+    const c = window.onlineIfc.viewer.clouds[0];
+    for (const k of [7, 18]) c.setClassHidden(k, true); // no noise
+    c.setPointSize(3, window.onlineIfc.viewer.renderer.getPixelRatio());
+    const card = document.querySelector('.cloud-card');
+    const sel = [...card.querySelectorAll('select')].find((s) => [...s.options].some((o) => o.value === 'class'));
+    sel.value = 'class'; sel.dispatchEvent(new Event('change'));
+  });
+  // the survey is in ETRS89 / UTM 32N, like the project (the LAZ file does not say so)
+  await page.evaluate(() => {
+    const sel = document.querySelector('.cloud-card .crs-select');
+    sel.value = 'EPSG:25832'; sel.dispatchEvent(new Event('change'));
+  });
+  await page.waitForTimeout(400);
+  // the model groups folded, so the point cloud's card shows
+  await page.evaluate(() => { for (const b of document.querySelectorAll('.mgroup .mg-head .mg-caret.open')) b.click(); });
+  await page.waitForTimeout(300);
+  await followCamera(page, 12140, { back: 30, side: 20, up: 8, ahead: 25 });
+  await page.evaluate(() => {
+    window.onlineIfc.viewer.renderFrame({ still: true });
+    const sv = document.querySelector('.secview');
+    Object.assign(sv.style, { left: 'auto', top: 'auto', right: '12px', bottom: '34px', width: '640px', height: '440px' });
+    const s = window.onlineIfc.secViewer; if (s) { s.view = null; s.update?.(); }
+  });
+  await page.waitForTimeout(1500);
+  const png = path.join(tmp, 'clouds.png');
+  await page.screenshot({ path: png });
+  await page.close();
+  webp(png, 'clouds');
+}
+
 function sizeOf(png) {
   const b = fs.readFileSync(png);
   return { width: b.readUInt32BE(16), height: b.readUInt32BE(20) };
@@ -185,7 +345,7 @@ function sizeOf(png) {
   const base = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   try {
-    for (const [name, fn] of [['cut', recordCut], ['secview', recordSecview]]) {
+    for (const [name, fn] of [['cut', recordCut], ['secview', recordSecview], ['profile', shotProfile], ['drawing', shotDrawing], ['terrain', shotTerrain], ['clouds', shotClouds]]) {
       if (only && only !== name) continue;
       const tmp = fs.mkdtempSync(path.join(require('node:os').tmpdir(), `clip-${name}-`));
       await fn(browser, base, tmp);

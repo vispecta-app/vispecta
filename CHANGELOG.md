@@ -7,110 +7,100 @@ This file is updated when a release is made, from the pull requests merged since
 
 ## Unreleased
 
+## v0.0.5 – 20.11.2026
+
 ### Added
-- **Contours on terrain** ([#92](https://github.com/vispecta-app/vispecta/issues/92)): choose *Auto* or an
-  interval (0.25 – 5 m) on the terrain's card. Every 5th contour is thicker. Contours show in 3D and in plan
-  drawings, with the height on the thick ones (PDF, SVG, DXF layer `CONTOURS`), and are saved in the project.
-- **Cut and fill** ([#92](https://github.com/vispecta-app/vispecta/issues/92)): the terrain against the top of
-  chosen models (by default the embankment), on a grid along an alignment. The result is a table per station range, a CSV
-  and a difference map in 3D (red: cut, blue: fill).
-- **Height models as GeoTIFF** ([#92](https://github.com/vispecta-app/vispecta/issues/92)), e.g. DHM/Terræn: drop
-  a `.tif` and it opens as a terrain, cut to the models and placed in map coordinates.
-- **LandXML export of a terrain** ([#92](https://github.com/vispecta-app/vispecta/issues/92)): *Download LandXML*
-  on its card.
-- **Project coordinate system** ([#107](https://github.com/vispecta-app/vispecta/issues/107)): choose the
-  project's map coordinate system at the top of the model browser.
-  - Models, point clouds, GeoTIFF and LandXML in another system are converted into it on the fly. The system
-    is read from the files (IFC `IfcProjectedCRS`, LAS WKT/GeoKeys, E57, GeoTIFF, LandXML) or chosen on the
-    card.
-  - Built in: Denmark (UTM 32N/33N, DKTM1–4, Kp2000) and Germany (Gauss-Krüger, DB_REF). Any other EPSG code
-    can be looked up.
-  - Heights are not converted.
+- **Terrain from a height model or a survey, and earthworks** ([#92](https://github.com/vispecta-app/vispecta/issues/92)):
+  - **Height models as GeoTIFF**, e.g. DHM/Terræn: drop a `.tif` and it opens as a terrain, cut to the models and
+    placed in map coordinates.
+  - **A ground filter for point clouds without classes:** a morphological filter removes trees, buildings and
+    vehicles before triangulation. It is the default when the cloud has no ground class.
+  - **Contours:** choose *Auto* or an interval (0.25 – 5 m) on the terrain's card. Every 5th contour is thicker.
+    They show in 3D and in plan drawings, with the height on the thick ones (PDF, SVG, DXF layer `CONTOURS`).
+  - **Cut and fill:** the terrain against the top of chosen models (by default the embankment), on a grid along
+    an alignment. The result has key figures, a table per station range, a CSV and a difference map in 3D (red:
+    cut, blue: fill).
+  - **LandXML export** of a terrain (*Download LandXML* on its card).
 - **Very large point clouds as COPC** ([#52](https://github.com/vispecta-app/vispecta/issues/52)): a cloud-optimised
   LAZ is read piece by piece, never whole. The parts the view needs are loaded (more detail close up, within the
-  point budget), and the rest is dropped again. Sections and longitudinal profiles load the points along them
-  at full density.
-- **E57 point clouds** ([#52](https://github.com/vispecta-app/vispecta/issues/52)) from terrestrial scanners: all
-  scan positions, placed with their poses. Cartesian or spherical coordinates, intensity and colour are read.
-- **Depth shading (EDL)** for point clouds ([#52](https://github.com/vispecta-app/vispecta/issues/52)): eye-dome
-  lighting, switched on the cloud's card.
-- **Point clouds in projects and workspaces** ([#52](https://github.com/vispecta-app/vispecta/issues/52)): clouds up
-  to 300 MB are stored with the project. Larger ones are kept as a reference (in Chrome/Edge they are opened
-  again from where they are). Their settings are saved too.
-- **Ground filter for point clouds without classes** ([#92](https://github.com/vispecta-app/vispecta/issues/92)): a
-  morphological filter removes trees, buildings and vehicles before triangulation. It is the default when
-  the cloud has no ground class.
+  point budget), and the rest is dropped again. Sections and longitudinal profiles load the points along them at
+  full density.
+- **E57 point clouds** ([#52](https://github.com/vispecta-app/vispecta/issues/52)) from terrestrial scanners: all scan
+  positions, placed with their poses. Cartesian or spherical coordinates, intensity and colour are read.
+- **Depth shading (EDL)** for point clouds ([#52](https://github.com/vispecta-app/vispecta/issues/52)), switched on the
+  cloud's card.
+- **Point clouds in projects and workspaces** ([#52](https://github.com/vispecta-app/vispecta/issues/52)):
+  - clouds up to 300 MB are stored with the project;
+  - larger ones are kept as a reference, and Chrome/Edge open them again from where they are;
+  - their settings are saved too.
+- **Project coordinate system** ([#107](https://github.com/vispecta-app/vispecta/issues/107)), chosen at the top of
+  the model browser:
+  - models, point clouds, GeoTIFF and LandXML in another system are converted into it on the fly;
+  - the system is read from the files (IFC `IfcProjectedCRS`, LAS WKT/GeoKeys, E57, GeoTIFF, LandXML) or chosen
+    on the card;
+  - built in: Denmark (UTM 32N/33N, DKTM1–4, Kp2000) and Germany (Gauss-Krüger, DB_REF), and any other EPSG code
+    can be looked up;
+  - heights are not converted.
+- **Accessibility** ([#62](https://github.com/vispecta-app/vispecta/issues/62)):
+  - menus and tabs have ARIA roles and states and work with the arrow keys, Home, End and Esc;
+  - the 3D view, symbol-only buttons and fields without a label have names;
+  - text and buttons reach 4.5:1, and click targets are at least 24 px;
+  - on phones a fade shows that the toolbar scrolls.
+- **Checks on every pull request** ([#57](https://github.com/vispecta-app/vispecta/issues/57)):
+  - ESLint, the build, and a smoke test in headless Chromium that fails on any page or console error;
+  - it covers the samples, sections, drawings, point clouds, COPC/E57, terrain, coordinate systems, projects
+    and IDS filters;
+  - axe-core checks accessibility;
+  - `npm run test` runs the same locally.
 
 ### Changed
-- **`main.js` split into modules** ([#63](https://github.com/vispecta-app/vispecta/issues/63)): from 4,700 to
-  2,100 lines. A core module and ten modules for the larger areas live in `src/app/`, with no change in
-  behaviour. Station labels in 3D now have dark text on the orange (7.4:1 instead of 2.5:1).
-- **Fixed:** closing a project now also resets its coordinate system (#107).
-- **Long models draw only what is in view** ([#60](https://github.com/vispecta-app/vispecta/issues/60)): a model
-  longer than 400 m is split in plan into cells (up to 16 along it). Each colour gets a mesh per cell with its own
-  bounding box, so what is out of view is skipped. Close up on the 31 km Chesapeake corridor, 72 % fewer triangles
-  are drawn (102,000 of 359,000). The geometry cache is rebuilt once (new format).
-- **IFC geometry is built in a worker** ([#58](https://github.com/vispecta-app/vispecta/issues/58)): opening a model no
-  longer freezes the page while its geometry is read. On the Chesapeake sample (26 MB), the page was blocked in 13
-  long tasks for 2.1 s; it is now 2 tasks and 1.0 s. What is left is the page opening the file itself for properties
-  (0.7 s). This costs about 0.3 s more in total.
-- **Filters start without freezing the page** ([#61](https://github.com/vispecta-app/vispecta/issues/61)):
-  - the property index is built in slices of about 12 ms, so the page stays responsive;
-  - the calculated quantities are worked out only when a filter or colour uses them;
-  - an unedited file keeps its index in the browser, stored in columns.
-
-  On the Chesapeake sample (17,553 elements) the build took 4.6 s with a 2.2 s freeze. It now takes 1.6 s
-  with no slice over 60 ms, and 0.15 s the next time.
-- **Accessibility** ([#62](https://github.com/vispecta-app/vispecta/issues/62)):
-  - menus and tabs have ARIA roles and states and can be used with the arrow keys, Home, End and Esc;
-  - the 3D view, symbol-only buttons and fields without a label have names;
-  - the accent colour is a little darker, so text and buttons reach 4.5:1;
-  - the status bar is opaque, and click targets are at least 24 px;
-  - on phones a fade shows that the toolbar scrolls;
-  - axe-core runs in the smoke test.
-- **Content Security Policy** ([#64](https://github.com/vispecta-app/vispecta/issues/64)): the app, the about
-  page and the 404 page tell the browser to load only from the site itself and to contact no other server
-  than the GitHub API (update check) and epsg.io (a looked-up coordinate system). The inline scripts moved
-  into files of their own.
-- **A bounded offline cache** ([#64](https://github.com/vispecta-app/vispecta/issues/64)): the sample models and
-  the Python runtime are cached apart from the app, only once used, and the cache is kept under 250 MB. The
-  files used longest ago are dropped first.
-- **The cut and fill dialog is laid out in two columns:** the settings on the left, the result on the right.
-  The result has key figures (cut, fill, net, area) and a table that scrolls on its own, with a fixed header
-  and a total row.
-- **The installed app is called just "Vispecta"** (manifest name, app title on iOS/Android, and the
-  window title when it runs as an app), instead of "Vispecta – free IFC viewer …".
-- **The X/Y/Z axis cross is gone**; the view cube and its compass ring show the directions. The view
-  cube stays in the top right corner, and the measure panel opens under it instead of on top of it.
-  ([#95](https://github.com/vispecta-app/vispecta/issues/95))
-- **Floating panels can be moved:** drag sections, measure, drive, compare and IDS by their header. They
-  are remembered per panel, kept inside the 3D view, and pushed clear of the view cube. A double-click
-  on the header puts a panel back in its place.
-- **The Chesapeake Bay Bridge-Tunnel sample is hidden** on the start screen; the railway sample and
-  the sample scene stay. ([#95](https://github.com/vispecta-app/vispecta/issues/95))
-- **Export 2D drawing is a wide dialog in two columns:** the drawing on the left, the annotation on
-  the right, the export button always at the bottom; stacked on narrow screens.
-  ([#96](https://github.com/vispecta-app/vispecta/issues/96))
-
-### Added
-- **Checks on every pull request.** ESLint (undefined names, unused variables), the build and a smoke
-  test in headless Chromium: sample scene, a station section with the section window and an SVG
-  export, a point cloud, all tabs, bad files, and the railway sample. Any page or console error
-  fails it. `npm run test` runs the same locally.
-  ([#57](https://github.com/vispecta-app/vispecta/issues/57))
+- **The page stays responsive with large models:**
+  - **IFC geometry is built in a worker** ([#58](https://github.com/vispecta-app/vispecta/issues/58)). On the
+    Chesapeake sample (26 MB), the page was blocked for 2.1 s in 13 long tasks; it is now 1.0 s in 2.
+  - **Long models draw only what is in view** ([#60](https://github.com/vispecta-app/vispecta/issues/60)). A model
+    longer than 400 m is split in plan into cells. Close up on the 31 km Chesapeake corridor, 72 % fewer
+    triangles are drawn.
+  - **Filters start without freezing the page** ([#61](https://github.com/vispecta-app/vispecta/issues/61)). On
+    Chesapeake, the index took 4.6 s with a 2.2 s freeze. It now takes 1.6 s without one, and 0.15 s the next
+    time, because the index is kept in the browser.
+  - **Autosave no longer stutters:** the project's picture is taken at most once a minute, and never while the
+    page is hidden or closing.
+- **Content Security Policy and a bounded offline cache** ([#64](https://github.com/vispecta-app/vispecta/issues/64)):
+  - the pages load only from the site itself, and contact no other server than the GitHub API (update check)
+    and epsg.io (a looked-up coordinate system);
+  - the sample models and the Python runtime are cached apart from the app, only once used, and under 250 MB.
+- **Layout:**
+  - **Floating panels can be moved** by their header: sections, measure, drive, compare and IDS. Positions are
+    remembered, and a double-click puts a panel back.
+  - **The view cube replaces the X/Y/Z axis cross** ([#95](https://github.com/vispecta-app/vispecta/issues/95)). It
+    stays in the top right corner, and the measure panel opens under it.
+  - **The cut and fill dialog and the drawing dialog** ([#96](https://github.com/vispecta-app/vispecta/issues/96))
+    are laid out in two columns.
+  - **Larger fold arrows** in the model browser.
+- **The installed app is called just "Vispecta".**
+- **The Chesapeake Bay Bridge-Tunnel sample is hidden** on the start screen
+  ([#95](https://github.com/vispecta-app/vispecta/issues/95)).
+- **The about page:**
+  - the clips of a cut sliding along the track and of the section window now come from the double-track sample;
+  - it has new sections on terrain and earthworks and on point clouds and coordinate systems.
+- **Code:**
+  - `main.js` is split into modules in `src/app/` ([#63](https://github.com/vispecta-app/vispecta/issues/63));
+  - CHANGELOG is written per release.
 
 ### Fixed
+- **Cross sections show the axes of all alignments they cross**, not only the one they follow (e.g. both tracks of
+  a double-track line). Each axis is named with its alignment and station.
+- **Top of rail is annotated in cross sections:** the rail head is always a point, with its offset and height.
 - **Alignments with a placement of their own** ([#107](https://github.com/vispecta-app/vispecta/issues/107)): the
-  `ObjectPlacement` of an `IfcAlignment` (and of the site it is placed in) was ignored, so such an alignment
-  was drawn in the wrong place.
-- **Cross sections show the axes of all alignments they cross**, not only the one they follow (e.g. both
-  tracks of a double-track line). Each axis, also the own one, is named with its alignment (track) and station, in the section
-  window and in PDF, SVG and DXF (layer `ALIGNMENT_AXIS`).
-- **Top of rail is annotated in cross sections.** Round shapes such as a rail head were thinned away as
-  facets, so only the rail foot got points. Now the top of a narrow bump (3 cm above the outline 12 cm to
-  each side) is always a point and wins over nearby corners: offset and height of the rail head.
-- **Fold arrows in the model browser are larger** (a 26 px button with a hover state), and a terrain's height
-  colour list no longer runs out of its card; the height range sits under it.
+  `ObjectPlacement` of an `IfcAlignment` was ignored, so such an alignment was drawn in the wrong place.
+- **A point cloud could be missing when a project was opened again** if the project had been saved while the cloud
+  was still being stored.
+- **Closing a project resets its coordinate system.**
+- **The popped-out section window had no fonts.**
+- **Station labels in 3D** have dark text on the orange (7.4:1).
+- **The welcome screen on phones:**
+  - the view cube no longer covers the heading;
+  - the sample buttons no longer run off the screen.
 
 ## v0.0.4 – 18.11.2026
 

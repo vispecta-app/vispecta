@@ -1,6 +1,6 @@
 {
   "name": "vispecta",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "Vispecta – IFC viewer for infrastructure: alignments, sections, longitudinal profiles and model checking, in the browser",
   "license": "AGPL-3.0-only",
   "author": "Rasmus Roien Molbaek",
