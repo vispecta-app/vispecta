@@ -5,11 +5,12 @@
 //   files     fingerprint -> {key, name, size, blob, added}      the IFC files of projects
 //   geom      fingerprint -> {key, header, blob, size, lastUsed} geometry ready for display
 //   projects  id -> {id, name, created, modified, files: [{key, name}], state, thumb}
+//   pindex    'fingerprint|lang|format' -> {key, fileKey, packed}  property indexes in columns (#61)
 import * as THREE from 'three';
 
 // Storage keys keep the project's former name (onlineifc), so data saved in the browser stays.
 const DB_NAME = 'onlineifc';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // 2: property indexes (#61)
 // Bump when the loader changes in a way that changes the geometry (invalidates the geometry cache).
 export const GEOMETRY_FORMAT = 'g3-webifc0.0.78-seg16-cells'; // g3: long models split into cells (#60)
 
@@ -24,8 +25,13 @@ function db() {
         if (!d.objectStoreNames.contains('files')) d.createObjectStore('files', { keyPath: 'key' });
         if (!d.objectStoreNames.contains('geom')) d.createObjectStore('geom', { keyPath: 'key' });
         if (!d.objectStoreNames.contains('projects')) d.createObjectStore('projects', { keyPath: 'id' });
+        if (!d.objectStoreNames.contains('pindex')) d.createObjectStore('pindex', { keyPath: 'key' });
       };
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => {
+        // another tab opens a newer version: let it (this tab opens it again when it needs it)
+        req.result.onversionchange = () => { req.result.close(); dbPromise = null; };
+        resolve(req.result);
+      };
       req.onerror = () => reject(req.error);
       req.onblocked = () => reject(new Error('IndexedDB blocked'));
     });
@@ -163,4 +169,28 @@ export async function trimGeometry(maxBytes, keep = new Set()) {
     total -= g.size || 0;
   }
   return total;
+}
+
+// ---------------------------------------------------------- property indexes (#61)
+// The filter index of an unedited IFC file, without the calculated quantities, per language (the
+// type names in it are translated). Bump PINDEX_FORMAT when buildPropertyIndex changes what it stores.
+const PINDEX_FORMAT = 'p1';
+const pindexKey = (fileKey, lang) => `${fileKey}|${lang || ''}|${PINDEX_FORMAT}`;
+
+export async function getIndex(fileKey, lang) {
+  const rec = await get('pindex', pindexKey(fileKey, lang));
+  return rec?.packed || null;
+}
+
+/** packed: the index in columns (see packIndex in model.js). */
+export function putIndex(fileKey, lang, packed) {
+  return put('pindex', { key: pindexKey(fileKey, lang), fileKey, packed });
+}
+
+/** Removes the indexes of files that are no longer kept (keep: file keys) and those of older formats. */
+export async function trimIndexes(keep = null) {
+  const list = (await tx('pindex', 'readonly', (st) => req2p(st.getAllKeys()))).map((k) => ({ key: k, fileKey: String(k).split('|')[0] }));
+  const drop = list.filter((x) => (keep && !keep.has(x.fileKey)) || !String(x.key).endsWith(`|${PINDEX_FORMAT}`));
+  for (const x of drop) await del('pindex', x.key);
+  return list.length - drop.length;
 }
