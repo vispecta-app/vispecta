@@ -37,6 +37,7 @@ import { IssuesPanel } from './issues.js';
 import { readAlignments, AlignmentLayer, SectionMarks, pointAt, heightAt, project, formatStation, parseStation, setStationFormat, stationFormat, STATION_FORMATS } from './alignment.js';
 import { loadPointCloud, LAS_CLASSES, classColor as lasClassColor } from './pointcloud.js';
 import { isCopc, openCopc } from './copc.js';
+import { crsOptions, crsName, crsNote, crsKnown, normalizeCrs, defineCrs, customDefs, addDefs } from './crs.js';
 import { Corridor } from './corridor.js';
 import { computeSection, computeProfile, planeAxes, layout, toSvg, toPdf, toPdfPages, toDxf, renderBackground, SCALES, AXIS_COLOR } from './drawing.js';
 import { ViewCube } from './viewcube.js';
@@ -451,6 +452,7 @@ async function openCloudFiles(list) {
       continue;
     }
     const first = !viewer.models.length && viewer.clouds.length === 0;
+    if (!projectCrsChosen && !viewer.projectCrs && !viewer.models.length) viewer.projectCrs = cloud.crs; // a cloud first: its system (#107)
     viewer.addCloud(cloud);
     const far = viewer.models.length ? viewer.placeCloud(cloud) : null;
     const settings = pendingCloudSettings.get(file.name);
@@ -464,6 +466,7 @@ async function openCloudFiles(list) {
     try { handle = (await fileHandles.get(fileId(file))) || null; } catch { handle = null; }
     projects.cloudAdded(cloud, file, handle);
   }
+  crsChanged();
   afterModelsChanged();
   secViewer?.planesChanged?.();
 }
@@ -525,11 +528,12 @@ async function streamAlong(al, s0, s1) {
 
 /** Settings of a cloud as stored in projects and workspaces. */
 function cloudSettings(c) {
-  return { name: c.name, alias: c.alias || null, visible: c.visible, mode: c.mode, pointSize: c.pointSize, share: c.share, hidden: [...c.hiddenClasses] };
+  return { name: c.name, crs: c.crs || null, alias: c.alias || null, visible: c.visible, mode: c.mode, pointSize: c.pointSize, share: c.share, hidden: [...c.hiddenClasses] };
 }
 function applyCloudSettings(c, x) {
   if (!x) return;
   c.alias = x.alias || null;
+  if ('crs' in x && (x.crs || null) !== c.crs) c.crs = x.crs || null;
   if (typeof x.visible === 'boolean') c.setVisible(x.visible);
   if (x.mode) c.setMode(x.mode);
   if (x.pointSize > 0) c.setPointSize(x.pointSize, viewer.renderer.getPixelRatio());
@@ -602,6 +606,7 @@ function cloudCard(c) {
       h('div', { class: 'card-row' }, h('label', { text: t('pc.share') }), share),
       h('div', { class: 'card-row' }, h('label', { text: t('pc.slab') }), slab, h('span', { class: 'muted', text: 'm' })),
       h('label', { class: 'card-row check', title: t('pc.edlTitle') }, edl, h('span', { text: t('pc.edl') })),
+      ...crsRow(c, (v) => { c.crs = v; crsChanged(); renderModels(); cloudsChanged(); projects.touch?.(); }),
       classes,
       h('div', { class: 'card-btns' },
         h('button', { class: 'btn sm', onclick: () => viewer.fitBox(c.getBox()), text: t('models.zoom') }),
@@ -862,6 +867,11 @@ function volumeCsv() {
   download(`cut-fill-${r.al.name}.csv`, rows.map((x) => x.map(q).join(';')).join('\n'), 'text/csv');
 }
 
+/** The project's coordinate system for the terrain worker: GeoTIFF and LandXML are converted into it (#107). */
+function workerCrs() {
+  return viewer.projectCrs ? { to: viewer.projectCrs, defs: customDefs([viewer.projectCrs]) } : null;
+}
+
 /** The georeference written into the terrain file: the map conversion the models use. */
 function terrainGeoref() {
   const mm = viewer.mapModel();
@@ -927,6 +937,8 @@ async function buildTerrain() {
  */
 function landXmlPlacement(text) {
   const toIfc = viewer.mapToIfcMatrix();
+  // a file that names its coordinate system, with a project system: map coordinates, converted (#107)
+  if (toIfc && viewer.projectCrs && normalizeCrs(/<CoordinateSystem\b[^>]*>/i.exec(text)?.[0]?.replace(/^.*?epsgCode="(\d+)".*$/s, 'EPSG:$1'))) return toIfc;
   const p = /<P\b[^>]*>\s*([-\d.eE+]+)[\s,]+([-\d.eE+]+)[\s,]+([-\d.eE+]+)/.exec(text);
   const box = viewer.sceneBox({ visibleOnly: false, clouds: true });
   if (!toIfc || !p || box.isEmpty()) return toIfc;
@@ -941,7 +953,7 @@ async function terrainFromLandXml(file) {
   try {
     const text = await file.text();
     const res = await runTerrainWorker({
-      landxml: text, toIfc: landXmlPlacement(text)?.elements || null, maxEdge: 0, name, georef: terrainGeoref(),
+      landxml: text, toIfc: landXmlPlacement(text)?.elements || null, maxEdge: 0, name, georef: terrainGeoref(), crs: workerCrs(),
     }, t('ter.reading', { name: file.name }));
     await openTerrain(res, name);
   } catch (err) {
@@ -967,9 +979,10 @@ async function terrainFromGeoTiff(file) {
       const a = viewer.toIfc(box.min).applyMatrix4(inv), b = viewer.toIfc(box.max).applyMatrix4(inv);
       clip = [Math.min(a.x, b.x) - 50, Math.min(a.y, b.y) - 50, Math.max(a.x, b.x) + 50, Math.max(a.y, b.y) + 50];
     }
-    const res = await runTerrainWorker({ geotiff: buf, toIfc: toIfc?.elements || null, clip, maxCells: 1500000, name, georef: terrainGeoref() },
+    const res = await runTerrainWorker({ geotiff: buf, toIfc: toIfc?.elements || null, clip, maxCells: 1500000, name, georef: terrainGeoref(), crs: workerCrs() },
       t('ter.reading', { name: file.name }));
     await openTerrain(res, name);
+    if (res.converted) toast(t('crs.convertedToast', { name: file.name, from: crsName(res.crs), to: crsName(viewer.projectCrs) }), true);
     toast(t('ter.rasterInfo', { w: fmtNum(res.raster[0]), h: fmtNum(res.raster[1]), c: fmtNum(+res.cell.toFixed(2)) }), true);
   } catch (err) {
     console.error(err);
@@ -1001,12 +1014,13 @@ function terrainLandXml(m) {
   }
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
   const nm = esc(m.alias || m.name.replace(/\.ifc$/i, ''));
-  const crs = viewer.mapModel()?.georef?.map?.crs;
+  const crs = viewer.projectCrs || viewer.mapModel()?.georef?.map?.crs;
+  const epsg = /^EPSG:(\d+)$/.exec(viewer.projectCrs || '')?.[1];
   const now = new Date();
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <LandXML xmlns="http://www.landxml.org/schema/LandXML-1.2" version="1.2" date="${now.toISOString().slice(0, 10)}" time="${now.toISOString().slice(11, 19)}">
   <Units><Metric linearUnit="meter" areaUnit="squareMeter" volumeUnit="cubicMeter" angularUnit="decimal degrees" directionUnit="decimal degrees"/></Units>
-${crs && fromIfc ? `  <CoordinateSystem name="${esc(crs)}"/>\n` : ''}  <Application name="Vispecta" manufacturer="Vispecta" version="${esc(BUILD.version || '')}"/>
+${crs && fromIfc ? `  <CoordinateSystem name="${esc(crsName(crs) || crs)}"${epsg ? ` epsgCode="${epsg}"` : ''}/>\n` : ''}  <Application name="Vispecta" manufacturer="Vispecta" version="${esc(BUILD.version || '')}"/>
   <Surfaces>
     <Surface name="${nm}">
       <Definition surfType="TIN">
@@ -1037,6 +1051,7 @@ async function openIfcFiles(list, keys = null, { fit = true } = {}) {
         if (!key && projects.enabled) { try { key = await projects.keyOf(file); } catch { key = null; } }
         const model = await loadIfcFile(file, { onProgress: (msg, frac) => progress(prefix + msg, (i + frac) / list.length), geometryCache: key ? projects.geometryCacheFor(key) : null });
         model.indexCache = key ? projects.indexCacheFor(key) : null; // the filter index, kept per file (#61)
+        model.crs = model.crsDetected = normalizeCrs(model.georef?.map?.crs); // its map coordinate system (#107)
         viewer.addModel(model);
         checkUnits(model);
         if (key) projects.modelAdded(model, file, key);
@@ -1055,9 +1070,100 @@ async function openIfcFiles(list, keys = null, { fit = true } = {}) {
       }
     }
   });
+  crsChanged();
   afterModelsChanged();
   if (fit) viewer.fitBox(viewer.sceneBox(), { keepDirection: before > 0 });
   checkCoordinates();
+}
+
+// ------------------------------------------------- coordinate systems (#107)
+// The project's map coordinate system: chosen by hand, or else the first model's (or cloud's).
+// Models, clouds and terrain in another system are converted into it (viewer.applyCrs).
+let projectCrsChosen = false;
+const crsShown = new Set(); // conversions already told about (toast once)
+
+/** After models or clouds came or went, or a system was chosen: place everything again. */
+function crsChanged({ quiet = false } = {}) {
+  if (!projectCrsChosen && !viewer.projectCrs) {
+    viewer.projectCrs = viewer.referenceModel?.crs || viewer.models.find((m) => m.crs)?.crs || viewer.clouds.find((c) => c.crs)?.crs || null;
+  }
+  if (!viewer.projectCrs && !viewer.models.some((m) => m.crsT || m.warped)) { for (const c of viewer.clouds) viewer.placeCloud(c); return; }
+  const res = viewer.applyCrs();
+  updateAlignments();
+  if (!quiet) for (const r of res) {
+    const key = `${r.model.name}|${r.from}|${r.to}`;
+    if (crsShown.has(key)) continue;
+    crsShown.add(key);
+    toast(t('crs.convertedToast', { name: r.model.alias || r.model.name, from: crsName(r.from), to: crsName(r.to) }), true);
+  }
+  for (const c of viewer.clouds) {
+    if (!c.crs || !viewer.projectCrs || c.crs === viewer.projectCrs) continue;
+    const key = `${c.name}|${c.crs}|${viewer.projectCrs}`;
+    if (quiet || crsShown.has(key)) continue;
+    crsShown.add(key);
+    toast(t('crs.convertedToast', { name: c.label, from: crsName(c.crs), to: crsName(viewer.projectCrs) }), true);
+  }
+  secViewer?.planesChanged?.();
+  viewer.invalidate(500);
+}
+
+/** A select of coordinate systems: none, the built-in ones, the user's own, and "other EPSG code…". */
+function crsSelect(value, { none, detected = null, onChange }) {
+  const opts = crsOptions();
+  const groups = [['dk', t('crs.grpDk')], ['de', t('crs.grpDe')], ['custom', t('crs.grpCustom')]];
+  const label = (o) => `${o.code.startsWith('PROJ:') ? '' : `${o.code} · `}${o.name}${o.code === detected ? ` (${t('crs.fromFile')})` : ''}`;
+  const sel = h('select', { class: 'crs-select' },
+    h('option', { value: '', text: none, selected: !value }),
+    value && !crsKnown(value) ? h('option', { value, text: `${value} – ${t('crs.undefined')}`, selected: true }) : null,
+    groups.map(([g, name]) => {
+      const list = opts.filter((o) => o.group === g);
+      return list.length ? h('optgroup', { label: name }, list.map((o) => h('option', { value: o.code, text: label(o), selected: o.code === value }))) : null;
+    }),
+    h('option', { value: '__other', text: t('crs.other') }));
+  sel.addEventListener('change', async () => {
+    let v = sel.value;
+    if (v === '__other' || (v && !crsKnown(v))) {
+      const input = v === '__other' ? prompt(t('crs.otherPrompt'), '') : v;
+      if (!input) { sel.value = value || ''; return; }
+      try { v = await withLoading((progress) => { progress(t('crs.lookingUp'), 0.5); return defineCrs(input); }); } catch (e) { toast(t('crs.lookupFailed', { code: input, error: e.message || e })); sel.value = value || ''; return; }
+    }
+    onChange(v || null);
+  });
+  return sel;
+}
+
+function setProjectCrs(code) {
+  viewer.projectCrs = code;
+  projectCrsChosen = true;
+  crsChanged();
+  renderModels();
+  projects.touch?.();
+}
+
+/** The line under a source's coordinate system: what is done with it. */
+function crsNoteText(src) {
+  if (!src.crs) return src.fileCrs && !normalizeCrs(src.fileCrs) ? t('crs.fileUnknown') : null;
+  if (!crsKnown(src.crs)) return t('crs.needDef');
+  if (!viewer.projectCrs) return null;
+  if (src.crs === viewer.projectCrs) return t('crs.same');
+  const note = crsNote(src.crs) || crsNote(viewer.projectCrs);
+  const i = src.crsInfo;
+  const how = i ? (i.warped ? t('crs.warped', { mm: fmtNum(+(i.residual * 1000).toFixed(1)) }) : t('crs.similar', { mm: fmtNum(+(i.residual * 1000).toFixed(2)) })) : t('crs.pointwise');
+  return `${t('crs.converted', { to: crsName(viewer.projectCrs) })} ${how}${note ? ` ${t(`crs.note.${note}`)}` : ''} ${t('crs.heights')}`;
+}
+
+/** The coordinate system row on a model's or cloud's card. */
+function crsRow(src, onChange) {
+  const sel = crsSelect(src.crs, { none: t('crs.unknown'), detected: normalizeCrs(src.crsDetected ?? src.fileCrs), onChange });
+  const note = crsNoteText(src);
+  return [h('div', { class: 'card-row' }, h('label', { text: t('crs.label'), title: t('crs.labelTitle') }), sel),
+    note ? h('div', { class: 'card-meta crs-note', text: note }) : null];
+}
+
+/** The project's coordinate system, at the top of the model browser. */
+function projectCrsBar() {
+  const sel = crsSelect(viewer.projectCrs, { none: t('crs.projectNone'), onChange: setProjectCrs });
+  return h('div', { class: 'crs-bar' }, h('label', { text: t('crs.project'), title: t('crs.projectTitle') }), sel);
 }
 
 // ------------------------------------------------------------- length units
@@ -1834,6 +1940,7 @@ function renderModels() {
   list.replaceChildren();
   $('#models-empty').hidden = viewer.models.length + viewer.clouds.length + drawnPaths.length > 0;
   $('#model-actions').hidden = viewer.models.length === 0;
+  if (viewer.models.length || viewer.clouds.length) list.append(projectCrsBar());
   // groups whose models are all gone stay until removed; models of a removed group are loose
   const loose = viewer.models.filter((m) => !groupOf(m));
   for (const g of state.modelGroups) list.append(groupSection(g, viewer.models.filter((m) => m.groupId === g.id)));
@@ -1965,6 +2072,7 @@ function modelCard(m) {
       m.terrain ? h('div', { class: 'card-row' }, h('button', { class: 'btn sm', text: t('vol.open'), title: t('vol.intro'), onclick: () => openVolumeDialog(m) }),
         h('button', { class: 'btn sm', text: t('ter.lxExport'), title: t('ter.lxTitle'), onclick: () => terrainLandXml(m) })) : null,
       h('div', { class: 'card-row' }, h('label', { text: t('mg.group') }), groupSel),
+      ...crsRow(m, (v) => { m.crs = v; crsChanged(); renderModels(); projects.touch?.(); }),
       m.alignments?.length ? h('div', { class: 'aln-list' }, h('div', { class: 'aln-head muted', text: t('aln.list', { n: m.alignments.length }) }), m.alignments.map(alignmentRow)) : null,
       h('div', { class: 'card-btns' },
         h('button', { class: 'btn sm', onclick: () => viewer.fitBox(m.getBox()), text: t('models.zoom') }),
@@ -3499,12 +3607,16 @@ const projects = new ProjectManager({
     models: viewer.models.map((m) => ({ key: projects.keys.get(m) || null, name: m.name, alias: m.alias || null, group: m.groupId || null, color: m.overrideColor ? `#${m.overrideColor.getHexString()}` : null,
       // alignments: alias and visibility per alignment (#89); terrain: height colours on or off (#90)
       alignments: (m.alignments || []).some((a) => a.alias || a.hidden) ? m.alignments.map((a) => ({ alias: a.alias || null, hidden: !!a.hidden })) : undefined,
+      crs: m.crs !== m.crsDetected ? m.crs || null : undefined, // a coordinate system chosen by hand (#107)
       heightColors: m.terrain ? m.heightColors || false : undefined, contours: m.terrain ? m.contours || false : undefined })),
     stationFormat: stationFormat.value, // the client's stationing format stays with the project (#29)
     annotEdits: annotEdits.size ? [...annotEdits] : undefined, // points chosen by hand (#48)
     drawingPresets: userPresets.length ? userPresets : undefined, // drawing presets (#51)
     clouds: viewer.clouds.length ? viewer.clouds.map(cloudSettings) : undefined, // point cloud settings (#52)
     cloudSlab: viewer.cloudSlab,
+    // the project's coordinate system and the definitions of the user's own systems (#107)
+    projectCrs: viewer.projectCrs || null, projectCrsChosen,
+    crsDefs: customDefs([viewer.projectCrs, ...viewer.models.map((m) => m.crs), ...viewer.clouds.map((c) => c.crs)].filter(Boolean)),
     corridor: corridor.def ? { path: corridor.def.al.name, drawn: !!corridor.def.al.drawn, offsets: corridor.def.offsets, from: corridor.def.from, to: corridor.def.to } : null, // (#26)
   }),
   setExtra: (x) => {
@@ -3527,11 +3639,15 @@ const projects = new ProjectManager({
       if (m.terrain && info && 'heightColors' in info) m.setHeightColors(info.heightColors || false);
       if (m.terrain && info && 'contours' in info && (info.contours || false) !== (m.contours || false)) setContours(m, info.contours || false);
       if (info && 'color' in info) m.setColor(info.color || null);
+      if (info && info.crs !== undefined) m.crs = info.crs || null; // chosen by hand; else as the file says
       const g = groupOf(m);
       m.setGroupHidden(g ? !g.visible : false);
     }
     if (x?.stationFormat) applyStationFormat(x.stationFormat);
+    addDefs(x?.crsDefs);
+    if (x && 'projectCrs' in x) { viewer.projectCrs = x.projectCrs || null; projectCrsChosen = !!x.projectCrsChosen; }
     restoreCloudSettings(x?.clouds || [], { slab: x?.cloudSlab });
+    crsChanged({ quiet: true });
     updateAlignments();
     const cd = x?.corridor, cal = cd && allAlignments().find((a) => a.name === cd.path && !!a.drawn === cd.drawn);
     if (cal) corridor.set({ al: cal, offsets: cd.offsets, from: cd.from, to: cd.to }); else corridor.clear();

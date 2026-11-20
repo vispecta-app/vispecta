@@ -72,6 +72,35 @@ function exactHorizontal(segs, scale) {
   return poly;
 }
 
+/**
+ * The matrix of an IfcLocalPlacement chain (IFC coordinates, metres), or null when it is the identity.
+ * Only IfcAxis2Placement3D/2D relative placements are followed.
+ */
+function placementMatrix(api, mid, id, scale) {
+  const m = new THREE.Matrix4();
+  let any = false;
+  for (let guard = 0; id && guard < 32; guard++) {
+    const pl = api.GetLine(mid, id, false);
+    const rp = pl?.RelativePlacement?.value ? api.GetLine(mid, pl.RelativePlacement.value, false) : null;
+    if (rp) {
+      const loc = rp.Location?.value ? api.GetLine(mid, rp.Location.value, false) : null;
+      const c = (loc?.Coordinates || []).map((q) => num(q) ?? 0);
+      const dir = (ref) => { const d = ref?.value ? api.GetLine(mid, ref.value, false) : null; return d?.DirectionRatios ? d.DirectionRatios.map((q) => num(q) ?? 0) : null; };
+      const az = dir(rp.Axis) || [0, 0, 1];
+      const z = new THREE.Vector3(az[0], az[1], az[2] ?? 1).normalize();
+      const r = dir(rp.RefDirection) || [1, 0, 0];
+      const x = new THREE.Vector3(r[0], r[1], r[2] ?? 0);
+      x.addScaledVector(z, -x.dot(z)).normalize();
+      const y = new THREE.Vector3().crossVectors(z, x);
+      const local = new THREE.Matrix4().makeBasis(x, y, z).setPosition((c[0] || 0) * scale, (c[1] || 0) * scale, (c[2] || 0) * scale);
+      if (!local.equals(new THREE.Matrix4())) any = true;
+      m.premultiply(local);
+    }
+    id = pl?.PlacementRelTo?.value || null;
+  }
+  return any ? m : null;
+}
+
 /** Reads all alignments of a model. Returns [] for models without IfcAlignment. */
 export async function readAlignments(model) {
   const api = model.api, mid = model.modelID;
@@ -138,6 +167,10 @@ export async function readAlignments(model) {
         poly.push(...exact);
       }
     } catch (e) { console.warn('exact horizontal', e); }
+    // the alignment's own placement (IfcLocalPlacement chain): web-ifc gives the curve without it
+    let place = null;
+    try { place = placementMatrix(api, mid, line?.ObjectPlacement?.value, scale); } catch { place = null; }
+    if (place) for (const p of poly) { v3.set(p[0], p[1], 0).applyMatrix4(place); p[0] = v3.x; p[1] = v3.y; }
     const cum = [0];
     for (let k = 1; k < poly.length; k++) cum.push(cum[k - 1] + Math.hypot(poly[k][0] - poly[k - 1][0], poly[k][1] - poly[k - 1][1]));
     // vertical profile
@@ -156,6 +189,7 @@ export async function readAlignments(model) {
       }
     }
     vertical.sort((a, b) => a.s0 - b.s0);
+    if (place) { const dz = place.elements[14]; if (dz) for (const vs of vertical) vs.h0 += dz; }
     // stationing from referents (IfcReferent with Pset_Stationing.Station)
     const referents = [];
     for (const child of nests.get(aid) || []) {

@@ -16,6 +16,14 @@ https://github.com/vispecta-app/vispecta/releases
   a `.tif` and it opens as a terrain, cut to the models and placed in map coordinates.
 - **LandXML export of a terrain** ([#92](https://github.com/vispecta-app/vispecta/issues/92)): *Download LandXML*
   on its card.
+- **Project coordinate system** ([#107](https://github.com/vispecta-app/vispecta/issues/107)): choose the
+  project's map coordinate system at the top of the model browser.
+  - Models, point clouds, GeoTIFF and LandXML in another system are converted into it on the fly. The system
+    is read from the files (IFC `IfcProjectedCRS`, LAS WKT/GeoKeys, E57, GeoTIFF, LandXML) or chosen on the
+    card.
+  - Built in: Denmark (UTM 32N/33N, DKTM1–4, Kp2000) and Germany (Gauss-Krüger, DB_REF). Any other EPSG code
+    can be looked up.
+  - Heights are not converted.
 - **Very large point clouds as COPC** ([#52](https://github.com/vispecta-app/vispecta/issues/52)): a cloud-optimised
   LAZ is read piece by piece, never whole. The parts the view needs are loaded (more detail close up, within the
   point budget), and the rest is dropped again. Sections and longitudinal profiles load the points along them
@@ -39,6 +47,13 @@ https://github.com/vispecta-app/vispecta/releases
 
   On the Chesapeake sample (17,553 elements) the build took 4.6 s with a 2.2 s freeze. It now takes 1.6 s
   with no slice over 60 ms, and 0.15 s the next time.
+- **Content Security Policy** ([#64](https://github.com/vispecta-app/vispecta/issues/64)): the app, the about
+  page and the 404 page tell the browser to load only from the site itself and to contact no other server
+  than the GitHub API (update check) and epsg.io (a looked-up coordinate system). The inline scripts moved
+  into files of their own.
+- **A bounded offline cache** ([#64](https://github.com/vispecta-app/vispecta/issues/64)): the sample models and
+  the Python runtime are cached apart from the app, only once used, and the cache is kept under 250 MB. The
+  files used longest ago are dropped first.
 - **The cut and fill dialog is laid out in two columns:** the settings on the left, the result on the right.
   The result has key figures (cut, fill, net, area) and a table that scrolls on its own, with a fixed header
   and a total row.
@@ -64,6 +79,9 @@ https://github.com/vispecta-app/vispecta/releases
   ([#57](https://github.com/vispecta-app/vispecta/issues/57))
 
 ### Fixed
+- **Alignments with a placement of their own** ([#107](https://github.com/vispecta-app/vispecta/issues/107)): the
+  `ObjectPlacement` of an `IfcAlignment` (and of the site it is placed in) was ignored, so such an alignment
+  was drawn in the wrong place.
 - **Cross sections show the axes of all alignments they cross**, not only the one they follow (e.g. both
   tracks of a double-track line). Each axis, also the own one, is named with its alignment (track) and station, in the section
   window and in PDF, SVG and DXF (layer `ALIGNMENT_AXIS`).

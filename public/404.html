@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Page not found – Vispecta</title>
     <meta name="robots" content="noindex" />
+    <!-- What the page may load and contact (#64): itself, and only the GitHub API (update check) and epsg.io
+         (a coordinate system you look up). Workers (Python, point clouds) are not covered by this tag. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https://api.github.com https://epsg.io; img-src 'self' data: blob:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'" />
     <meta name="theme-color" content="#0C2A30" />
     <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -87,23 +90,6 @@
       </figure>
     </main>
 
-    <script>
-      (function () {
-        var T = {
-          da: { title: 'Station 0+404 ligger ikke på linjeføringen.', open: 'Åbn Vispecta', about: 'Om Vispecta', doc: 'Siden findes ikke – Vispecta' },
-          de: { title: 'Station 0+404 liegt nicht auf der Achse.', open: 'Vispecta öffnen', about: 'Über Vispecta', doc: 'Seite nicht gefunden – Vispecta' }
-        };
-        var lang = '';
-        try { lang = localStorage.getItem('onlineifc.lang') || ''; } catch (e) { /* ignore */ }
-        if (!T[lang]) lang = (navigator.language || 'en').slice(0, 2).toLowerCase();
-        var d = T[lang];
-        if (d) {
-          document.documentElement.lang = lang;
-          document.title = d.doc;
-          var els = document.querySelectorAll('[data-t]');
-          for (var i = 0; i < els.length; i++) { var k = els[i].getAttribute('data-t'); if (d[k]) els[i].textContent = d[k]; }
-        }
-      })();
-    </script>
+    <script src="/404.js"></script>
   </body>
 </html>

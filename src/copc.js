@@ -40,7 +40,7 @@ export async function openCopc(file, { budget = pointBudget(), onProgress } = {}
   // the overview: whole levels from the root, as many as the budget allows (at most a fifth of it)
   const keys = stream.overviewKeys(Math.min(budget / 5, 1e6));
   const data = await stream.fetch(keys, (f) => onProgress?.(0.3 + 0.7 * f));
-  const cloud = new PointCloud(file.name, { format: 'COPC', total: info.count, origin: info.origin, min: info.min, max: info.max, ...stream.assemble(keys, data) });
+  const cloud = new PointCloud(file.name, { format: 'COPC', total: info.count, origin: info.origin, min: info.min, max: info.max, crs: info.crs, ...stream.assemble(keys, data) });
   stream.attach(cloud);
   return cloud;
 }
@@ -102,7 +102,7 @@ export class CopcStream extends EventTarget {
     const BATCH = 16;
     for (let i = 0; i < need.length; i += BATCH) {
       const r = await this.call({ load: need.slice(i, i + BATCH) });
-      for (const n of r.nodes) this.loaded.set(n.key, n);
+      for (const n of r.nodes) { this.#convert(n); this.loaded.set(n.key, n); }
       onProgress?.(Math.min(1, (i + BATCH) / need.length));
     }
     return this.loaded;
@@ -138,6 +138,36 @@ export class CopcStream extends EventTarget {
     cloud.streamBox = new THREE.Box3(new THREE.Vector3(min[0] - origin[0], min[1] - origin[1], min[2] - origin[2]), new THREE.Vector3(max[0] - origin[0], max[1] - origin[1], max[2] - origin[2]));
     cloud.fixedRanges = {};
     cloud.setData({ count: cloud.count, positions: cloud.positions, colors: cloud.rgb, intensity: cloud.intensity, classes: cloud.classes });
+  }
+
+  /**
+   * Converts the cloud into another map coordinate system (#107): conv works on the coordinates the
+   * points are in now; origin is the cloud's new origin. Loaded nodes are converted now, later ones
+   * when they arrive (from the file's own system).
+   */
+  reproject(conv, origin) {
+    const old = this.origin || this.info.origin;
+    const prev = this.toData;
+    this.toData = prev ? (x, y) => { const [u, v] = prev(x, y); return conv(u, v); } : conv;
+    for (const n of this.loaded.values()) {
+      const P = n.positions;
+      for (let i = 0; i < P.length; i += 3) { const [x, y] = conv(old[0] + P[i], old[1] + P[i + 1]); P[i] = x - origin[0]; P[i + 1] = y - origin[1]; }
+    }
+    for (const n of this.nodes.values()) {
+      const [x, y] = conv(old[0] + n.center.x, old[1] + n.center.y);
+      n.center.x = x - origin[0]; n.center.y = y - origin[1];
+    }
+    this.origin = origin;
+    const { min, max } = this.cloud;
+    this.cloud.streamBox.set(new THREE.Vector3(min[0] - origin[0], min[1] - origin[1], min[2] - origin[2]), new THREE.Vector3(max[0] - origin[0], max[1] - origin[1], max[2] - origin[2]));
+  }
+
+  /** A node as it comes from the worker (the file's system, around its origin) -> the cloud's system now. */
+  #convert(n) {
+    if (!this.toData) return;
+    const [sx, sy] = this.info.origin, [ox, oy] = this.origin;
+    const P = n.positions;
+    for (let i = 0; i < P.length; i += 3) { const [x, y] = this.toData(sx + P[i], sy + P[i + 1]); P[i] = x - ox; P[i + 1] = y - oy; }
   }
 
   /** Points in memory (loaded nodes). */

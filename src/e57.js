@@ -49,6 +49,7 @@ export async function readE57(file, makeSink, progress) {
   }
   const out = sink.result('E57');
   out.scans = list.length;
+  out.crs = child(root, 'coordinateMetadata')?.text.trim() || null; // WKT or a code, when the file has it (#107)
   return out;
 }
 

@@ -816,6 +816,29 @@ export class IfcModel {
     if (this.declaredLengthScale !== undefined) this.lengthScale = this.declaredLengthScale * f;
   }
 
+  /**
+   * Moves every vertex by fn(x, y, z) -> [x, y, z] (in the model's own geometry coordinates), from
+   * the positions as loaded; fn null puts them back (#107: a model converted into another map
+   * coordinate system point by point, where one similarity transform is not exact enough).
+   */
+  warpPositions(fn) {
+    for (const b of this.buckets) {
+      if (!fn && !b.positions0) continue;
+      const P = b.geometry.getAttribute('position');
+      b.positions0 ||= P.array.slice();
+      const src = b.positions0, dst = P.array;
+      if (!fn) dst.set(src);
+      else for (let i = 0; i < src.length; i += 3) { const q = fn(src[i], src[i + 1], src[i + 2]); dst[i] = q[0]; dst[i + 1] = q[1]; dst[i + 2] = q[2]; }
+      if (!fn) b.positions0 = null;
+      P.needsUpdate = true;
+      b.geometry.computeBoundingBox();
+      b.geometry.computeBoundingSphere();
+      // picking builds its tree again from the new positions
+      if (b.pickMesh) { b.pickMesh.removeFromParent(); b.pickMesh.geometry.boundsTree = null; b.pickMesh = null; }
+    }
+    this.warped = !!fn;
+  }
+
   /** Metres per length unit as the model is shown (after a unit correction). */
   get shownLengthScale() { return (this.declaredLengthScale ?? 1) * this.unitFix; }
 
