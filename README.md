@@ -206,6 +206,15 @@ These names are available in scripts:
 
 Run with **Ctrl+Enter**. The script is saved in the browser. The *Examples* menu has ready-made scripts: count elements per class, set a property set on the selection, find walls missing FireRating, rename storeys, export all properties to CSV, remove a class, and merge all models. `ifcopenshell.api`, `ifcopenshell.util.*`, numpy and shapely are available. Other Pyodide packages, such as pandas, are loaded automatically when you import them.
 
+## Accessibility
+Vispecta aims at WCAG 2.2 AA (#62).
+
+- **Keyboard:** the toolbar menus open with Enter, Space or ↓. ↑ ↓ Home End move between the items, and Esc closes the menu and goes back to its button. The tabs of the left panel are a tab list, so ← → Home End switch between them.
+- **Screen readers:** menus, tabs, the 3D view (with its keyboard shortcuts in its label) and every symbol-only button and field have names and states.
+- **Contrast and size:** text and buttons meet 4.5:1, and click targets are at least 24 × 24 px.
+- **Phones:** a fade at the edge of the toolbar shows that it scrolls sideways.
+- **Checked automatically:** the smoke test runs axe-core on the loaded app and fails on any serious violation.
+
 ## Shortcuts
 
 | Action | Shortcut |
