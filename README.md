@@ -63,7 +63,7 @@ The toolbar groups the functions: **View**, **Section**, **Visibility**, **Align
 - **Quantity takeoff** (Q, or the button in the *Models* tab): a table with the count and the summed volume, surface area, plan area and length per group, grouped by one or two properties (class, storey, type, name, any property …). Add any numeric property, e.g. from a `Qto_` set, as an extra column. Works on all visible elements or on the selection; click a row to select its elements; export to CSV.
 
 ### Filters (colour and find by properties)
-The **Filters** tab indexes the attributes, storey, type, material, property sets, quantities and calculated quantities of all elements.
+The **Filters** tab indexes the attributes, storey, type, material, property sets, quantities and calculated quantities of all elements. The index is built in small slices so the page stays responsive. Calculated quantities are worked out only when a filter or colour uses them. For a file stored with a project, the index is kept in the browser and is ready at once the next time (#61).
 - **Colour by property:** choose any property and get a legend with a colour per value (numeric values are grouped in ranges). Click a value to select its elements, hide/show values, change colours, and optionally make elements without a value transparent.
 - **Find elements:** rules such as *Class = IfcWall* and *Pset_WallCommon.FireRating has no value* (=, ≠, contains, >, <, has / has no value; all or any rule) to select, isolate, hide or colour the matching elements.
 

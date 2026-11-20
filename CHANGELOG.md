@@ -44,6 +44,13 @@ https://github.com/vispecta-app/vispecta/releases
   longer freezes the page while its geometry is read. On the Chesapeake sample (26 MB), the page was blocked in 13
   long tasks for 2.1 s; it is now 2 tasks and 1.0 s. What is left is the page opening the file itself for properties
   (0.7 s). This costs about 0.3 s more in total.
+- **Filters start without freezing the page** ([#61](https://github.com/vispecta-app/vispecta/issues/61)):
+  - the property index is built in slices of about 12 ms, so the page stays responsive;
+  - the calculated quantities are worked out only when a filter or colour uses them;
+  - an unedited file keeps its index in the browser, stored in columns.
+
+  On the Chesapeake sample (17,553 elements) the build took 4.6 s with a 2.2 s freeze. It now takes 1.6 s
+  with no slice over 60 ms, and 0.15 s the next time.
 - **Accessibility** ([#62](https://github.com/vispecta-app/vispecta/issues/62)):
   - menus and tabs have ARIA roles and states and can be used with the arrow keys, Home, End and Esc;
   - the 3D view, symbol-only buttons and fields without a label have names;
