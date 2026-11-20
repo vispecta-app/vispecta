@@ -154,6 +154,19 @@ Surveys and laser scans can be loaded next to the IFC models (#27) – drop the 
 ### Models far apart
 After loading, Vispecta warns when a model lies more than 1000 m (adjustable under the model list) from the others – by the gap between their boxes, in map coordinates when the models have an `IfcMapConversion` (#28). The message names the model and the distance and the likely cause (another map coordinate system, a map conversion in only one model, map vs. local coordinates, or another base point), and the model card shows ⚠.
 
+### Coordinate systems
+Models, point clouds and terrain do not always come in the same map coordinate system: a model in UTM 32N and a DHM tile in UTM 33N, a survey in Kp2000 Jylland, a German model in DB_REF. Vispecta converts them into one project system on the fly (#107):
+
+- **The project's system** is chosen at the top of the model browser. By default it is the system of the first model (its `IfcProjectedCRS`) or cloud, and it is saved in the project.
+- **Each file's system** is read where the file names it: `IfcProjectedCRS` in IFC, the WKT or GeoTIFF keys in LAS/LAZ/COPC, the coordinate metadata in E57, the GeoTIFF keys of a height model, and `CoordinateSystem` in LandXML. Otherwise, choose it on the card. A model without an `IfcMapConversion` is then taken to be in map coordinates of that system.
+- **Conversion:** point clouds, GeoTIFF and LandXML are converted point by point. An IFC model gets a similarity transform fitted over its extent. Where that would be off by more than half a millimetre (between UTM zones about 1 mm per km, growing with the square of the length), its vertices and alignments are converted point by point too. The card says how. Stationing stays as designed.
+- **Built in:**
+  - Denmark: ETRS89 / UTM 32N and 33N, DKTM1–4, and Kp2000 Jylland, Sjælland and Bornholm (also WGS 84 / UTM).
+  - Germany: DHDN / Gauss-Krüger zones 2–5, and DB_REF zones 2–5. DHDN uses the Germany-wide 7 parameters, about 1–3 m, without BeTA2007. DB_REF uses 7 parameters, about a decimetre. Neither is for setting out.
+  - *Other EPSG code…* looks up any projected system once at epsg.io, or takes a pasted proj4 definition, and keeps it in this browser and the project.
+- **Heights are not converted** (no geoid or height grid yet). System 34 is not supported.
+- Conversion uses [proj4js](https://github.com/proj4js/proj4js) (MIT), locally.
+
 ### Measure
 **Measure** (toolbar or `M`) opens the measuring panel with three tools:
 - **Distance:** point to point. *Lock X/Y* keeps the second point on the vertical line through the first point, so only the height (Z) is measured. Shows the distance, the horizontal distance, the height difference (ΔZ), ΔX/ΔY and the slope. Dashed lines show the horizontal and vertical components.
@@ -258,6 +271,7 @@ Built with [three.js](https://threejs.org), [three-mesh-bvh](https://github.com/
 | `src/pointcloud.js`, `src/pointcloud-worker.js` | point clouds: reading (LAS/LAZ/PLY/XYZ), thinning and display |
 | `src/copc.js`, `src/copc-worker.js` | COPC streaming: the octree nodes the view, sections and profiles need |
 | `src/e57.js` | E57 reader (paged file, bit-packed fields, scan poses) |
+| `src/crs.js`, `src/lascrs.js` | coordinate systems: definitions, detection, conversion and fitting (proj4js) |
 | `src/viewcube.js` | view cube in the corner of the 3D view |
 | `src/secview.js` | section window: live 2D cut of a plane, stepping, zoom, pop-out window |
 | `src/lineedit.js` | editing the points of a drawn line |
@@ -299,7 +313,7 @@ The `dist/` folder can also be put on any other static host (Netlify, Azure Stat
 
 ### Installable app (PWA)
 
-The built site has a web app manifest and a service worker (`public/sw.js`). In Chrome or Edge, use *Install* in the address bar to get Vispecta as an app with its own window. After the first visit it works offline, and the installed app can open `.ifc` files directly (*Open with* in the file explorer). The service worker only caches the app itself; IFC files never leave the computer. It is only registered in the built app (`npm run build`), not in the dev server.
+The built site has a web app manifest and a service worker (`public/sw.js`). In Chrome or Edge, use *Install* in the address bar to get Vispecta as an app with its own window. After the first visit it works offline, and the installed app can open `.ifc` files directly (*Open with* in the file explorer). The service worker caches the app itself. The sample models and the Python runtime are cached separately, only once they have been used, and that cache is kept under 250 MB: the files used longest ago are dropped first (#64). IFC files never leave the computer. It is only registered in the built app (`npm run build`), not in the dev server.
 
 ## Privacy
 
@@ -309,9 +323,13 @@ Vispecta is a static website without a backend, cookies, analytics or tracking.
 - **What the site loads:** everything – the app, fonts, web-ifc, laz-perf and the Python runtime (Pyodide, IfcOpenShell, ifctester) – comes from vispecta.com itself (hosted on GitHub Pages, which, like any web host, sees the visitor's IP address).
 - **Other servers are contacted only when you ask for it:**
   - *Check for updates* in the About dialog asks the GitHub API for the latest release;
+  - *Other EPSG code…* under coordinate systems asks epsg.io for the definition of that code (only the code is sent);
   - a Python script of your own that imports a package which is not hosted (e.g. pandas) fetches it from jsDelivr, and `micropip.install` in your script fetches from PyPI.
 
-  No model data is sent in either case.
+  - *Other EPSG code…* under coordinate systems asks epsg.io for the definition of that code.
+
+  No model data is sent in any of these cases.
+- **Enforced by the browser:** the pages carry a Content Security Policy (#64). The page may load only from vispecta.com itself (scripts, styles, fonts, images, WebAssembly), and the only other servers it may contact are the GitHub API (update check) and epsg.io. There are no inline scripts. The Python and point-cloud workers are not covered by the tag: GitHub Pages cannot send the header that would cover them.
 
 ## Status
 

@@ -3,6 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- What the page may load and contact (#64): itself, and only the GitHub API (update check) and epsg.io
+         (a coordinate system you look up). Workers (Python, point clouds) are not covered by this tag. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https://api.github.com https://epsg.io; img-src 'self' data: blob:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'" />
     <title>About Vispecta – a free IFC viewer for rail and road projects</title>
     <meta name="description" content="Vispecta turns IFC models into cross sections, longitudinal profiles and drawings, right in your browser. IFC 4.3 alignments and stationing, IDS checks, BCF. Free, open source, and your files are never uploaded." />
     <link rel="canonical" href="https://vispecta.com/about/" />

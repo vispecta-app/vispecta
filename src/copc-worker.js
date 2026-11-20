@@ -9,6 +9,7 @@
 // Positions are relative to the cloud's origin (double precision stays here, Float32 goes out).
 import createLazPerf from 'laz-perf/lib/worker/laz-perf.js';
 import lazWasm from 'laz-perf/lib/worker/laz-perf.wasm?url';
+import { lasCrs } from './lascrs.js';
 
 let file = null, h = null, nodes = null, lazP = null, rgbScale = 0;
 const RGB_AT = { 7: 30, 8: 30 };
@@ -84,6 +85,7 @@ async function open(f) {
     count, fmt, origin: h.origin, min: h.min, max: h.max, center: info.center, half: info.half, spacing: info.spacing,
     nodes: [...nodes.values()].map(({ d, x, y, z, count: n }) => [d, x, y, z, n]),
     hasRgb: RGB_AT[fmt] !== undefined,
+    crs: lasCrs(head, headerSize, nVlr), // the coordinate system in the file's records (#107)
   };
 }
 
