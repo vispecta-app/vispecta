@@ -267,7 +267,15 @@ Built with [three.js](https://threejs.org), [three-mesh-bvh](https://github.com/
 
 | File | Purpose |
 | --- | --- |
-| `src/main.js` | user interface |
+| `src/main.js` | user interface: start-up, files, toolbar and menus, selection, tree, properties, projects, measuring, merge, Python, status, undo |
+| `src/app/core.js` | the core every part of the UI imports: DOM helpers, the viewer, the selection state, toasts, loading bar, downloads |
+| `src/app/browser.js` | the model browser: model cards, groups, names |
+| `src/app/sections.js` | section planes, cross sections at a station, the section window |
+| `src/app/lines.js`, `src/app/profile.js` | drawn lines; longitudinal profile, section series, drive along |
+| `src/app/drawing.js` | the drawing dialog, annotated points, drawing presets |
+| `src/app/corridor.js`, `src/app/terrain.js` | offset lines and corridors; terrain, contours, cut and fill |
+| `src/app/clouds.js`, `src/app/crs.js` | point clouds and COPC streaming in the UI; coordinate systems |
+| `src/app/checks.js` | IDS check and comparison of versions |
 | `src/viewer.js` | three.js scene, picking, sections |
 | `src/measure.js` | measuring tools and snapping |
 | `src/filters.js` | colour by property and rule-based filters |

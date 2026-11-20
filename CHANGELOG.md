@@ -40,6 +40,10 @@ https://github.com/vispecta-app/vispecta/releases
   the cloud has no ground class.
 
 ### Changed
+- **`main.js` split into modules** ([#63](https://github.com/vispecta-app/vispecta/issues/63)): from 4,700 to
+  2,100 lines. A core module and ten modules for the larger areas live in `src/app/`, with no change in
+  behaviour. Station labels in 3D now have dark text on the orange (7.4:1 instead of 2.5:1).
+- **Fixed:** closing a project now also resets its coordinate system (#107).
 - **Long models draw only what is in view** ([#60](https://github.com/vispecta-app/vispecta/issues/60)): a model
   longer than 400 m is split in plan into cells (up to 16 along it). Each colour gets a mesh per cell with its own
   bounding box, so what is out of view is skipped. Close up on the 31 km Chesapeake corridor, 72 % fewer triangles
