@@ -40,6 +40,13 @@ https://github.com/vispecta-app/vispecta/releases
   the cloud has no ground class.
 
 ### Changed
+- **Accessibility** ([#62](https://github.com/vispecta-app/vispecta/issues/62)):
+  - menus and tabs have ARIA roles and states and can be used with the arrow keys, Home, End and Esc;
+  - the 3D view, symbol-only buttons and fields without a label have names;
+  - the accent colour is a little darker, so text and buttons reach 4.5:1;
+  - the status bar is opaque, and click targets are at least 24 px;
+  - on phones a fade shows that the toolbar scrolls;
+  - axe-core runs in the smoke test.
 - **Content Security Policy** ([#64](https://github.com/vispecta-app/vispecta/issues/64)): the app, the about
   page and the 404 page tell the browser to load only from the site itself and to contact no other server
   than the GitHub API (update check) and epsg.io (a looked-up coordinate system). The inline scripts moved
