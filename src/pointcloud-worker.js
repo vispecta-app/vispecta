@@ -11,6 +11,7 @@
 import createLazPerf from 'laz-perf/lib/worker/laz-perf.js';
 import lazWasm from 'laz-perf/lib/worker/laz-perf.wasm?url';
 import { readE57 } from './e57.js';
+import { lasCrs } from './lascrs.js';
 
 self.onmessage = async ({ data }) => {
   try {
@@ -218,6 +219,12 @@ async function readLas(file, budget) {
     out.colors = c;
   }
   out.version = `${h.major}.${h.minor}`;
+  // the coordinate system in the file's records (#107)
+  try {
+    const hv = new DataView(head);
+    const hs = hv.getUint16(94, true), nv = hv.getUint32(100, true);
+    out.crs = lasCrs(new Uint8Array(await file.slice(0, Math.min(h.offset, 1 << 20)).arrayBuffer()), hs, nv);
+  } catch { out.crs = null; }
   out.pointFormat = h.fmt;
   return out;
 }

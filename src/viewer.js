@@ -3,6 +3,14 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { sectionFill } from './model.js';
 import { CutOutline } from './cutlines.js';
+import { converter, fitSimilarity } from './crs.js';
+
+/** Is a matrix the identity (to a micrometre in metres)? */
+const nearIdentity = (m) => m.elements.every((v, i) => Math.abs(v - (i % 5 === 0 ? 1 : 0)) < 1e-6);
+
+// IFC (Z up) <-> three.js (Y up)
+const Y_UP = new THREE.Matrix4().set(1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1);
+const Z_UP = Y_UP.clone().invert();
 
 const AXES = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
 
@@ -12,6 +20,7 @@ export class Viewer extends EventTarget {
     this.container = container;
     this.models = [];
     this.clouds = []; // point clouds (#27)
+    this.projectCrs = null; // the project's map coordinate system, e.g. 'EPSG:25832' (#107)
 
     // No preserveDrawingBuffer (it costs on many GPUs, most on phones): everything that reads the
     // canvas – screenshot, issue snapshots, view thumbnails – renders a frame right before reading.
@@ -201,6 +210,7 @@ export class Viewer extends EventTarget {
    * cloud defines the coordinate system.
    */
   addCloud(cloud) {
+    this.#cloudToProject(cloud);
     if (!this.referenceMatrix) {
       const [x, y, z] = cloud.origin;
       this.referenceMatrix = new THREE.Matrix4().makeTranslation(-x, -z, y); // IFC (x, y, z) -> viewer (x, z, -y), at the origin
@@ -227,8 +237,24 @@ export class Viewer extends EventTarget {
 
   /** Map coordinates (E, N, H in metres) -> IFC coordinates, as a matrix; null without a map conversion. */
   mapToIfcMatrix() {
+    // with a project coordinate system (#107): its map coordinates -> the reference model's IFC
+    // coordinates. A reference model in another system is converted with a fitted similarity.
+    const r = this.referenceModel;
+    if (this.projectCrs && r && r.crs && r.crs !== this.projectCrs) {
+      const fit = this.#fitModel(r);
+      if (fit) return fit.S.clone().multiply(this.ifcToMapOf(r)).invert();
+    }
     const mm = this.#mapModel();
-    if (!mm) return null;
+    if (!mm) return this.projectCrs && (this.models.length || this.clouds.length) ? new THREE.Matrix4() : null;
+    return this.#mapToIfcOf(mm);
+  }
+
+  /** A model's IFC coordinates (m) -> its map coordinates (m): its IfcMapConversion, or as they are. */
+  ifcToMapOf(m) {
+    return m.georef?.map ? this.#mapToIfcOf(m).invert() : new THREE.Matrix4();
+  }
+
+  #mapToIfcOf(mm) {
     const m = mm.georef.map, ls = mm.lengthScale || 1;
     const k = ls / (m.scale * m.mapScale), t = ls / m.scale;
     return new THREE.Matrix4().set(
@@ -244,7 +270,22 @@ export class Viewer extends EventTarget {
   }
 
   /** Places a cloud (see addCloud). Returns the distance (m) between the cloud and the models, or null. */
+  /**
+   * A cloud with a known coordinate system (#107): its points converted into the project's system
+   * (point by point), or back into its own when the project has none.
+   */
+  #cloudToProject(cloud) {
+    if (!cloud.crs) return;
+    const want = this.projectCrs || cloud.crs, have = cloud.dataCrs || cloud.crs;
+    if (have === want) return;
+    const conv = converter(have, want);
+    if (!conv) return;
+    cloud.reproject(conv);
+    cloud.dataCrs = want;
+  }
+
   placeCloud(cloud) {
+    this.#cloudToProject(cloud);
     const toViewer = new THREE.Matrix4().copy(this.referenceMatrix || new THREE.Matrix4())
       .multiply(new THREE.Matrix4().set(1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1)); // IFC (Z up) -> viewer (Y up)
     const [ox, oy, oz] = cloud.origin;
@@ -252,6 +293,8 @@ export class Viewer extends EventTarget {
     const candidates = [['raw', raw]];
     const toIfc = this.mapToIfcMatrix(); // map (e, n, h) -> IFC project coordinates (m): inverse IfcMapConversion
     if (toIfc) candidates.push(['map', toIfc.multiply(raw)]);
+    // a cloud in a known system with a project system (#107): map coordinates, not a guess
+    if (this.projectCrs && cloud.crs && toIfc) candidates.shift();
     // the models' extent, in IFC coordinates
     const box = this.sceneBox({ visibleOnly: false, clouds: false });
     const center = box.isEmpty() ? null : this.toIfc(box.getCenter(new THREE.Vector3()));
@@ -274,10 +317,104 @@ export class Viewer extends EventTarget {
     return Math.max(0, Math.hypot(cc.x - center.x, cc.y - center.y) - size);
   }
 
+  // ------------------------------------------------- coordinate systems (#107)
+  /** Model geometry coordinates -> its IFC coordinates (m, Z up). */
+  #localToIfc(m) {
+    const f = m.unitFix || 1;
+    return Z_UP.clone().multiply(m.coordMatrix.clone().invert()).multiply(new THREE.Matrix4().makeScale(f, f, f));
+  }
+
+  /** The model's extent in its map coordinates: [x0, y0, x1, y1], or null. */
+  #mapExtent(m) {
+    const L = this.#localToIfc(m), M = this.ifcToMapOf(m);
+    const box = new THREE.Box3();
+    for (const b of m.buckets) { if (!b.geometry.boundingBox) b.geometry.computeBoundingBox(); box.union(b.geometry.boundingBox); }
+    const out = [Infinity, Infinity, -Infinity, -Infinity], v = new THREE.Vector3();
+    const add = () => { out[0] = Math.min(out[0], v.x); out[1] = Math.min(out[1], v.y); out[2] = Math.max(out[2], v.x); out[3] = Math.max(out[3], v.y); };
+    if (!box.isEmpty()) for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) { v.set(x, y, z).applyMatrix4(L).applyMatrix4(M); add(); }
+    // alignments (IFC coordinates): a model may hold nothing else
+    for (const al of m.alignments || []) for (const [x, y] of al.poly0 || al.poly) { v.set(x, y, 0).applyMatrix4(M); add(); }
+    return out[0] <= out[2] ? out : null;
+  }
+
+  /** The similarity from the model's map system into the project's, fitted over its extent (and the converter). */
+  #fitModel(m) {
+    const conv = converter(m.crs, this.projectCrs);
+    const ext = conv && this.#mapExtent(m);
+    if (!ext) return null;
+    const fit = fitSimilarity(conv, ext);
+    const S = new THREE.Matrix4().set(fit.a, -fit.b, 0, fit.tx, fit.b, fit.a, 0, fit.ty, 0, 0, 1, 0, 0, 0, 0, 1);
+    return { conv, S, residual: fit.residual, scale: Math.hypot(fit.a, fit.b), rotation: Math.atan2(fit.b, fit.a) };
+  }
+
+  /**
+   * Places every model, cloud and alignment for the project coordinate system (#107). A model in
+   * another system gets a similarity transform (model.crsT); where that is off by more than half a
+   * millimetre somewhere in the model, its vertices are converted one by one as well. Returns
+   * [{model, from, residual, warped}] for the models that are converted.
+   */
+  applyCrs() {
+    const out = [];
+    for (const m of this.models) { m.crsT = null; m.crsInfo = null; }
+    const P = this.projectCrs ? this.mapToIfcMatrix() : null;
+    for (const m of this.models) {
+      let exact = null;
+      if (P && m.crs && this.projectCrs && m.crs === this.projectCrs) {
+        // the same system, but maybe another map conversion than the frame: placed by its georeference
+        const T = P.clone().multiply(this.ifcToMapOf(m));
+        if (m !== this.referenceModel && !nearIdentity(T)) m.crsT = T;
+      } else if (P && m.crs && this.projectCrs) {
+        const fit = this.#fitModel(m);
+        if (fit) {
+          const Mb = this.ifcToMapOf(m);
+          const T = P.clone().multiply(fit.S).multiply(Mb);
+          // the reference model defines the IFC frame: its similarity is the identity by construction
+          if (m !== this.referenceModel) m.crsT = T;
+          const v = new THREE.Vector3();
+          exact = (x, y, z) => {
+            v.set(x, y, z).applyMatrix4(Mb);
+            const [u, w] = fit.conv(v.x, v.y);
+            return v.set(u, w, v.z).applyMatrix4(P);
+          };
+          m.crsInfo = { from: m.crs, to: this.projectCrs, residual: fit.residual, scale: fit.scale, rotation: fit.rotation, warped: fit.residual > 5e-4 };
+          out.push({ model: m, ...m.crsInfo });
+        }
+      }
+      // vertices: converted one by one where the similarity is not exact enough
+      if (exact && m.crsInfo.warped) {
+        const L = this.#localToIfc(m), T = m.crsT || new THREE.Matrix4();
+        const back = L.clone().invert().multiply(T.clone().invert());
+        const q = new THREE.Vector3();
+        m.warpPositions((x, y, z) => { q.set(x, y, z).applyMatrix4(L); const e = exact(q.x, q.y, q.z); e.applyMatrix4(back); return [e.x, e.y, e.z]; });
+      } else if (m.warped) m.warpPositions(null);
+      // alignments: their points in project IFC coordinates (the stationing stays as designed)
+      for (const al of m.alignments || []) {
+        al.poly0 ||= al.poly.map((p) => p.slice());
+        const T = m.crsT, v = new THREE.Vector3();
+        al.poly = exact ? al.poly0.map(([x, y]) => { const e = exact(x, y, 0); return [e.x, e.y]; })
+          : T ? al.poly0.map(([x, y]) => { v.set(x, y, 0).applyMatrix4(T); return [v.x, v.y]; })
+            : al.poly0.map((p) => p.slice());
+        // heights: the vertical profile moves with the model (a map conversion's height)
+        const dz = exact ? exact(0, 0, 0).z : T ? T.elements[14] : 0;
+        for (const vs of al.vertical || []) { vs.h00 ??= vs.h0; vs.h0 = vs.h00 + dz; }
+      }
+      this.#place(m);
+    }
+    for (const c of this.clouds) this.placeCloud(c);
+    this.modelRoot.updateMatrixWorld(true);
+    this.#updateSceneRadius();
+    this.invalidate(500);
+    this.dispatchEvent(new Event('crschanged'));
+    return out;
+  }
+
   /** Group matrix of a model: from its own coordinates into those of the reference model. */
   #place(model) {
     const f = model.unitFix || 1;
-    const mat = model.group.matrix.copy(this.referenceMatrix).multiply(model.coordMatrix.clone().invert());
+    const mat = model.group.matrix.copy(this.referenceMatrix);
+    // a model in another map coordinate system (#107): IFC -> its map -> project map -> project IFC
+    if (model.crsT) mat.multiply(Y_UP).multiply(model.crsT).multiply(Z_UP);
+    mat.multiply(model.coordMatrix.clone().invert());
     if (f !== 1) mat.multiply(new THREE.Matrix4().makeScale(f, f, f));
     model.group.matrixWorldNeedsUpdate = true;
   }

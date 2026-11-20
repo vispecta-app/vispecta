@@ -513,7 +513,9 @@ export class SectionViewer {
     const w = window.open('', 'vispecta-section', 'width=960,height=640');
     if (!w) { this.ctx.toast?.(this.ctx.t('sv.blocked')); return; }
     let css = '';
-    for (const sh of document.styleSheets) { try { for (const rule of sh.cssRules) css += `${rule.cssText}\n`; } catch { /* other origin (fonts) */ } }
+    // relative url()s (the fonts) are relative to the style sheet, not to the new window: made absolute
+    const abs = (text, base) => text.replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g, (m, q, u) => (/^(data|blob|https?):/.test(u) ? m : `url("${new URL(u, base).href}")`));
+    for (const sh of document.styleSheets) { try { for (const rule of sh.cssRules) css += `${abs(rule.cssText, sh.href || document.baseURI)}\n`; } catch { /* other origin */ } }
     w.document.open();
     w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Vispecta</title><style>${css}</style></head><body class="sv-popup"></body></html>`);
     w.document.close();
