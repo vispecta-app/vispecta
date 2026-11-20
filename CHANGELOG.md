@@ -3,6 +3,8 @@
 Changes per release, with the GitHub issue each one belongs to. Releases and their full notes:
 https://github.com/vispecta-app/vispecta/releases
 
+This file is updated when a release is made, from the pull requests merged since the last one (not in each pull request).
+
 ## Unreleased
 
 ### Added
