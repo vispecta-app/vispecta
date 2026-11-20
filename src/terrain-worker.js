@@ -19,6 +19,19 @@
 // (TERRAIN) with an IfcTriangulatedFaceSet, which Vispecta then opens like any model.
 import Delaunator from 'delaunator';
 import { fromArrayBuffer } from 'geotiff';
+import { addDefs, converter, normalizeCrs } from './crs.js';
+
+/**
+ * The conversion into the project's coordinate system (#107): crs = {to, defs, from?} from the app,
+ * detected = what the file says. Returns {conv: (e, n) -> [e, n] or null, back, from}.
+ */
+function crsConv(crs, detected) {
+  if (!crs?.to) return { conv: null, back: null, from: normalizeCrs(detected) };
+  addDefs(crs.defs);
+  const from = crs.from || normalizeCrs(detected);
+  if (!from || from === crs.to) return { conv: null, back: null, from };
+  return { conv: converter(from, crs.to), back: converter(crs.to, from), from };
+}
 
 self.onmessage = async ({ data }) => {
   try {
@@ -125,9 +138,19 @@ function morphologicalFilter(cells, Z, g) {
 }
 
 /** A raster height model (GeoTIFF, e.g. DHM/Terræn) as a regular TIN in IFC coordinates. */
-async function fromGeoTiff({ geotiff, toIfc, clip, maxCells = 1500000, name, georef }) {
+async function fromGeoTiff({ geotiff, toIfc, clip, maxCells = 1500000, name, georef, crs }) {
   const tiff = await fromArrayBuffer(geotiff);
   const img = await tiff.getImage();
+  let keys = null;
+  try { keys = img.getGeoKeys(); } catch { keys = null; }
+  const code = keys?.ProjectedCSTypeGeoKey && keys.ProjectedCSTypeGeoKey !== 32767 ? `EPSG:${keys.ProjectedCSTypeGeoKey}` : null;
+  const { conv, back, from } = crsConv(crs, code);
+  // the clip is in the project's system: into the raster's
+  if (clip && back) {
+    const c = [];
+    for (const x of [clip[0], clip[2]]) for (const y of [clip[1], clip[3]]) c.push(back(x, y));
+    clip = [Math.min(...c.map((p) => p[0])), Math.min(...c.map((p) => p[1])), Math.max(...c.map((p) => p[0])), Math.max(...c.map((p) => p[1]))];
+  }
   const W = img.getWidth(), H = img.getHeight();
   const [oe, on] = img.getOrigin();
   const [re, rn] = img.getResolution(); // rn is negative for north-up rasters
@@ -152,7 +175,8 @@ async function fromGeoTiff({ geotiff, toIfc, clip, maxCells = 1500000, name, geo
   for (let j = 0; j < outH; j++) for (let i = 0; i < outW; i++) {
     const k = j * outW + i, h = band[k];
     if (!Number.isFinite(h) || (nodata !== null && Math.abs(h - nodata) < 1e-6) || h < -1e4 || h > 1e5) continue;
-    const E = oe + px0 * re + (i + 0.5) * sx, N = on + py0 * rn + (j + 0.5) * sy;
+    let E = oe + px0 * re + (i + 0.5) * sx, N = on + py0 * rn + (j + 0.5) * sy;
+    if (conv) [E, N] = conv(E, N);
     ok[k] = 1;
     if (m) { X[k] = m[0] * E + m[4] * N + m[8] * h + m[12]; Y[k] = m[1] * E + m[5] * N + m[9] * h + m[13]; Zs[k] = m[2] * E + m[6] * N + m[10] * h + m[14]; }
     else { X[k] = E; Y[k] = N; Zs[k] = h; }
@@ -172,7 +196,7 @@ async function fromGeoTiff({ geotiff, toIfc, clip, maxCells = 1500000, name, geo
   }
   progress(0.7);
   const res = write({ xy, zs: Zs, tris: Uint32Array.from(tris), ox, oy, name, georef, source: 'geotiff', grid: Math.abs(sx), total: W * H });
-  return { ...res, raster: [W, H], cell: Math.abs(sx) };
+  return { ...res, raster: [W, H], cell: Math.abs(sx), crs: from, converted: !!conv };
 }
 
 /** Keeps the triangles whose edges are all at most maxEdge long (in plan). */
@@ -190,7 +214,9 @@ function dropLong(t, xy, maxEdge) {
 }
 
 /** A LandXML TIN surface (Pnts + Faces); points without faces are triangulated. */
-function fromLandXml({ landxml, toIfc, maxEdge, name, georef }) {
+function fromLandXml({ landxml, toIfc, maxEdge, name, georef, crs }) {
+  const cs = /<CoordinateSystem\b[^>]*>/i.exec(landxml)?.[0] || '';
+  const { conv, from } = crsConv(crs, /epsgCode="(\d+)"/i.exec(cs)?.[1] ? `EPSG:${/epsgCode="(\d+)"/i.exec(cs)[1]}` : cs);
   const surf = /<Surface\b[^>]*>([\s\S]*?)<\/Surface>/i.exec(landxml);
   if (!surf) throw new Error('no <Surface> in the LandXML file');
   const surfName = (/<Surface\b[^>]*\bname="([^"]*)"/i.exec(surf[0]) || [])[1] || '';
@@ -207,7 +233,8 @@ function fromLandXml({ landxml, toIfc, maxEdge, name, georef }) {
   if (pts.length < 3) throw new Error('too few points in the LandXML surface');
   const m = toIfc;
   const map = (p) => {
-    const [N, E, H] = p;
+    let [N, E, H] = p;
+    if (conv) [E, N] = conv(E, N);
     if (!m) return [E, N, H];
     return [m[0] * E + m[4] * N + m[8] * H + m[12], m[1] * E + m[5] * N + m[9] * H + m[13], m[2] * E + m[6] * N + m[10] * H + m[14]];
   };
@@ -227,7 +254,7 @@ function fromLandXml({ landxml, toIfc, maxEdge, name, georef }) {
     faces.push(a, b, c);
   }
   const tris = faces.length ? Uint32Array.from(faces) : dropLong(new Delaunator(xy).triangles, xy, maxEdge);
-  return write({ xy, zs, tris, ox, oy, name: name || surfName || 'Terrain', georef, source: faces.length ? 'landxml' : 'landxml-points', total: pts.length });
+  return { ...write({ xy, zs, tris, ox, oy, name: name || surfName || 'Terrain', georef, source: faces.length ? 'landxml' : 'landxml-points', total: pts.length }), crs: from, converted: !!conv };
 }
 
 // ------------------------------------------------------------------ IFC writer
