@@ -56,42 +56,64 @@ export class PointCloud {
     this.alias = null;
     this.format = d.format;
     this.total = d.total;            // points in the file
-    this.count = d.count;            // points kept
     this.origin = d.origin;          // [x, y, z] in the cloud's own coordinates
     this.min = d.min; this.max = d.max;
-    this.positions = d.positions;    // Float32Array, x y z relative to origin (Z up)
-    this.rgb = d.colors;             // Uint8Array or null
-    this.intensity = d.intensity;    // Uint16Array or null
-    this.classes = d.classes;        // Uint8Array or null
-    this.classCounts = new Map();
-    if (this.classes) for (const c of this.classes) this.classCounts.set(c, (this.classCounts.get(c) || 0) + 1);
+    this.scans = d.scans || 0;       // E57: scan positions in the file
     this.hiddenClasses = new Set();
     this.visible = true;
-    this.mode = this.rgb ? 'rgb' : this.classCounts.size > 1 ? 'class' : 'elevation';
     this.pointSize = 2;
     this.share = 1;                  // share of the kept points drawn (1, 0.5, 0.25, 0.1)
     this.movingMax = movingBudget(); // points drawn while the camera moves
     this.placement = 'raw';          // 'raw' or 'map' – set by the viewer
-
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
-    this.colorAttr = new THREE.BufferAttribute(new Uint8Array(this.count * 3), 3, true);
-    g.setAttribute('color', this.colorAttr);
-    g.computeBoundingBox();
-    g.computeBoundingSphere();
-    this.geometry = g;
+    this.stream = null;              // COPC: the octree streamer (copc.js)
+    this.fixedRanges = null;         // COPC: colour ranges kept while points come and go
     this.material = new THREE.PointsMaterial({ size: 2, sizeAttenuation: false, vertexColors: true });
+    this.edlMark = { value: 0 };     // eye-dome lighting (#52): points mark themselves in the alpha channel
     // round points
     this.material.onBeforeCompile = (shader) => {
-      shader.fragmentShader = shader.fragmentShader.replace('#include <clipping_planes_fragment>',
-        '#include <clipping_planes_fragment>\n{ vec2 pc = gl_PointCoord - 0.5; if (dot(pc, pc) > 0.25) discard; }');
+      shader.uniforms.edlMark = this.edlMark;
+      shader.fragmentShader = 'uniform float edlMark;\n' + shader.fragmentShader.replace('#include <clipping_planes_fragment>',
+        '#include <clipping_planes_fragment>\n{ vec2 pc = gl_PointCoord - 0.5; if (dot(pc, pc) > 0.25) discard; }')
+        .replace(/}\s*$/, '  if (edlMark > 0.5) gl_FragColor.a = 0.5;\n}');
     };
-    this.points = new THREE.Points(g, this.material);
+    this.points = new THREE.Points(new THREE.BufferGeometry(), this.material);
     this.points.matrixAutoUpdate = false;
     this.points.frustumCulled = false; // one large object; cheap to skip the test
     this.points.userData.cloud = this;
     this.points.raycast = () => {}; // picking points is done by pick() below
+    this.setData(d);
+    this.mode = this.rgb ? 'rgb' : this.classCounts.size > 1 ? 'class' : 'elevation';
     this.applyColors();
+  }
+
+  /**
+   * Puts new points in the cloud (all of them: a COPC cloud swaps its points as the camera moves).
+   * d: { count, positions, colors, intensity, classes }.
+   */
+  setData(d) {
+    this.count = d.count;            // points kept
+    this.positions = d.positions;    // Float32Array, x y z relative to origin (Z up)
+    this.rgb = d.colors;             // Uint8Array or null
+    this.intensity = d.intensity;    // Uint16Array or null
+    this.classes = d.classes;        // Uint8Array or null
+    const counts = new Map();
+    if (this.classes) for (const c of this.classes) counts.set(c, (counts.get(c) || 0) + 1);
+    // a COPC cloud keeps the classes it has seen (they are listed on its card)
+    if (this.stream && this.classCounts) for (const k of this.classCounts.keys()) if (!counts.has(k)) counts.set(k, 0);
+    this.classCounts = counts;
+    const old = this.geometry;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
+    this.colorAttr = new THREE.BufferAttribute(new Uint8Array(this.count * 3), 3, true);
+    g.setAttribute('color', this.colorAttr);
+    if (this.stream && this.streamBox) g.boundingBox = this.streamBox.clone(); // the whole cloud, not what is loaded
+    else g.computeBoundingBox();
+    g.boundingSphere = g.boundingBox.getBoundingSphere(new THREE.Sphere());
+    this.geometry = g;
+    this.points.geometry = g;
+    old?.dispose();
+    this._screen = null;
+    if (this.mode) { this.applyColors(); this.#applyFilter(); }
   }
 
   get label() { return this.alias || this.name; }
@@ -144,7 +166,7 @@ export class PointCloud {
       for (const k of this.classCounts.keys()) lut.set(k, new THREE.Color(classColor(k)));
       for (let i = 0; i < n; i++) { const col = lut.get(this.classes[i]); c[i * 3] = col.r * 255; c[i * 3 + 1] = col.g * 255; c[i * 3 + 2] = col.b * 255; }
     } else if (mode === 'intensity') {
-      const [lo, hi] = percentiles(this.intensity, 0.02, 0.98);
+      const [lo, hi] = this.#range('i', () => percentiles(this.intensity, 0.02, 0.98));
       const k = 255 / Math.max(1, hi - lo);
       for (let i = 0; i < n; i++) { const v = Math.max(0, Math.min(255, (this.intensity[i] - lo) * k)); c[i * 3] = c[i * 3 + 1] = c[i * 3 + 2] = v; }
     } else if (mode === 'single') {
@@ -153,11 +175,17 @@ export class PointCloud {
       // elevation: a perceptual ramp between the 2 % and 98 % heights
       const z = new Float32Array(n);
       for (let i = 0; i < n; i++) z[i] = this.positions[i * 3 + 2];
-      const [lo, hi] = percentiles(z, 0.02, 0.98);
+      const [lo, hi] = this.#range('z', () => percentiles(z, 0.02, 0.98));
       const span = Math.max(1e-6, hi - lo);
       for (let i = 0; i < n; i++) { const [r, g, b] = ramp((z[i] - lo) / span); c[i * 3] = r; c[i * 3 + 1] = g; c[i * 3 + 2] = b; }
     }
     this.colorAttr.needsUpdate = true;
+  }
+
+  /** A colour range; a COPC cloud keeps the first one, so colours stay put while points stream in. */
+  #range(k, f) {
+    if (!this.fixedRanges) return f();
+    return (this.fixedRanges[k] ||= f());
   }
 
   /** Colour of point i as '#rrggbb' (as currently shown). */
@@ -273,6 +301,7 @@ export class PointCloud {
   }
 
   dispose() {
+    this.stream?.dispose();
     this.points.removeFromParent();
     this.geometry.dispose();
     this.material.dispose();

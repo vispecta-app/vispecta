@@ -113,7 +113,9 @@ Cross sections get letters (A–A, B–B …). In 3D and on plan drawings each o
 ### Point clouds
 Surveys and laser scans can be loaded next to the IFC models (#27) – drop the file like an IFC file:
 
-- **Formats:** LAS and LAZ (LAZ is decompressed with [laz-perf](https://github.com/hobuinc/laz-perf), served by the site), XYZ / CSV / TXT / PTS, and PLY (ASCII and binary).
+- **Formats:** LAS and LAZ (LAZ is decompressed with [laz-perf](https://github.com/hobuinc/laz-perf), served by the site), COPC, E57, XYZ / CSV / TXT / PTS, and PLY (ASCII and binary).
+- **Very large clouds as COPC** (cloud-optimised LAZ, #52): the file is never read whole. Vispecta reads its octree and loads the parts the view needs, more detail close up and less far away, always within the point budget. Parts that are no longer needed are dropped again, so clouds of billions of points can be viewed. Sections and the section window load the points along the plane at full density, and so does a longitudinal profile along its path. *Terrain (TIN)…* takes an even sample of the whole cloud. The card shows how much is loaded. COPC files are made from LAS/LAZ with [PDAL](https://pdal.io) (`pdal translate in.laz out.copc.laz --writers.copc`) or [untwine](https://github.com/hobuinc/untwine) (`untwine -i in.laz -o out.copc.laz`).
+- **E57** from terrestrial scanners (#52): all scan positions are read and put together with their poses (rotation and translation). Cartesian or spherical coordinates, intensity and colour are supported, and points marked invalid are skipped. Images in the file are ignored.
 - **Thinned while reading** in a worker: an even voxel grid down to a point budget (about 5 million points on a computer, 1.5–3 million on phones and small devices), so the view stays fluid. The card shows how many points of the file are kept.
 - **Placement:** the points are taken as IFC coordinates, or as map coordinates through the models' `IfcMapConversion` (e.g. UTM or DKS) – whichever lands nearer the models. Without models, the first cloud defines the coordinate system. A warning appears when a cloud lies more than 1 km from the models.
 - **Display:** colour by RGB, classification (ASPRS colours), intensity, elevation or one colour; show/hide by classification (e.g. only ground and rail); point size.
@@ -121,8 +123,8 @@ Surveys and laser scans can be loaded next to the IFC models (#27) – drop the 
 - **In sections and drawings:** section planes clip the cloud, and the points within ±0.1 m of the plane (adjustable on the card) are shown as dots in the section window and in PDF/SVG/DXF drawings (DXF layer `POINTCLOUD`) – so the existing terrain or track can be compared with the design at every station.
 - **In longitudinal profiles:** the points within the same distance of the path, unrolled by station.
 - **Measuring** snaps to points.
-
-Point clouds are not saved in projects or workspaces yet; open the file again.
+- **Depth shading (EDL)** on the card: eye-dome lighting darkens points by depth compared with their neighbours, so edges and shapes show in dense clouds that have no colours (#52). The setting is remembered in this browser.
+- **In projects** (#52): a cloud up to 300 MB is stored in the browser with the project, like the IFC files. A larger one is kept as a reference: a file dropped in Chrome or Edge is opened again from where it is (the browser asks for permission), otherwise the project asks you to open the file again. The settings are saved too (name, colours, size, classes, section slab). A **workspace** file holds the clouds' names and settings, and they are applied when the files are opened.
 
 ### Terrain (TIN)
 *Terrain (TIN)…* on a point cloud's card builds a terrain surface (#45):
@@ -253,6 +255,9 @@ Built with [three.js](https://threejs.org), [three-mesh-bvh](https://github.com/
 | `src/drawing.js` | 2D drawings from section planes (PDF, SVG, DXF) |
 | `src/alignment.js` | IFC4x3 alignments and stationing |
 | `src/terrain-worker.js` | terrain (TIN) from point clouds and LandXML, written as IFC |
+| `src/pointcloud.js`, `src/pointcloud-worker.js` | point clouds: reading (LAS/LAZ/PLY/XYZ), thinning and display |
+| `src/copc.js`, `src/copc-worker.js` | COPC streaming: the octree nodes the view, sections and profiles need |
+| `src/e57.js` | E57 reader (paged file, bit-packed fields, scan poses) |
 | `src/viewcube.js` | view cube in the corner of the 3D view |
 | `src/secview.js` | section window: live 2D cut of a plane, stepping, zoom, pop-out window |
 | `src/lineedit.js` | editing the points of a drawn line |

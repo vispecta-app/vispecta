@@ -1,7 +1,8 @@
 // Saved views (camera, visibility, colours, sections, selection) and the workspace file.
 // A view is a BCF-style viewpoint (elements are referenced by GlobalId, so views keep working
 // with a newer version of the model) plus some extra viewer state (model colour/opacity, X-ray).
-// The workspace file (.vispecta.json; older ones are .onlineifc.json) holds the saved views and the issues, but not the IFC files.
+// The workspace file (.vispecta.json; older ones are .onlineifc.json) holds the saved views and the issues, but not the IFC files
+// or point clouds (only their names, and the settings of the clouds, #52).
 import { t, fmtNum } from './i18n.js';
 import { uuid, guidOf, guidIndex, captureViewpoint, applyViewpoint } from './bcf.js';
 
@@ -92,7 +93,7 @@ export class ViewsPanel {
   }
 
   add(name) {
-    if (!this.ctx.viewer.models.length) return this.ctx.toast(t('msg.loadFirst'));
+    if (!this.ctx.viewer.models.length && !this.ctx.viewer.clouds?.length) return this.ctx.toast(t('msg.loadFirst'));
     this.views.push(this.capture(name || t('views.defaultName', { n: this.views.length + 1 })));
     this.#persist();
     this.render();
@@ -109,6 +110,8 @@ export class ViewsPanel {
     return JSON.stringify({
       app: 'Vispecta', format: 'workspace', version: 1, saved: new Date().toISOString(),
       models: viewer.models.map((m) => ({ name: m.name, schema: m.schema, fileSize: m.fileSize })),
+      clouds: this.ctx.cloudSettings?.() || [], // point clouds: names and settings (#52)
+      cloudSlab: viewer.cloudSlab,
       current: this.capture('current'),
       views: this.views,
       issues: topics,
@@ -143,8 +146,9 @@ export class ViewsPanel {
       }
       issues.render();
     }
-    const loaded = new Set(viewer.models.map((m) => m.name));
-    const missing = (ws.models || []).map((m) => m.name).filter((n) => !loaded.has(n));
+    if (ws.clouds?.length || ws.cloudSlab) this.ctx.restoreClouds?.(ws.clouds || [], { slab: ws.cloudSlab });
+    const loaded = new Set([...viewer.models, ...(viewer.clouds || [])].map((m) => m.name));
+    const missing = [...(ws.models || []), ...(ws.clouds || [])].map((m) => m.name).filter((n) => !loaded.has(n));
     this.pendingCurrent = missing.length ? ws.current || null : null; // shown as a button once the models are open
     if (missing.length) toast(t('views.openModels', { names: missing.join(', ') }));
     else if (ws.current) this.apply(ws.current);
@@ -175,7 +179,7 @@ export class ViewsPanel {
       h('h3', { text: t('views.wsTitle') }),
       h('div', { class: 'muted small', text: t('views.wsDesc') }),
       h('div', { class: 'flt-btns' },
-        h('button', { class: 'btn sm', text: t('views.wsSave'), onclick: () => { if (!this.ctx.viewer.models.length) return this.ctx.toast(t('msg.loadFirst')); this.saveWorkspace(); } }),
+        h('button', { class: 'btn sm', text: t('views.wsSave'), onclick: () => { if (!this.ctx.viewer.models.length && !this.ctx.viewer.clouds?.length) return this.ctx.toast(t('msg.loadFirst')); this.saveWorkspace(); } }),
         h('button', { class: 'btn sm', text: t('views.wsOpen'), onclick: () => fileInput.click() }),
         restore, fileInput)));
     root.replaceChildren(...parts);

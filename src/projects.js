@@ -6,6 +6,8 @@ import * as store from './store.js';
 
 const ENABLED_KEY = 'onlineifc.projects.enabled';
 const AUTOSAVE_MS = 4000;
+// point clouds up to this size are stored in the browser with the project; larger ones by reference (#52)
+const CLOUD_STORE_MAX = 300e6;
 
 const fmtBytes = (n) => (!n ? "0 MB" : n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : n >= 1e6 ? `${(n / 1e6).toFixed(0)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`);
 
@@ -28,6 +30,7 @@ export class ProjectManager extends EventTarget {
     this.ctx = ctx;
     this.current = null; // project record (without state) of what is open now
     this.keys = new Map(); // IfcModel -> file key (fingerprint)
+    this.clouds = new Map(); // PointCloud -> { name, size, key?, handle? } (#52)
     this.saved = new Map(); // IfcModel -> model.version that is stored
     this.fpCache = new WeakMap(); // File/Blob -> fingerprint
     this.timer = null;
@@ -45,7 +48,7 @@ export class ProjectManager extends EventTarget {
   setEnabled(on) {
     this.enabled = on && store.available();
     try { localStorage.setItem(ENABLED_KEY, on ? '1' : '0'); } catch { /* ignore */ }
-    if (this.enabled && this.ctx.viewer.models.length) this.saveNow();
+    if (this.enabled && (this.ctx.viewer.models.length || this.ctx.viewer.clouds.length)) this.saveNow();
     this.#emit();
   }
 
@@ -90,6 +93,33 @@ export class ProjectManager extends EventTarget {
     }
     await this.#storeFile(key, model.name, file);
     this.touch(true);
+  }
+
+  /**
+   * A point cloud was opened (#52). Up to CLOUD_STORE_MAX it is stored in the browser like the IFC
+   * files; a larger one is kept as a reference: its file handle where the browser gives one (a file
+   * dropped in Chromium), else just its name – the project then asks for the file again.
+   */
+  async cloudAdded(cloud, file, handle = null) {
+    const ref = { name: cloud.name, size: file.size, handle: handle || null };
+    this.missingClouds = (this.missingClouds || []).filter((m) => m.name !== cloud.name);
+    this.clouds.set(cloud, ref);
+    if (!this.enabled || this.restoring) { if (this.restoring && file.__key) ref.key = file.__key; return; }
+    if (!this.current) {
+      const now = Date.now();
+      this.current = { id: crypto.randomUUID?.() || `${now}-${Math.random().toString(36).slice(2)}`, name: cloud.name.replace(/\.[^.]+$/, ''), created: now, modified: now, files: [] };
+    }
+    if (file.size <= CLOUD_STORE_MAX) {
+      const key = await this.keyOf(file);
+      await this.#storeFile(key, cloud.name, file);
+      ref.key = key;
+    }
+    this.touch(true);
+  }
+
+  cloudRemoved(cloud) {
+    if (!this.clouds.delete(cloud)) return;
+    if (!this.restoring) this.touch(true);
   }
 
   modelRemoved(model) {
@@ -151,11 +181,16 @@ export class ProjectManager extends EventTarget {
         }
       }
       const files = viewer.models.filter((m) => this.keys.has(m)).map((m) => ({ key: this.keys.get(m), name: m.name, unitFix: m.unitFix, changes: m.changes.slice(-200).map((c) => ({ time: c.time, description: c.description })) }));
-      const current = viewer.models.length ? views.capture('current') : null;
+      const current = viewer.models.length || viewer.clouds.length ? views.capture('current') : null;
+      for (const c of [...this.clouds.keys()]) if (!viewer.clouds.includes(c)) this.clouds.delete(c);
+      const clouds = viewer.clouds.map((c) => this.clouds.get(c)).filter(Boolean).map(({ name, size, key, handle }) => ({ name, size, key: key || null, handle: handle || null }));
+      // clouds of the project that were not found when it was opened stay in it
+      for (const m of this.missingClouds || []) if (!clouds.some((c) => c.name === m.name)) clouds.push(m);
       const rec = {
         ...this.current,
         modified: Date.now(),
         files,
+        clouds,
         thumb: current?.thumb || this.current.thumb || null,
         state: {
           current,
@@ -201,7 +236,7 @@ export class ProjectManager extends EventTarget {
   // ------------------------------------------------------------ open / close
   async open(id) {
     const { viewer, views, issues, state } = this.ctx;
-    if (this.current?.id === id && viewer.models.length) return;
+    if (this.current?.id === id && (viewer.models.length || viewer.clouds.length)) return;
     const rec = await store.get('projects', id);
     if (!rec) return;
     await this.saveNow(); // keep what is open now
@@ -210,6 +245,7 @@ export class ProjectManager extends EventTarget {
       this.ctx.clearModels();
       this.keys.clear();
       this.saved.clear();
+      this.clouds.clear();
       const files = [];
       const keys = [];
       const missing = [];
@@ -227,6 +263,28 @@ export class ProjectManager extends EventTarget {
       issues.topics = (st?.issues || []).map((tp) => ({ ...tp }));
       state.spacesVisible = !!st?.spacesVisible;
       await this.ctx.openFiles(files, keys);
+      // point clouds (#52): stored in the browser, or opened again from their file handle
+      const cloudFiles = [], askFor = [];
+      for (const c of rec.clouds || []) {
+        let f = null;
+        if (c.key) { const fr = await store.get('files', c.key).catch(() => null); if (fr) { f = new File([fr.blob], c.name); f.__key = c.key; } }
+        if (!f && c.handle) {
+          try {
+            let perm = await c.handle.queryPermission?.({ mode: 'read' });
+            if (perm !== 'granted') perm = await c.handle.requestPermission?.({ mode: 'read' });
+            if (perm === 'granted') f = await c.handle.getFile();
+          } catch { f = null; }
+        }
+        if (f) cloudFiles.push({ f, c }); else askFor.push(c.name);
+      }
+      if (cloudFiles.length) await this.ctx.openClouds?.(cloudFiles.map((x) => x.f));
+      // the references stay with the project, also for the clouds that were not found this time
+      for (const { f, c } of cloudFiles) {
+        const cloud = viewer.clouds.find((q) => q.name === f.name && !this.clouds.get(q)?.restored);
+        if (cloud) this.clouds.set(cloud, { name: c.name, size: c.size, key: c.key || null, handle: c.handle || null, restored: true });
+      }
+      this.missingClouds = (rec.clouds || []).filter((c) => askFor.includes(c.name));
+      if (askFor.length) this.ctx.toast(t('proj.openClouds', { names: askFor.join(', ') }));
       this.ctx.setExtra?.(st?.extra || null);
       // change logs of edited models
       viewer.models.forEach((m) => {
@@ -255,6 +313,8 @@ export class ProjectManager extends EventTarget {
       this.keys.clear();
       this.saved.clear();
       this.current = null;
+      this.clouds.clear();
+      this.missingClouds = [];
       this.ctx.views.views = [];
       this.ctx.issues.topics = [];
       this.ctx.views.render();
@@ -285,7 +345,8 @@ export class ProjectManager extends EventTarget {
   async collectGarbage() {
     try {
       const used = new Set();
-      for (const p of await store.all('projects')) for (const f of p.files || []) used.add(f.key);
+      for (const p of await store.all('projects')) for (const f of [...(p.files || []), ...(p.clouds || [])]) if (f.key) used.add(f.key);
+      for (const r of this.clouds.values()) if (r.key) used.add(r.key);
       for (const k of this.keys.values()) used.add(k);
       for (const f of await store.allMeta('files')) if (!used.has(f.key)) { await store.del('files', f.key); await store.del('geom', f.key).catch(() => {}); }
     } catch (e) { console.warn('cleanup', e); }
