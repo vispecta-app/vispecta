@@ -32,6 +32,13 @@ https://github.com/vispecta-app/vispecta/releases
   the cloud has no ground class.
 
 ### Changed
+- **Content Security Policy** ([#64](https://github.com/vispecta-app/vispecta/issues/64)): the app, the about
+  page and the 404 page tell the browser to load only from the site itself and to contact no other server
+  than the GitHub API (update check) and epsg.io (a looked-up coordinate system). The inline scripts moved
+  into files of their own.
+- **A bounded offline cache** ([#64](https://github.com/vispecta-app/vispecta/issues/64)): the sample models and
+  the Python runtime are cached apart from the app, only once used, and the cache is kept under 250 MB. The
+  files used longest ago are dropped first.
 - **The cut and fill dialog is laid out in two columns:** the settings on the left, the result on the right.
   The result has key figures (cut, fill, net, area) and a table that scrolls on its own, with a fixed header
   and a total row.

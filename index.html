@@ -3,24 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <script>
-      // Phones land on the about page the first time; "Open Vispecta" there (?app) opens the viewer
-      // and is remembered, so later visits open the viewer straight away. Installed apps, links
-      // with a hash or a query and computers always open the viewer.
-      (function () {
-        try {
-          var KEY = 'onlineifc.openedApp';
-          if (/[?&]app\b/.test(location.search)) {
-            localStorage.setItem(KEY, '1');
-            history.replaceState(null, '', location.pathname + location.hash);
-            return;
-          }
-          var phone = matchMedia('(max-width: 760px) and (pointer: coarse)').matches;
-          var installed = matchMedia('(display-mode: standalone)').matches;
-          if (phone && !installed && !location.search && !location.hash && localStorage.getItem(KEY) !== '1') location.replace('./about/');
-        } catch (e) { /* storage blocked: stay in the viewer */ }
-      })();
-    </script>
+    <!-- What the page may load and contact (#64): itself, and only the GitHub API (update check) and epsg.io
+         (a coordinate system you look up). Workers (Python, point clouds) are not covered by this tag. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https://api.github.com https://epsg.io; img-src 'self' data: blob:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'" />
+    <script src="./boot.js"></script>
     <title>Vispecta – free IFC viewer for infrastructure: alignments, sections, IDS</title>
     <meta name="description" content="Free IFC viewer in the browser for rail and road projects: IFC 4.3 alignments and stationing, cross sections and longitudinal profiles as PDF/DXF, measuring, IDS checks and BCF issues. Your files are never uploaded." />
     <link rel="canonical" href="https://vispecta.com/" />
@@ -71,13 +57,6 @@
     <meta name="apple-mobile-web-app-title" content="Vispecta" />
     <meta name="application-name" content="Vispecta" />
     <link rel="stylesheet" href="/src/style.css" />
-    <script>
-      // Apply the saved theme before the page is drawn (avoids a white flash in dark mode)
-      try {
-        var th = localStorage.getItem('onlineifc.theme');
-        document.documentElement.dataset.theme = th === 'dark' || th === 'light' ? th : matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-      } catch (e) { /* ignore */ }
-    </script>
   </head>
   <body>
     <header class="toolbar">
