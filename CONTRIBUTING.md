@@ -22,6 +22,7 @@ Open an issue (choose *Idea or feature request*) and describe the task from your
 3. Keep changes focused: one feature or fix per pull request.
 4. Check that `npm run build` passes and try your change in the browser with a few models.
 5. Open a pull request that says what changed and how you tested it. Screenshots help for UI changes.
+6. Do not edit `CHANGELOG.md` in the pull request: describe the change in the pull request instead. The changelog is written once per release from the merged pull requests, so pull requests do not conflict with each other there.
 
 ### Guidelines
 
