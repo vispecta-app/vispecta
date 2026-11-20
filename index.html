@@ -213,16 +213,19 @@
     </header>
 
     <main class="layout">
+      <h1 class="visually-hidden">Vispecta – IFC viewer</h1>
       <button class="panel-reopen left" data-action="toggle-left" data-i18n-title="panel.showLeft" hidden>›</button>
       <aside class="panel left" id="left-panel">
         <nav class="tabs">
           <button class="panel-collapse" data-action="toggle-left" data-i18n-title="panel.hide">‹</button>
-          <button class="tab active" data-tab="models" data-i18n="tabs.models"></button>
-          <button class="tab" data-tab="tree" data-i18n="tabs.tree"></button>
-          <button class="tab" data-tab="classes" data-i18n="tabs.classes"></button>
-          <button class="tab" data-tab="filters" data-i18n="tabs.filters"></button>
-          <button class="tab" data-tab="issues" data-i18n="tabs.issues"></button>
-          <button class="tab" data-tab="views" data-i18n="tabs.views"></button>
+          <div class="tab-row">
+            <button class="tab active" data-tab="models" data-i18n="tabs.models"></button>
+            <button class="tab" data-tab="tree" data-i18n="tabs.tree"></button>
+            <button class="tab" data-tab="classes" data-i18n="tabs.classes"></button>
+            <button class="tab" data-tab="filters" data-i18n="tabs.filters"></button>
+            <button class="tab" data-tab="issues" data-i18n="tabs.issues"></button>
+            <button class="tab" data-tab="views" data-i18n="tabs.views"></button>
+          </div>
         </nav>
         <section class="tab-body active" id="tab-models">
           <div class="project-bar" id="project-bar" hidden>

@@ -122,6 +122,26 @@ async function main() {
     }
     check('tabs open (structure, classes, filters, issues, views)', true);
 
+    // ---------------------------------------------------------------- accessibility (#62): axe-core, WCAG 2.2 A/AA
+    await page.click('.tab[data-tab="models"]');
+    // evaluated by the test driver, not as a <script>: the page's Content Security Policy (#64) allows no inline scripts
+    await page.evaluate(fs.readFileSync(path.join(ROOT, 'node_modules/axe-core/axe.min.js'), 'utf8'));
+    const axe = await page.evaluate(async () => {
+      const res = await window.axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] } });
+      return res.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => `${v.id} (${v.nodes.length}): ${v.nodes[0].target.join(' ')}`);
+    });
+    check('accessibility: no serious WCAG 2.2 AA violations (axe-core)', axe.length === 0, axe.slice(0, 3).join(' | '));
+    // the menus and tabs by keyboard
+    await page.focus('.menu-btn[data-menu="view"]');
+    await page.keyboard.press('ArrowDown');
+    await page.waitForFunction(() => document.activeElement?.getAttribute('role') === 'menuitem');
+    await page.keyboard.press('Escape');
+    await page.focus('.tab[data-tab="models"]');
+    await page.keyboard.press('ArrowRight');
+    const kb = await page.evaluate(() => ({ menu: document.querySelector('.menu-btn[data-menu="view"]').getAttribute('aria-expanded'), tab: document.activeElement.dataset.tab, sel: document.activeElement.getAttribute('aria-selected') }));
+    check('menus and tabs work with the keyboard', kb.menu === 'false' && kb.tab === 'tree' && kb.sel === 'true', JSON.stringify(kb));
+    await page.click('.tab[data-tab="models"]');
+
     // ---------------------------------------------------------------- bad files (#54)
     const bridge = fs.readFileSync(path.join(DIST, 'samples/simple-scene/Infra-Bridge.ifc'));
     const before = (await toasts(page)).length;
