@@ -1036,6 +1036,7 @@ async function openIfcFiles(list, keys = null, { fit = true } = {}) {
         let key = keys?.[i] || null;
         if (!key && projects.enabled) { try { key = await projects.keyOf(file); } catch { key = null; } }
         const model = await loadIfcFile(file, { onProgress: (msg, frac) => progress(prefix + msg, (i + frac) / list.length), geometryCache: key ? projects.geometryCacheFor(key) : null });
+        model.indexCache = key ? projects.indexCacheFor(key) : null; // the filter index, kept per file (#61)
         viewer.addModel(model);
         checkUnits(model);
         if (key) projects.modelAdded(model, file, key);
@@ -4205,7 +4206,7 @@ async function runCompare() {
   try {
     comparison = await withLoading(async (progress) => {
       for (const m of [oldM, newM]) {
-        if (!m._pindex || m._pindex.version !== m.version) await m.buildPropertyIndex((f) => progress(t('flt.building', { name: m.name }), f * 0.6));
+        if (!m._pindex || m._pindex.version !== m.version) await m.buildPropertyIndex((f) => progress(t('flt.building', { name: m.name }), f * 0.6), { lang: document.documentElement.lang });
       }
       progress(t('cmp.running'), 0.6);
       return compareModels(oldM, newM, (f) => progress(t('cmp.running'), 0.6 + 0.4 * f));

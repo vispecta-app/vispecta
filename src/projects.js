@@ -69,6 +69,15 @@ export class ProjectManager extends EventTarget {
     };
   }
 
+  /** The property index cache for the filters (#61): {get(lang), put(lang, index)}. */
+  indexCacheFor(key) {
+    if (!this.enabled) return null;
+    return {
+      get: (lang) => store.getIndex(key, lang).catch(() => null),
+      put: (lang, idx) => store.putIndex(key, lang, idx),
+    };
+  }
+
   async #putGeometry(key, g) {
     try {
       const est = await store.estimate();
@@ -349,6 +358,7 @@ export class ProjectManager extends EventTarget {
       for (const r of this.clouds.values()) if (r.key) used.add(r.key);
       for (const k of this.keys.values()) used.add(k);
       for (const f of await store.allMeta('files')) if (!used.has(f.key)) { await store.del('files', f.key); await store.del('geom', f.key).catch(() => {}); }
+      await store.trimIndexes(used).catch(() => {});
     } catch (e) { console.warn('cleanup', e); }
   }
 

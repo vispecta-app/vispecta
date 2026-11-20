@@ -48,8 +48,7 @@ export class FilterPanel {
         for (let i = 0; i < need.length; i++) {
           const m = need[i];
           m._pindex = null;
-          await m.buildPropertyIndex((f) => progress(t('flt.building', { name: m.name }), (i + f) / need.length));
-          m._pindex.lang = this.lang();
+          await m.buildPropertyIndex((f) => progress(t('flt.building', { name: m.name }), (i + f) / need.length), { lang: this.lang() });
         }
       });
     }

@@ -32,6 +32,13 @@ https://github.com/vispecta-app/vispecta/releases
   the cloud has no ground class.
 
 ### Changed
+- **Filters start without freezing the page** ([#61](https://github.com/vispecta-app/vispecta/issues/61)):
+  - the property index is built in slices of about 12 ms, so the page stays responsive;
+  - the calculated quantities are worked out only when a filter or colour uses them;
+  - an unedited file keeps its index in the browser, stored in columns.
+
+  On the Chesapeake sample (17,553 elements) the build took 4.6 s with a 2.2 s freeze. It now takes 1.6 s
+  with no slice over 60 ms, and 0.15 s the next time.
 - **The cut and fill dialog is laid out in two columns:** the settings on the left, the result on the right.
   The result has key figures (cut, fill, net, area) and a table that scrolls on its own, with a fixed header
   and a total row.

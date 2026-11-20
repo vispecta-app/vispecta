@@ -570,9 +570,29 @@ export class IfcModel {
    * All attributes, properties and calculated quantities of all elements with geometry, for
    * filtering and colouring. Keys: 'attr:Name', 'pset:Pset_WallCommon.FireRating', 'calc:volume' …
    * Values are numbers or strings. Built in one pass over the relationships and cached.
+   *
+   * (#61) The work is cut into slices of about 12 ms, so the page stays responsive. An unedited
+   * model keeps its index in the browser (this.indexCache, from the project's file key), so it is
+   * built once per file. The calculated quantities are worked out per element only when they are
+   * read (a filter or colour on calc:…), not for all elements up front.
    */
-  async buildPropertyIndex(onProgress = () => {}) {
-    if (this._pindex && this._pindex.version === this.version) return this._pindex;
+  async buildPropertyIndex(onProgress = () => {}, { lang = '' } = {}) {
+    if (this._pindex && this._pindex.version === this.version && (!lang || this._pindex.lang === lang)) return this._pindex;
+    const cache = this.version === 0 ? this.indexCache : null;
+    if (cache) {
+      try {
+        const hit = await cache.get(lang);
+        if (hit?.ids) {
+          const { data, keys } = await unpackIndex(hit, () => this.#indexEntry());
+          for (const o of data.values()) o['attr:Model'] = this.name; // the file may have been opened under another name
+          for (const [id, o] of data) o[INDEX_ID] = id;
+          this._pindex = { version: this.version, lang, data, keys };
+          this.#addCalcKeys(this._pindex);
+          onProgress(1);
+          return this._pindex;
+        }
+      } catch (e) { console.warn('property index cache', e); }
+    }
     const api = this.api, mid = this.modelID;
     const data = new Map();
     const keys = new Map(); // key -> {numeric, count}
@@ -586,9 +606,17 @@ export class IfcModel {
       k.count++;
       if (typeof v !== 'number') k.numeric = false;
     };
-    const tick = async (f) => { onProgress(f); await new Promise((r) => setTimeout(r, 0)); };
+    // yields to the page every ~12 ms (and reports progress then)
+    let sliceStart = performance.now(), progress = 0;
+    const tick = async (f) => {
+      if (f !== undefined) progress = f;
+      if (performance.now() - sliceStart < 12) return;
+      onProgress(progress);
+      await yieldToPage();
+      sliceStart = performance.now();
+    };
     const ids = [...this.elementIds];
-    for (const id of ids) data.set(id, {});
+    for (const id of ids) { const o = this.#indexEntry(); o[INDEX_ID] = id; data.set(id, o); }
 
     // Attributes
     let i = 0;
@@ -598,7 +626,7 @@ export class IfcModel {
       put(id, 'attr:Class', this.typeName(id));
       for (const k of ['Name', 'ObjectType', 'Tag', 'PredefinedType', 'Description']) put(id, `attr:${k}`, rawIndexValue(line?.[k]));
       put(id, 'attr:Storey', this.#storeyOf(id));
-      if (++i % 500 === 0) await tick(0.2 * (i / ids.length));
+      await tick(0.3 * (++i / ids.length));
     }
 
     // Property sets and quantities (instance)
@@ -628,8 +656,9 @@ export class IfcModel {
       for (const o of rel.RelatedObjects || []) {
         if (!data.has(o.value)) continue;
         for (const d of defs) if (d) for (const [k, v] of psetValues(d)) put(o.value, k, v);
+        await tick();
       }
-      if (r % 300 === 0) await tick(0.2 + 0.4 * (r / rels.size()));
+      await tick(0.3 + 0.5 * (r / rels.size()));
     }
 
     // Types: name and type property sets
@@ -646,7 +675,9 @@ export class IfcModel {
         typeOfElement.set(o.value, tid);
         put(o.value, 'attr:Type', tname);
         for (const h of ty?.HasPropertySets || []) for (const [k, v] of psetValues(h.value)) put(o.value, k, v);
+        await tick();
       }
+      await tick(0.8 + 0.1 * (r / trels.size()));
     }
 
     // Materials
@@ -657,28 +688,52 @@ export class IfcModel {
       const name = materialNames(api, mid, rel.RelatingMaterial?.value).join(', ');
       if (!name) continue;
       for (const o of rel.RelatedObjects || []) matByObject.set(o.value, name);
+      await tick(0.9 + 0.05 * (r / mrels.size()));
     }
     for (const id of ids) {
       const m = matByObject.get(id) ?? matByObject.get(typeOfElement.get(id));
       if (m) put(id, 'attr:Material', m);
+      await tick();
     }
     // Presentation layers ("CAD layers")
     try {
       const { byElement } = this.layerIndex();
       for (const [id, names] of byElement) put(id, 'attr:Layer', names.join(', '));
     } catch (e) { console.warn('layers', e); }
-    await tick(0.7);
 
-    // Calculated quantities
-    i = 0;
-    for (const id of ids) {
-      const q = this.computeQuantities(id);
-      if (q) for (const k of ['volume', 'area', 'planArea', 'length', 'width', 'height']) put(id, `calc:${k}`, Math.round(q[k] * 1000) / 1000);
-      if (++i % 300 === 0) await tick(0.7 + 0.3 * (i / ids.length));
-    }
     onProgress(1);
-    this._pindex = { version: this.version, data, keys };
+    this._pindex = { version: this.version, lang, data, keys };
+    this.#addCalcKeys(this._pindex);
+    // kept in the browser, in columns (fast to store and read back), without the calculated quantities
+    if (cache) packIndex(data, keys).then((packed) => cache.put(lang, packed)).catch((e) => console.warn('property index cache', e));
     return this._pindex;
+  }
+
+  /**
+   * An empty entry of the property index. Its prototype holds the calculated quantities
+   * (calc:volume …) as getters: they are worked out from the geometry only when they are read (a
+   * filter or colour on one of them), per element, not for all elements up front.
+   */
+  #indexEntry() {
+    if (!this._calcProto) {
+      const model = this, proto = {};
+      for (const k of CALC_KEYS) {
+        Object.defineProperty(proto, `calc:${k}`, {
+          enumerable: false,
+          get() {
+            const q = model.computeQuantities(this[INDEX_ID]);
+            return q ? Math.round(q[k] * 1000) / 1000 : undefined;
+          },
+        });
+      }
+      this._calcProto = proto;
+    }
+    return Object.create(this._calcProto);
+  }
+
+  #addCalcKeys(pindex) {
+    const n = pindex.data.size;
+    if (n) for (const k of CALC_KEYS) pindex.keys.set(`calc:${k}`, { numeric: true, count: n });
   }
 
   /** Sums of calculated quantities over several elements. */
@@ -1498,6 +1553,65 @@ export function isSpatialType(ty) {
 }
 
 /** A value for the property index: number when numeric, otherwise a display string. */
+const CALC_KEYS = ['volume', 'area', 'planArea', 'length', 'width', 'height'];
+const INDEX_ID = Symbol('id'); // the element of a property index entry (not stored, not listed)
+
+/**
+ * The property index in columns (#61), for IndexedDB: the element ids, and per key either a
+ * Float64Array (numbers, NaN where missing) or a table of the distinct texts and a Uint32Array of
+ * positions in it (0 where missing). Typed arrays are copied in one go; thousands of small objects
+ * would block the page while they are stored and read back.
+ */
+async function packIndex(data, keys) {
+  const ids = Int32Array.from(data.keys());
+  const objs = [...data.values()];
+  const cols = [];
+  let t = performance.now();
+  for (const [key, info] of keys) {
+    if (key.startsWith('calc:')) continue;
+    if (info.numeric) {
+      const a = new Float64Array(ids.length).fill(NaN);
+      for (let i = 0; i < objs.length; i++) { const v = objs[i][key]; if (v !== undefined) a[i] = v; }
+      cols.push({ key, numeric: true, count: info.count, values: a });
+    } else {
+      const dict = [''], at = new Map(), idx = new Uint32Array(ids.length);
+      for (let i = 0; i < objs.length; i++) {
+        const v = objs[i][key];
+        if (v === undefined) continue;
+        const sv = String(v);
+        let k = at.get(sv);
+        if (k === undefined) { k = dict.length; dict.push(sv); at.set(sv, k); }
+        idx[i] = k;
+      }
+      cols.push({ key, numeric: false, count: info.count, dict, idx });
+    }
+    if (performance.now() - t > 12) { await yieldToPage(); t = performance.now(); }
+  }
+  return { ids, cols };
+}
+
+/** The columns back into the index: {data: Map(id -> entry), keys}. newEntry() makes an entry. */
+async function unpackIndex({ ids, cols }, newEntry) {
+  const objs = Array.from(ids, () => newEntry());
+  const keys = new Map();
+  let t = performance.now();
+  for (const c of cols) {
+    keys.set(c.key, { numeric: c.numeric, count: c.count });
+    if (c.numeric) { const a = c.values; for (let i = 0; i < a.length; i++) if (a[i] === a[i]) objs[i][c.key] = a[i]; }
+    else { const { dict, idx } = c; for (let i = 0; i < idx.length; i++) if (idx[i]) objs[i][c.key] = dict[idx[i]]; }
+    if (performance.now() - t > 12) { await yieldToPage(); t = performance.now(); }
+  }
+  const data = new Map();
+  for (let i = 0; i < ids.length; i++) data.set(ids[i], objs[i]);
+  return { data, keys };
+}
+
+/** Gives the page a moment (input, painting) between slices of work. */
+function yieldToPage() {
+  if (globalThis.scheduler?.yield) return globalThis.scheduler.yield();
+  return new Promise((r) => { const c = new MessageChannel(); c.port1.onmessage = () => r(); c.port2.postMessage(0); });
+}
+
 function rawIndexValue(v) {
   if (v === null || v === undefined) return undefined;
   if (typeof v === 'object' && !Array.isArray(v)) {
