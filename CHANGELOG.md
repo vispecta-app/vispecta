@@ -40,6 +40,13 @@ https://github.com/vispecta-app/vispecta/releases
   the cloud has no ground class.
 
 ### Changed
+- **Filters start without freezing the page** ([#61](https://github.com/vispecta-app/vispecta/issues/61)):
+  - the property index is built in slices of about 12 ms, so the page stays responsive;
+  - the calculated quantities are worked out only when a filter or colour uses them;
+  - an unedited file keeps its index in the browser, stored in columns.
+
+  On the Chesapeake sample (17,553 elements) the build took 4.6 s with a 2.2 s freeze. It now takes 1.6 s
+  with no slice over 60 ms, and 0.15 s the next time.
 - **Accessibility** ([#62](https://github.com/vispecta-app/vispecta/issues/62)):
   - menus and tabs have ARIA roles and states and can be used with the arrow keys, Home, End and Esc;
   - the 3D view, symbol-only buttons and fields without a label have names;

@@ -31,6 +31,7 @@ export class ProjectManager extends EventTarget {
     this.current = null; // project record (without state) of what is open now
     this.keys = new Map(); // IfcModel -> file key (fingerprint)
     this.clouds = new Map(); // PointCloud -> { name, size, key?, handle? } (#52)
+    this.pendingStores = new Set(); // point cloud files being stored
     this.saved = new Map(); // IfcModel -> model.version that is stored
     this.fpCache = new WeakMap(); // File/Blob -> fingerprint
     this.timer = null;
@@ -66,6 +67,15 @@ export class ProjectManager extends EventTarget {
     return {
       get: () => store.getGeometry(key).catch(() => null),
       put: (g) => this.#putGeometry(key, g),
+    };
+  }
+
+  /** The property index cache for the filters (#61): {get(lang), put(lang, index)}. */
+  indexCacheFor(key) {
+    if (!this.enabled) return null;
+    return {
+      get: (lang) => store.getIndex(key, lang).catch(() => null),
+      put: (lang, idx) => store.putIndex(key, lang, idx),
     };
   }
 
@@ -110,9 +120,15 @@ export class ProjectManager extends EventTarget {
       this.current = { id: crypto.randomUUID?.() || `${now}-${Math.random().toString(36).slice(2)}`, name: cloud.name.replace(/\.[^.]+$/, ''), created: now, modified: now, files: [] };
     }
     if (file.size <= CLOUD_STORE_MAX) {
-      const key = await this.keyOf(file);
-      await this.#storeFile(key, cloud.name, file);
-      ref.key = key;
+      // a save that comes while the file is still being stored waits for it (else the project
+      // would be saved without the cloud's key, and it would be missing when opened again)
+      const job = (async () => {
+        const key = await this.keyOf(file);
+        await this.#storeFile(key, cloud.name, file);
+        ref.key = key;
+      })();
+      this.pendingStores.add(job);
+      try { await job; } finally { this.pendingStores.delete(job); }
     }
     this.touch(true);
   }
@@ -169,6 +185,7 @@ export class ProjectManager extends EventTarget {
     if (this.saving) { this.again = true; return; }
     this.saving = true;
     try {
+      if (this.pendingStores.size) await Promise.allSettled([...this.pendingStores]); // point clouds still being stored
       const { viewer, views, issues, state } = this.ctx;
       // edited models: store the edited file as a new version
       for (const m of viewer.models) {
@@ -349,6 +366,7 @@ export class ProjectManager extends EventTarget {
       for (const r of this.clouds.values()) if (r.key) used.add(r.key);
       for (const k of this.keys.values()) used.add(k);
       for (const f of await store.allMeta('files')) if (!used.has(f.key)) { await store.del('files', f.key); await store.del('geom', f.key).catch(() => {}); }
+      await store.trimIndexes(used).catch(() => {});
     } catch (e) { console.warn('cleanup', e); }
   }
 

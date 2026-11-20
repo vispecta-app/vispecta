@@ -120,6 +120,25 @@ async function main() {
     }
     check('tabs open (structure, classes, filters, issues, views)', true);
 
+    // ---------------------------------------------------------------- property index for filters (#61)
+    await page.click('.tab[data-tab="filters"]');
+    await page.evaluate(() => [...document.querySelectorAll('#tab-filters button')].find((b) => b.classList.contains('primary'))?.click());
+    await page.waitForFunction(() => document.querySelector('#tab-filters select'), null, { timeout: 120000 });
+    const pidx = await page.evaluate(() => {
+      const v = window.onlineIfc.viewer;
+      let n = 0, ok = true;
+      for (const m of v.models) {
+        if (!m._pindex) return { ok: false, n };
+        for (const [id, o] of m._pindex.data) {
+          const q = m.computeQuantities(id), vol = o['calc:volume'];
+          if (q && vol !== Math.round(q.volume * 1000) / 1000) ok = false;
+          if (Object.keys(o).some((k) => k.startsWith('calc:'))) ok = false; // worked out when read, not stored
+          n++;
+        }
+      }
+      return { ok, n };
+    });
+    check('filters: property index with quantities worked out when read', pidx.ok && pidx.n > 300, `${pidx.n} elements`);
     // ---------------------------------------------------------------- accessibility (#62): axe-core, WCAG 2.2 A/AA
     await page.click('.tab[data-tab="models"]');
     // evaluated by the test driver, not as a <script>: the page's Content Security Policy (#64) allows no inline scripts
