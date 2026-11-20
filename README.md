@@ -313,7 +313,7 @@ The `dist/` folder can also be put on any other static host (Netlify, Azure Stat
 
 ### Installable app (PWA)
 
-The built site has a web app manifest and a service worker (`public/sw.js`). In Chrome or Edge, use *Install* in the address bar to get Vispecta as an app with its own window. After the first visit it works offline, and the installed app can open `.ifc` files directly (*Open with* in the file explorer). The service worker only caches the app itself; IFC files never leave the computer. It is only registered in the built app (`npm run build`), not in the dev server.
+The built site has a web app manifest and a service worker (`public/sw.js`). In Chrome or Edge, use *Install* in the address bar to get Vispecta as an app with its own window. After the first visit it works offline, and the installed app can open `.ifc` files directly (*Open with* in the file explorer). The service worker caches the app itself. The sample models and the Python runtime are cached separately, only once they have been used, and that cache is kept under 250 MB: the files used longest ago are dropped first (#64). IFC files never leave the computer. It is only registered in the built app (`npm run build`), not in the dev server.
 
 ## Privacy
 
@@ -326,7 +326,10 @@ Vispecta is a static website without a backend, cookies, analytics or tracking.
   - *Other EPSG code…* under coordinate systems asks epsg.io for the definition of that code (only the code is sent);
   - a Python script of your own that imports a package which is not hosted (e.g. pandas) fetches it from jsDelivr, and `micropip.install` in your script fetches from PyPI.
 
-  No model data is sent in either case.
+  - *Other EPSG code…* under coordinate systems asks epsg.io for the definition of that code.
+
+  No model data is sent in any of these cases.
+- **Enforced by the browser:** the pages carry a Content Security Policy (#64). The page may load only from vispecta.com itself (scripts, styles, fonts, images, WebAssembly), and the only other servers it may contact are the GitHub API (update check) and epsg.io. There are no inline scripts. The Python and point-cloud workers are not covered by the tag: GitHub Pages cannot send the header that would cover them.
 
 ## Status
 
