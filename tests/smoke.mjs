@@ -10,6 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { writeArrayBuffer } from 'geotiff';
+import proj4 from 'proj4';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = path.join(ROOT, 'dist');
@@ -169,7 +170,7 @@ async function main() {
     const [lx] = await Promise.all([page2.waitForEvent('download'), page2.evaluate(() => [...document.querySelectorAll('.model-card.open button')].find((b) => /LandXML/.test(b.textContent)).click())]);
     const lxml = fs.readFileSync(await lx.path(), 'utf8');
     const nP = (lxml.match(/<P id=/g) || []).length, nF = (lxml.match(/<F>/g) || []).length;
-    check('LandXML export of the terrain', /<LandXML\b/.test(lxml) && nP > 1000 && nF > 1000 && /EPSG:25832/.test(lxml), `${nP} points, ${nF} faces`);
+    check('LandXML export of the terrain', /<LandXML\b/.test(lxml) && nP > 1000 && nF > 1000 && /epsgCode="25832"/.test(lxml), `${nP} points, ${nF} faces`);
     // a height model as GeoTIFF (#92): 60 × 40 m at 1 m by the bridge, one no-data pixel
     const W = 60, H = 40, hv = new Float32Array(W * H);
     for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) hv[j * W + i] = 20 + i * 0.05 + j * 0.02;
@@ -242,6 +243,58 @@ async function main() {
       return { empty, n: v.clouds.length, alias: r?.alias, mode: r?.mode, size: r?.pointSize, count: r?.count };
     });
     check('point clouds saved in the project and opened again with their settings', proj.empty === 0 && proj.n === 2 && proj.alias === 'Rooms' && proj.mode === 'intensity' && proj.size === 3 && proj.count === 50000, JSON.stringify(proj));
+
+    // ---------------------------------------------------------------- coordinate systems (#107)
+    // the alignment file and a part of the survey in ETRS89 / UTM 33N (tests/fixtures/make_utm33.py);
+    // the alignment file's local coordinates are moved by 583 m too, so only its georeference puts it right
+    await page2.setInputFiles('#file-input', [path.join(FIX, 'alignment-utm33.ifc'), path.join(FIX, 'survey-utm33.las')]);
+    await page2.waitForFunction(() => window.onlineIfc.viewer.models.some((m) => m.name === 'alignment-utm33.ifc') && window.onlineIfc.viewer.clouds.some((c) => c.name === 'survey-utm33.las'));
+    await idle(page2);
+    const crsCheck = () => page2.evaluate(() => {
+      const v = window.onlineIfc.viewer;
+      const a = v.models.find((m) => m.name === '01-Alignment.ifc'), b = v.models.find((m) => m.name === 'alignment-utm33.ifc');
+      let d = 0;
+      a.alignments.forEach((al, i) => al.poly.forEach((pt, k) => { const q = b.alignments[i].poly[k]; d = Math.max(d, Math.hypot(pt[0] - q[0], pt[1] - q[1])); }));
+      // the first survey point, at 680266.611 6150043.249 (UTM 32N): IFC 266.611 43.249
+      const c = v.clouds.find((q) => q.name === 'survey-utm33.las');
+      let near = Infinity;
+      const w = c.getBox().min.clone();
+      for (let i = 0; i < c.count; i++) { const q = v.toIfc(c.worldPoint(i, w)); near = Math.min(near, Math.hypot(q.x - 266.611, q.y - 43.249)); }
+      return { project: v.projectCrs, crs: [b.crs, c.crs], d, near };
+    });
+    const c1 = await crsCheck();
+    // the fixture's own map conversion is a similarity fitted at its origin: up to 5 mm off at its ends
+    check('UTM 33N model converted into the project (UTM 32N)', c1.project === 'EPSG:25832' && c1.crs[0] === 'EPSG:25833' && c1.d < 0.01, `alignment within ${(c1.d * 1000).toFixed(1)} mm`);
+    check('UTM 33N point cloud converted point by point', c1.crs[1] === 'EPSG:25833' && c1.near < 0.002, `${(c1.near * 1000).toFixed(2)} mm`);
+    await page2.click('.tab[data-tab="models"]');
+    await page2.evaluate(() => { const sel = document.querySelector('.crs-bar select'); sel.value = 'EPSG:25833'; sel.dispatchEvent(new Event('change')); });
+    await page2.waitForTimeout(800);
+    const c2 = await crsCheck();
+    check('project switched to UTM 33N: everything still on top of each other', c2.project === 'EPSG:25833' && c2.d < 0.01 && c2.near < 0.002, `${(c2.d * 1000).toFixed(1)} mm, ${(c2.near * 1000).toFixed(2)} mm`);
+    const c3 = await page2.evaluate(async () => {
+      const { viewer: v, projects: pm } = window.onlineIfc;
+      await pm.saveNow();
+      const id = pm.current.id;
+      await pm.close();
+      await pm.open(id);
+      return v.projectCrs;
+    });
+    check('the project keeps its coordinate system', c3 === 'EPSG:25833', String(c3));
+    // LandXML in UTM 33N (the exported terrain, converted here) lands on the terrain
+    const tr = proj4('+proj=utm +zone=32 +ellps=GRS80 +units=m +no_defs', '+proj=utm +zone=33 +ellps=GRS80 +units=m +no_defs');
+    const lx33 = lxml.replace(/<CoordinateSystem[^>]*\/>/, '<CoordinateSystem name="ETRS89 / UTM zone 33N" epsgCode="25833"/>')
+      .replace(/<P id="(\d+)">([-\d.]+) ([-\d.]+) ([-\d.]+)<\/P>/g, (_, id, n, e, z) => { const [x, y] = tr.forward([+e, +n]); return `<P id="${id}">${y.toFixed(4)} ${x.toFixed(4)} ${z}</P>`; });
+    const nBefore = await page2.evaluate(() => window.onlineIfc.viewer.models.length);
+    await page2.setInputFiles('#file-input', { name: 'terrain-utm33.xml', mimeType: 'application/xml', buffer: Buffer.from(lx33) });
+    await page2.waitForFunction((n) => window.onlineIfc.viewer.models.length === n + 1, nBefore);
+    await idle(page2);
+    const lxd = await page2.evaluate(() => {
+      const v = window.onlineIfc.viewer;
+      const a = v.models.find((m) => m.name === '08-Terrain.ifc'), b = v.models.at(-1);
+      const A = a.getBox(), B = b.getBox();
+      return { name: b.name, d: Math.max(A.min.distanceTo(B.min), A.max.distanceTo(B.max)) };
+    });
+    check('LandXML in UTM 33N converted onto the terrain', lxd.d < 0.01, `${lxd.name}: box within ${(lxd.d * 1000).toFixed(1)} mm`);
     await page2.context().close();
   } catch (e) {
     check('smoke test ran to the end', false, e.message.split('\n')[0]);
