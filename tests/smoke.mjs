@@ -143,6 +143,14 @@ async function main() {
     await page2.waitForFunction(() => window.onlineIfc.viewer.models.length === 9 && window.onlineIfc.viewer.clouds.length === 1, null, { timeout: 180000 });
     await idle(page2);
     const rail = await page2.evaluate(() => ({ cloud: window.onlineIfc.viewer.clouds[0].placement, terrain: window.onlineIfc.viewer.models.filter((m) => m.terrain).length }));
+    // long models are split in plan into cells (#60): more buckets than colours, every element still there
+    const cells = await page2.evaluate(() => {
+      const m = window.onlineIfc.viewer.models.find((x) => x.name === '02-Track.ifc');
+      const colours = new Set(m.buckets.map((b) => b.color.getHexString() + b.opacity)).size;
+      const ids = new Set(); for (const b of m.buckets) for (const it of b.items) ids.add(it.id);
+      return { buckets: m.buckets.length, colours, ids: ids.size, elements: m.elementIds.size };
+    });
+    check('long model split into cells for view culling (#60)', cells.buckets > cells.colours && cells.ids === cells.elements, `${cells.buckets} buckets for ${cells.colours} colours, ${cells.ids} elements`);
     check('railway sample: 9 models and a LAZ survey placed in map coordinates', rail.cloud === 'map', `terrain models: ${rail.terrain}`);
     // contours on the terrain (#92)
     await page2.click('.tab[data-tab="models"]');

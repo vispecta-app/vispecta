@@ -11,7 +11,7 @@ import * as THREE from 'three';
 const DB_NAME = 'onlineifc';
 const DB_VERSION = 1;
 // Bump when the loader changes in a way that changes the geometry (invalidates the geometry cache).
-export const GEOMETRY_FORMAT = 'g2-webifc0.0.78-seg16';
+export const GEOMETRY_FORMAT = 'g3-webifc0.0.78-seg16-cells'; // g3: long models split into cells (#60)
 
 let dbPromise = null;
 function db() {
