@@ -5,6 +5,7 @@
 // (as they are, or through the IfcMapConversion of the models when the cloud is in map
 // coordinates) -> viewer coordinates. See Viewer.placeCloud.
 import * as THREE from 'three';
+import { normalizeCrs } from './crs.js';
 
 /** ASPRS LAS classes: name and colour. */
 export const LAS_CLASSES = {
@@ -59,6 +60,9 @@ export class PointCloud {
     this.origin = d.origin;          // [x, y, z] in the cloud's own coordinates
     this.min = d.min; this.max = d.max;
     this.scans = d.scans || 0;       // E57: scan positions in the file
+    this.fileCrs = d.crs || null;    // the coordinate system written in the file (WKT or a code), #107
+    this.crs = normalizeCrs(d.crs);  // its EPSG code (or one chosen on the card); null: not known
+    this.dataCrs = this.crs;         // the system the points are in now (converted into the project's)
     this.hiddenClasses = new Set();
     this.visible = true;
     this.pointSize = 2;
@@ -186,6 +190,32 @@ export class PointCloud {
   #range(k, f) {
     if (!this.fixedRanges) return f();
     return (this.fixedRanges[k] ||= f());
+  }
+
+  /**
+   * Converts the points into another map coordinate system (#107): conv(x, y) -> [x, y] on map
+   * coordinates, point by point. Heights stay as they are.
+   */
+  reproject(conv) {
+    const [ox, oy, oz] = this.origin;
+    const [nx, ny] = conv(ox, oy).map(Math.round);
+    const box = (min, max) => {
+      const out = [Infinity, Infinity, min[2], -Infinity, -Infinity, max[2]];
+      for (const x of [min[0], max[0]]) for (const y of [min[1], max[1]]) { const [u, v] = conv(x, y); out[0] = Math.min(out[0], u); out[1] = Math.min(out[1], v); out[3] = Math.max(out[3], u); out[4] = Math.max(out[4], v); }
+      return out;
+    };
+    const b = box(this.min, this.max);
+    this.min = [b[0], b[1], b[2]]; this.max = [b[3], b[4], b[5]];
+    if (this.stream) {
+      this.stream.reproject(conv, [nx, ny, oz]);
+      this.origin = [nx, ny, oz];
+      this.setData(this.stream.assemble(this.stream.shown));
+      return;
+    }
+    const P = this.positions;
+    for (let i = 0; i < P.length; i += 3) { const [x, y] = conv(ox + P[i], oy + P[i + 1]); P[i] = x - nx; P[i + 1] = y - ny; }
+    this.origin = [nx, ny, oz];
+    this.setData({ count: this.count, positions: P, colors: this.rgb, intensity: this.intensity, classes: this.classes });
   }
 
   /** Colour of point i as '#rrggbb' (as currently shown). */
