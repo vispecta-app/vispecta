@@ -40,6 +40,10 @@ https://github.com/vispecta-app/vispecta/releases
   the cloud has no ground class.
 
 ### Changed
+- **Long models draw only what is in view** ([#60](https://github.com/vispecta-app/vispecta/issues/60)): a model
+  longer than 400 m is split in plan into cells (up to 16 along it). Each colour gets a mesh per cell with its own
+  bounding box, so what is out of view is skipped. Close up on the 31 km Chesapeake corridor, 72 % fewer triangles
+  are drawn (102,000 of 359,000). The geometry cache is rebuilt once (new format).
 - **IFC geometry is built in a worker** ([#58](https://github.com/vispecta-app/vispecta/issues/58)): opening a model no
   longer freezes the page while its geometry is read. On the Chesapeake sample (26 MB), the page was blocked in 13
   long tasks for 2.1 s; it is now 2 tasks and 1.0 s. What is left is the page opening the file itself for properties

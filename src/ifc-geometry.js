@@ -4,6 +4,11 @@
 // Every product's meshes are transformed into the model's coordinates and appended to the bucket
 // of their colour, so a model draws in a few draw calls; each bucket lists the index ranges of its
 // elements (items), so they can be shown, hidden and picked one by one.
+//
+// Long models (a corridor of kilometres) are also split in plan into cells (#60): a bucket per colour
+// and cell, each with its own bounding box, so three.js skips what is out of view. Elements stay
+// whole (by the centre of their box), and cells with few triangles of a colour are put together
+// again, so the number of draw calls stays small.
 import * as WebIFC from 'web-ifc';
 
 /** expressIDs of all objects that can have geometry (same set as StreamAllMeshes, without spaces). */
@@ -40,11 +45,68 @@ function streamMeshes(api, modelID, ids, cb) {
   api.wasmModule.StreamMeshes(modelID, ids, cb);
 }
 
-function concat(Type, chunks, total) {
-  const out = new Type(total);
-  let o = 0;
-  for (const c of chunks) { out.set(c, o); o += c.length; }
+// cells: none below CHUNK_MIN_EXTENT m, at most CHUNK_MAX_CELLS along the longest side, about CHUNK_CELL m
+const CHUNK_MIN_EXTENT = 400, CHUNK_CELL = 250, CHUNK_MAX_CELLS = 16;
+// a colour's cells with fewer triangles than this are put together again (not worth a draw call)
+const CHUNK_MIN_TRIS = 1500;
+
+/** The cell of a centre (x, z), or 0 for a model too small to split. Exported for the tests. */
+export function cellGrid(pieces) {
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+  for (const p of pieces) {
+    if (!Number.isFinite(p.cx)) continue;
+    if (p.cx < x0) x0 = p.cx; if (p.cx > x1) x1 = p.cx; if (p.cz < z0) z0 = p.cz; if (p.cz > z1) z1 = p.cz;
+  }
+  const L = Math.max(x1 - x0, z1 - z0);
+  if (!(L >= CHUNK_MIN_EXTENT)) return () => 0;
+  const size = L / Math.min(CHUNK_MAX_CELLS, Math.ceil(L / CHUNK_CELL));
+  const nx = Math.floor((x1 - x0) / size) + 1;
+  return (cx, cz) => (Number.isFinite(cx) ? Math.floor((cz - z0) / size) * nx + Math.floor((cx - x0) / size) + 1 : 0);
+}
+
+/** Pieces -> buckets by colour and cell, small cells of a colour together again. */
+function mergePieces(pieces, colors) {
+  const cellOf = cellGrid(pieces);
+  const groups = new Map(); // colour key -> Map(cell -> {pieces, tris})
+  for (const p of pieces) {
+    let g = groups.get(p.key);
+    if (!g) groups.set(p.key, (g = new Map()));
+    const cell = cellOf(p.cx, p.cz);
+    let c = g.get(cell);
+    if (!c) g.set(cell, (c = { list: [], tris: 0 }));
+    c.list.push(p); c.tris += p.idx.length / 3;
+  }
+  const out = [];
+  for (const [key, cells] of groups) {
+    const { color, opacity } = colors.get(key);
+    const rest = [];
+    for (const c of cells.values()) {
+      if (c.tris < CHUNK_MIN_TRIS && cells.size > 1) rest.push(...c.list);
+      else out.push(bucketOf(color, opacity, c.list));
+    }
+    if (rest.length) out.push(bucketOf(color, opacity, rest));
+  }
   return out;
+}
+
+/** One bucket from pieces: arrays put together, indices moved, index ranges per element. */
+function bucketOf(color, opacity, list) {
+  let nv = 0, ni = 0;
+  for (const p of list) { nv += p.vc; ni += p.idx.length; }
+  const positions = new Float32Array(nv * 3), normals = new Int8Array(nv * 3), index = new Uint32Array(ni);
+  const items = [];
+  let v = 0, i = 0;
+  for (const p of list) {
+    positions.set(p.pos, v * 3);
+    normals.set(p.nor, v * 3);
+    for (let k = 0; k < p.idx.length; k++) index[i + k] = p.idx[k] + v;
+    const last = items[items.length - 1];
+    if (last && last.id === p.id && last.start + last.count === i) last.count += p.idx.length;
+    else items.push({ id: p.id, start: i, count: p.idx.length });
+    v += p.vc; i += p.idx.length;
+    p.pos = p.nor = p.idx = null; // free as we go
+  }
+  return { color, opacity, positions, normals, index, items };
 }
 
 /**
@@ -54,8 +116,6 @@ function concat(Type, chunks, total) {
  * coordMatrix: [16] }.
  */
 export async function buildGeometry(api, modelID, { progress = () => {}, pause = async () => {} } = {}) {
-  // Group all triangles by colour, so each model is only a few draw calls.
-  const buckets = new Map();
   const spaceIds = new Set();
   // Many elements share the same geometry (type geometry / mapped items): read it once.
   const geomCache = new Map();
@@ -77,10 +137,15 @@ export async function buildGeometry(api, modelID, { progress = () => {}, pause =
     return g;
   };
 
+  // pieces of geometry, grouped into buckets at the end (when the model's extent is known)
+  const pieces = [];
+  const colors = new Map(); // colour key -> {color, opacity}
   const onMesh = (flatMesh, prefix) => {
     const expressID = flatMesh.expressID;
     if (prefix) spaceIds.add(expressID);
     const n = flatMesh.geometries.size();
+    const mine = [];
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
     for (let i = 0; i < n; i++) {
       const pg = flatMesh.geometries.get(i);
       const { verts, idx } = readGeometry(pg.geometryExpressID);
@@ -88,13 +153,8 @@ export async function buildGeometry(api, modelID, { progress = () => {}, pause =
 
       const c = pg.color;
       const key = `${prefix}${c.x.toFixed(3)}_${c.y.toFixed(3)}_${c.z.toFixed(3)}_${c.w.toFixed(3)}`;
-      let b = buckets.get(key);
-      if (!b) {
-        // Spaces (IfcSpace) are semi-transparent so they don't hide the building.
-        const opacity = prefix ? Math.min(c.w, 0.25) : c.w;
-        b = { color: [c.x, c.y, c.z], opacity, pos: [], nor: [], idx: [], items: [], vCount: 0, iCount: 0 };
-        buckets.set(key, b);
-      }
+      // Spaces (IfcSpace) are semi-transparent so they don't hide the building.
+      if (!colors.has(key)) colors.set(key, { color: [c.x, c.y, c.z], opacity: prefix ? Math.min(c.w, 0.25) : c.w });
 
       // Transform positions and normals (column-major 4×4 matrix; normals with the inverse transpose)
       const m = pg.flatTransformation;
@@ -109,25 +169,21 @@ export async function buildGeometry(api, modelID, { progress = () => {}, pause =
       const nor = new Int8Array(vc * 3); // normalized normals: 3 bytes per vertex instead of 12
       for (let k = 0, o = 0, q = 0; k < vc; k++, o += 6, q += 3) {
         const x = verts[o], y = verts[o + 1], z = verts[o + 2];
-        pos[q] = m0 * x + m4 * y + m8 * z + m12;
+        const px = m0 * x + m4 * y + m8 * z + m12, pz = m2 * x + m6 * y + m10 * z + m14;
+        pos[q] = px;
         pos[q + 1] = m1 * x + m5 * y + m9 * z + m13;
-        pos[q + 2] = m2 * x + m6 * y + m10 * z + m14;
+        pos[q + 2] = pz;
+        if (px < x0) x0 = px; if (px > x1) x1 = px; if (pz < z0) z0 = pz; if (pz > z1) z1 = pz;
         const a = verts[o + 3], bb = verts[o + 4], cc = verts[o + 5];
         const nx = n0 * a + n1 * bb + n2 * cc, ny = n3 * a + n4 * bb + n5 * cc, nz = n6 * a + n7 * bb + n8 * cc;
         const l = Math.hypot(nx, ny, nz) || 1;
         nor[q] = Math.round((nx / l) * 127); nor[q + 1] = Math.round((ny / l) * 127); nor[q + 2] = Math.round((nz / l) * 127);
       }
-      const ind = new Uint32Array(idx.length);
-      const off = b.vCount;
-      for (let k = 0; k < idx.length; k++) ind[k] = idx[k] + off;
-
-      const last = b.items[b.items.length - 1];
-      if (last && last.id === expressID && last.start + last.count === b.iCount) last.count += ind.length;
-      else b.items.push({ id: expressID, start: b.iCount, count: ind.length });
-
-      b.pos.push(pos); b.nor.push(nor); b.idx.push(ind);
-      b.vCount += vc; b.iCount += ind.length;
+      mine.push({ key, id: expressID, pos, nor, idx: Uint32Array.from(idx), vc });
     }
+    // the element's centre in plan (three.js: x and z) decides its cell
+    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+    for (const pc of mine) { pc.cx = cx; pc.cz = cz; pieces.push(pc); }
   };
 
   // Stream geometry in batches so the progress can be reported during large models.
@@ -147,17 +203,7 @@ export async function buildGeometry(api, modelID, { progress = () => {}, pause =
   geomCache.clear();
   await pause();
 
-  const merged = [];
-  for (const b of buckets.values()) {
-    merged.push({
-      color: b.color,
-      opacity: b.opacity,
-      positions: concat(Float32Array, b.pos, b.vCount * 3),
-      normals: concat(Int8Array, b.nor, b.vCount * 3),
-      index: concat(Uint32Array, b.idx, b.iCount),
-      items: b.items,
-    });
-    b.pos = b.nor = b.idx = null; // free the chunks of this bucket before merging the next
-  }
+  const merged = mergePieces(pieces, colors);
+  pieces.length = 0;
   return { buckets: merged, spaceIds: [...spaceIds], coordMatrix: [...api.GetCoordinationMatrix(modelID)] };
 }
