@@ -77,8 +77,10 @@ async function main() {
       models: window.onlineIfc.viewer.models.length,
       elements: window.onlineIfc.viewer.models.reduce((n, m) => n + m.elementIds.size, 0),
       alignments: window.onlineIfc.viewer.models.flatMap((m) => m.alignments || []).map((a) => a.name),
+      sources: [...new Set(window.onlineIfc.viewer.models.map((m) => m.geometrySource))].join(','),
     }));
     check('sample scene: 11 models', info.models === 11, `${info.elements} elements`);
+    check('IFC geometry built in a worker (#58)', /worker|cache/.test(info.sources) && !/main/.test(info.sources), info.sources);
     check('sample scene: alignments Track and Road', info.alignments.includes('Track') && info.alignments.includes('Road'), info.alignments.join(', '));
 
     // ---------------------------------------------------------------- station section on Track, section window, SVG

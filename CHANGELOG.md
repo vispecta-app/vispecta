@@ -32,6 +32,10 @@ https://github.com/vispecta-app/vispecta/releases
   the cloud has no ground class.
 
 ### Changed
+- **IFC geometry is built in a worker** ([#58](https://github.com/vispecta-app/vispecta/issues/58)): opening a model no
+  longer freezes the page while its geometry is read. On the Chesapeake sample (26 MB), the page was blocked in 13
+  long tasks for 2.1 s; it is now 2 tasks and 1.0 s. What is left is the page opening the file itself for properties
+  (0.7 s). This costs about 0.3 s more in total.
 - **The cut and fill dialog is laid out in two columns:** the settings on the left, the result on the right.
   The result has key figures (cut, fill, net, area) and a table that scrolls on its own, with a fixed header
   and a total row.
