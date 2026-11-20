@@ -36,6 +36,7 @@ import { FilterPanel, keyLabel } from './filters.js';
 import { IssuesPanel } from './issues.js';
 import { readAlignments, AlignmentLayer, SectionMarks, pointAt, heightAt, project, formatStation, parseStation, setStationFormat, stationFormat, STATION_FORMATS } from './alignment.js';
 import { loadPointCloud, LAS_CLASSES, classColor as lasClassColor } from './pointcloud.js';
+import { isCopc, openCopc } from './copc.js';
 import { Corridor } from './corridor.js';
 import { computeSection, computeProfile, planeAxes, layout, toSvg, toPdf, toPdfPages, toDxf, renderBackground, SCALES, AXIS_COLOR } from './drawing.js';
 import { ViewCube } from './viewcube.js';
@@ -426,13 +427,24 @@ function corridorCsv() {
 }
 
 // ------------------------------------------------------------- point clouds (#27)
-const CLOUD_FILE = /\.(las|laz|ply|xyz|pts|csv|txt)$/i;
+const CLOUD_FILE = /\.(las|laz|e57|ply|xyz|pts|csv|txt)$/i;
 viewer.cloudSlab = 0.1; // half thickness (m) of the slab of points shown in sections
+// file handles of dropped files (Chromium): a project can then open a large cloud again from where it is (#52)
+const fileHandles = new Map();
+const fileId = (f) => `${f.name}|${f.size}|${f.lastModified}`;
+// cloud settings from a project or a workspace, for clouds that are opened later (by file name)
+const pendingCloudSettings = new Map();
+
 async function openCloudFiles(list) {
   for (const file of list) {
     let cloud;
     try {
-      cloud = await withLoading((progress) => loadPointCloud(file, { onProgress: (f) => progress(t('pc.loading', { name: file.name }), f) }));
+      cloud = await withLoading(async (progress) => {
+        const onProgress = (f) => progress(t('pc.loading', { name: file.name }), f);
+        // COPC (cloud-optimised LAZ): opened piece by piece and streamed by the view (#52)
+        if (await isCopc(file).catch(() => false)) return openCopc(file, { onProgress });
+        return loadPointCloud(file, { onProgress });
+      });
     } catch (err) {
       console.error(err);
       toast(t('pc.failed', { name: file.name, error: err.message || err }));
@@ -441,13 +453,106 @@ async function openCloudFiles(list) {
     const first = !viewer.models.length && viewer.clouds.length === 0;
     viewer.addCloud(cloud);
     const far = viewer.models.length ? viewer.placeCloud(cloud) : null;
-    toast(t('pc.loaded', { name: file.name, n: fmtNum(cloud.count), total: fmtNum(cloud.total) }), true);
+    const settings = pendingCloudSettings.get(file.name);
+    if (settings) { applyCloudSettings(cloud, settings); pendingCloudSettings.delete(file.name); }
+    if (cloud.stream) setupStream(cloud);
+    toast(cloud.stream ? t('pc.loadedCopc', { name: file.name, total: fmtNum(cloud.total), nodes: fmtNum(cloud.stream.nodes.size) })
+      : t('pc.loaded', { name: file.name, n: fmtNum(cloud.count), total: fmtNum(cloud.total) }), true);
     if (far !== null && far > 1000) toast(t('pc.far', { name: file.name, km: (far / 1000).toFixed(1) }));
     if (first) viewer.fitBox(cloud.getBox(), { keepDirection: false });
+    let handle = null;
+    try { handle = (await fileHandles.get(fileId(file))) || null; } catch { handle = null; }
+    projects.cloudAdded(cloud, file, handle);
   }
   afterModelsChanged();
   secViewer?.planesChanged?.();
 }
+
+// --------------------------------------------------------- COPC streaming (#52)
+/** Connects a COPC cloud to the view: it loads what the camera, the sections and profiles need. */
+function setupStream(c) {
+  const st = c.stream;
+  // section planes in use: switched on in 3D, or shown in the section window
+  st.planes = () => {
+    const list = viewer.planes.filter((p) => p.enabled || p === secViewer?.plane);
+    return list.map((p) => ({ plane: p.plane, half: viewer.cloudSlab + 0.05 }));
+  };
+  let timer = 0;
+  st.addEventListener('change', () => {
+    viewer.invalidate(300);
+    // sections, the card and the status bar follow, a little later (points keep coming)
+    clearTimeout(timer);
+    timer = setTimeout(() => { secViewer?.planesChanged?.(); updateCloudMeta(c); renderStatus(); }, 350);
+  });
+  st.addEventListener('loading', () => updateCloudMeta(c, true));
+  st.addEventListener('idle', () => updateCloudMeta(c));
+  refineClouds();
+}
+
+function refineClouds() {
+  const viewport = { height: viewer.renderer.domElement.clientHeight };
+  for (const c of viewer.clouds) if (c.stream && c.visible) c.stream.refine(viewer.camera, viewport);
+}
+viewer.addEventListener('camerastill', refineClouds);
+viewer.addEventListener('planeschanged', () => { if (viewer.clouds.some((c) => c.stream)) refineClouds(); });
+
+/** The streaming line on a COPC cloud's card. */
+function updateCloudMeta(c, loading = false) {
+  const el = document.querySelector(`.cloud-card[data-uid="${c.uid}"] .pc-stream`);
+  if (el) el.textContent = streamText(c, loading || c.stream?.busy);
+}
+function streamText(c, loading) {
+  const st = c.stream;
+  return t(loading ? 'pc.streamLoading' : 'pc.stream', { shown: fmtNum(c.count), total: fmtNum(c.total), nodes: fmtNum(st.shown.length), all: fmtNum(st.nodes.size) });
+}
+
+/**
+ * Before a profile along a path: COPC clouds load the nodes along it at full density (#52).
+ * al: the alignment or drawn line; s0, s1: lengths along it.
+ */
+async function streamAlong(al, s0, s1) {
+  const streams = viewer.clouds.filter((c) => c.stream && c.visible);
+  if (!streams.length) return;
+  const pts = [];
+  const a = Math.max(0, Math.min(s0, s1)), b = Math.min(al.length, Math.max(s0, s1));
+  const n = Math.max(2, Math.ceil((b - a) / 5) + 1);
+  for (let i = 0; i < n; i++) { const q = pointAt(al, a + ((b - a) * i) / (n - 1)); pts.push(viewer.fromIfc(q.x, q.y, 0)); }
+  for (const c of streams) c.stream.setPath(pts, viewer.cloudSlab + 0.05);
+  refineClouds();
+  await Promise.all(streams.map((c) => c.stream.whenIdle()));
+  for (const c of streams) c.stream.setPath(null);
+}
+
+/** Settings of a cloud as stored in projects and workspaces. */
+function cloudSettings(c) {
+  return { name: c.name, alias: c.alias || null, visible: c.visible, mode: c.mode, pointSize: c.pointSize, share: c.share, hidden: [...c.hiddenClasses] };
+}
+function applyCloudSettings(c, x) {
+  if (!x) return;
+  c.alias = x.alias || null;
+  if (typeof x.visible === 'boolean') c.setVisible(x.visible);
+  if (x.mode) c.setMode(x.mode);
+  if (x.pointSize > 0) c.setPointSize(x.pointSize, viewer.renderer.getPixelRatio());
+  if (x.share > 0) c.setShare(x.share);
+  for (const k of x.hidden || []) c.setClassHidden(k, true);
+}
+/** Cloud settings from a project or workspace: applied to open clouds, kept for those opened later. */
+function restoreCloudSettings(list = [], { slab, edl } = {}) {
+  if (slab > 0) viewer.cloudSlab = slab;
+  if (typeof edl === 'boolean') setEdl(edl);
+  for (const x of list) {
+    const c = viewer.clouds.find((q) => q.name === x.name);
+    if (c) applyCloudSettings(c, x); else pendingCloudSettings.set(x.name, x);
+  }
+}
+
+/** Eye-dome lighting (#52): depth shading for point clouds, remembered in this browser. */
+function setEdl(on) {
+  viewer.edl = !!on;
+  try { localStorage.setItem('vispecta.edl', on ? '1' : '0'); } catch { /* ignore */ }
+  viewer.invalidate();
+}
+try { viewer.edl = localStorage.getItem('vispecta.edl') === '1'; } catch { viewer.edl = false; }
 
 /** Is anything loaded – IFC models or point clouds (#27)? Sections, measuring and profiles work on both. */
 function hasScene() { return viewer.models.length + viewer.clouds.length > 0; }
@@ -456,22 +561,24 @@ function hasScene() { return viewer.models.length + viewer.clouds.length > 0; }
 function cloudCard(c) {
   const open = c.cardOpen ?? true;
   const vis = h('input', { type: 'checkbox', title: t('models.visible'), checked: c.visible });
-  vis.addEventListener('change', () => { c.setVisible(vis.checked); renderModels(); cloudsChanged(); });
+  vis.addEventListener('change', () => { c.setVisible(vis.checked); renderModels(); cloudsChanged(); if (c.stream && c.visible) refineClouds(); });
   const label = h('span', { class: 'card-name', title: c.name }, breakableName(c.alias || c.name));
   const editAlias = () => inlineEdit(label, c.alias, c.name, (v) => { c.alias = v || null; renderModels(); });
   label.addEventListener('dblclick', editAlias);
   const sub = h('span', { class: 'card-file' }, c.alias ? breakableName(c.name) : null,
-    h('span', { class: 'muted', text: `${c.alias ? ' · ' : ''}${c.format} · ${t('pc.points', { n: fmtNum(c.count) })}` }));
+    h('span', { class: 'muted', text: `${c.alias ? ' · ' : ''}${c.format} · ${t('pc.points', { n: fmtNum(c.stream ? c.total : c.count) })}` }));
   const modes = [['rgb', !!c.rgb], ['class', !!c.classes && c.classCounts.size > 0], ['intensity', !!c.intensity], ['elevation', true], ['single', true]].filter((m) => m[1]);
   const modeSel = h('select', {}, modes.map(([m]) => h('option', { value: m, text: t(`pc.mode.${m}`), selected: m === c.mode })));
   modeSel.addEventListener('change', () => { c.setMode(modeSel.value); renderModels(); cloudsChanged(); });
   const size = h('input', { type: 'range', min: '1', max: '8', step: '0.5', value: String(c.pointSize) });
   const sizeVal = h('span', { class: 'muted', text: `${c.pointSize} px` });
   size.addEventListener('input', () => { c.setPointSize(+size.value, viewer.renderer.getPixelRatio()); sizeVal.textContent = `${size.value} px`; viewer.invalidate(); });
-  const share = h('select', { title: t('pc.shareTitle') }, [1, 0.5, 0.25, 0.1].map((f) => h('option', { value: String(f), text: `${f * 100} % · ${fmtNum(Math.round(c.count * f))}`, selected: f === c.share })));
+  const share = h('select', { title: t('pc.shareTitle') }, [1, 0.5, 0.25, 0.1].map((f) => h('option', { value: String(f), text: c.stream ? `${f * 100} %` : `${f * 100} % · ${fmtNum(Math.round(c.count * f))}`, selected: f === c.share })));
   share.addEventListener('change', () => { c.setShare(+share.value); viewer.invalidate(); });
   const slab = h('input', { type: 'number', min: '0.01', max: '5', step: '0.05', value: String(viewer.cloudSlab), class: 'num-sm', title: t('pc.slabTitle') });
   slab.addEventListener('change', () => { const v = +slab.value; if (v > 0) { viewer.cloudSlab = v; cloudsChanged(); } });
+  const edl = h('input', { type: 'checkbox', checked: !!viewer.edl });
+  edl.addEventListener('change', () => { setEdl(edl.checked); renderModels(); projects.touch?.(); });
   // classification: show/hide per class
   const classes = c.classCounts.size > 1 ? h('div', { class: 'pc-classes' }, [...c.classCounts].sort((a, b) => a[0] - b[0]).map(([k, n]) => {
     const cb = h('input', { type: 'checkbox', checked: !c.hiddenClasses.has(k) });
@@ -479,23 +586,27 @@ function cloudCard(c) {
     const sw = h('span', { class: 'pc-swatch' }); sw.style.background = lasClassColor(k);
     return h('label', { class: 'pc-class', title: `${k}` }, cb, sw, h('span', { text: lasClassName(k) }), h('span', { class: 'muted', text: fmtNum(n) }));
   })) : null;
-  return h('div', { class: `card model-card cloud-card${open ? ' open' : ''}${c.visible ? '' : ' off'}` },
+  return h('div', { class: `card model-card cloud-card${open ? ' open' : ''}${c.visible ? '' : ' off'}`, 'data-uid': String(c.uid) },
     h('div', { class: 'card-head' },
       h('button', { class: `mg-caret${open ? ' open' : ''}`, 'aria-expanded': String(open), 'aria-label': t('models.details'), onclick: () => { c.cardOpen = !open; renderModels(); } }),
       vis, h('span', { class: 'pc-icon', 'aria-hidden': 'true', text: '⁘' }),
       h('span', { class: 'card-title' }, label, sub),
       h('button', { class: 'icon-btn', title: t('models.aliasTitle'), text: '✎', onclick: editAlias })),
     open ? h('div', { class: 'card-body' },
-      h('div', { class: 'card-meta', text: t('pc.meta', { kept: fmtNum(c.count), total: fmtNum(c.total), placement: t(`pc.place.${c.placement}`) }) }),
+      c.stream ? h('div', { class: 'card-meta pc-stream', title: t('pc.streamTitle'), text: streamText(c, c.stream.busy) })
+        : h('div', { class: 'card-meta', text: t('pc.meta', { kept: fmtNum(c.count), total: fmtNum(c.total), placement: t(`pc.place.${c.placement}`) }) }),
+      c.stream ? h('div', { class: 'card-meta', text: t(`pc.place.${c.placement}`) }) : null,
+      c.scans > 1 ? h('div', { class: 'card-meta', text: t('pc.scans', { n: c.scans }) }) : null,
       h('div', { class: 'card-row' }, h('label', { text: t('pc.colour') }), modeSel),
       h('div', { class: 'card-row' }, h('label', { text: t('pc.size') }), size, sizeVal),
       h('div', { class: 'card-row' }, h('label', { text: t('pc.share') }), share),
       h('div', { class: 'card-row' }, h('label', { text: t('pc.slab') }), slab, h('span', { class: 'muted', text: 'm' })),
+      h('label', { class: 'card-row check', title: t('pc.edlTitle') }, edl, h('span', { text: t('pc.edl') })),
       classes,
       h('div', { class: 'card-btns' },
         h('button', { class: 'btn sm', onclick: () => viewer.fitBox(c.getBox()), text: t('models.zoom') }),
         h('button', { class: 'btn sm', onclick: () => openTerrainDialog(c), text: t('ter.button'), title: t('ter.buttonTitle') }),
-        h('button', { class: 'btn sm danger', onclick: () => { if (!confirm(t('pc.removeConfirm', { name: c.name }))) return; viewer.removeCloud(c); afterModelsChanged(); cloudsChanged(); }, text: t('models.remove') }))) : null);
+        h('button', { class: 'btn sm danger', onclick: () => { if (!confirm(t('pc.removeConfirm', { name: c.name }))) return; viewer.removeCloud(c); projects.cloudRemoved(c); afterModelsChanged(); cloudsChanged(); }, text: t('models.remove') }))) : null);
 }
 
 /** Name of a LAS class in the current language (ASPRS names in English as fallback). */
@@ -797,8 +908,10 @@ async function buildTerrain() {
   $('#terrain-dialog').close();
   const name = `${c.label.replace(/\.[^.]+$/, '')} – ${t('ter.suffix')}`;
   try {
+    // a COPC cloud: an even sample of all of it (the view may show only a part, #52)
+    const pts = c.stream ? await withLoading((progress) => c.stream.sample(c.stream.budget, (f) => progress(t('pc.loading', { name: c.label }), f))) : c;
     const res = await runTerrainWorker({
-      cloud: { positions: c.positions, classes: c.classes, hidden: [...c.hiddenClasses], toIfc: c.toIfcMatrix.elements },
+      cloud: { positions: pts.positions, classes: pts.classes, hidden: [...c.hiddenClasses], toIfc: c.toIfcMatrix.elements },
       grid, maxEdge, source: $('#ter-source').value, name, georef: terrainGeoref(),
     }, t('ter.building', { name: c.label }));
     await openTerrain(res, name);
@@ -1173,6 +1286,12 @@ window.addEventListener('drop', (e) => {
   e.preventDefault();
   e.stopPropagation();
   endDrag();
+  // file handles (Chromium): a large point cloud in a project is then opened from where it is (#52)
+  for (const it of e.dataTransfer.items || []) {
+    if (it.kind !== 'file' || !it.getAsFileSystemHandle) continue;
+    const f = it.getAsFile();
+    if (f && CLOUD_FILE.test(f.name)) fileHandles.set(fileId(f), it.getAsFileSystemHandle().catch(() => null));
+  }
   if (e.dataTransfer.files.length) openFiles(e.dataTransfer.files);
 }, true);
 window.addEventListener('blur', endDrag);
@@ -2596,7 +2715,7 @@ function openSecView(p, { popOut = false } = {}) {
     resetPoints: (pl) => resetAnnotPoints(pl),
     toggleCut: (pl) => togglePlaneCut(pl),
     onClose: () => viewer.setPlaneHighlight(null),
-    onPlane: (pl) => viewer.setPlaneHighlight(pl),
+    onPlane: (pl) => { viewer.setPlaneHighlight(pl); if (viewer.clouds.some((c) => c.stream)) setTimeout(refineClouds, 0); },
   });
   secViewer.open(p);
   if (popOut && !secViewer.win) secViewer.popOut();
@@ -2963,6 +3082,7 @@ async function computeProfileNow() {
     section = await withLoading(async (progress) => {
       progress(t('prof.cutting'), 0.3);
       await new Promise((r) => setTimeout(r, 30));
+      await streamAlong(al, from - al.station0, to - al.station0); // COPC: the points along the path (#52)
       return computeProfile(viewer, al, (s) => heightAt(al, s), { from: from - al.station0, to: to - al.station0, exag, fmt: fmtSt });
     });
   } catch (e) { console.error(e); toast(t('drw.failed', { error: e.message || e })); return null; }
@@ -3345,6 +3465,9 @@ const issues = new IssuesPanel({
 
 const views = new ViewsPanel({
   viewer, h, toast, download, state, issues,
+  // point clouds in the workspace file: names and settings (#52)
+  cloudSettings: () => viewer.clouds.map(cloudSettings),
+  restoreClouds: (list, opts) => { restoreCloudSettings(list, opts); renderModels(); cloudsChanged(); },
   root: $('#views'),
   setSelection: (map) => issues.ctx.setSelection(map),
   setSpacesVisible: (v) => issues.ctx.setSpacesVisible(v),
@@ -3360,12 +3483,14 @@ const projects = new ProjectManager({
     drawnPaths.length = 0;
     state.modelGroups = [];
     for (const m of [...viewer.models]) viewer.removeModel(m);
+    for (const c of [...viewer.clouds]) viewer.removeCloud(c); // a project holds its point clouds too (#52)
     state.selection.clear();
     state.treeKeys.clear();
     state.active = null;
     afterModelsChanged();
   },
   openFiles: (files, keys) => openIfcFiles(files, keys),
+  openClouds: (files) => openCloudFiles(files),
   afterRestore: () => { updateSpacesUi(); afterModelsChanged(); },
   getExtra: () => ({
     lines: drawnPaths.map((p) => ({ name: p.name, pts: pathPoints(p), ...(p.hidden ? { hidden: true } : {}) })),
@@ -3377,6 +3502,8 @@ const projects = new ProjectManager({
     stationFormat: stationFormat.value, // the client's stationing format stays with the project (#29)
     annotEdits: annotEdits.size ? [...annotEdits] : undefined, // points chosen by hand (#48)
     drawingPresets: userPresets.length ? userPresets : undefined, // drawing presets (#51)
+    clouds: viewer.clouds.length ? viewer.clouds.map(cloudSettings) : undefined, // point cloud settings (#52)
+    cloudSlab: viewer.cloudSlab,
     corridor: corridor.def ? { path: corridor.def.al.name, drawn: !!corridor.def.al.drawn, offsets: corridor.def.offsets, from: corridor.def.from, to: corridor.def.to } : null, // (#26)
   }),
   setExtra: (x) => {
@@ -3403,6 +3530,7 @@ const projects = new ProjectManager({
       m.setGroupHidden(g ? !g.visible : false);
     }
     if (x?.stationFormat) applyStationFormat(x.stationFormat);
+    restoreCloudSettings(x?.clouds || [], { slab: x?.cloudSlab });
     updateAlignments();
     const cd = x?.corridor, cal = cd && allAlignments().find((a) => a.name === cd.path && !!a.drawn === cd.drawn);
     if (cal) corridor.set({ al: cal, offsets: cd.offsets, from: cd.from, to: cd.to }); else corridor.clear();

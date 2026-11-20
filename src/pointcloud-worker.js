@@ -1,4 +1,4 @@
-// Point cloud reader (#27): LAS, LAZ, XYZ/CSV/TXT/PTS and PLY, read locally in a worker and thinned
+// Point cloud reader (#27): LAS, LAZ, E57 (#52), XYZ/CSV/TXT/PTS and PLY, read locally in a worker and thinned
 // to a point budget while reading.
 //
 // Thinning: a voxel grid (one point per cell) whose cell size is chosen from the extent and the
@@ -10,6 +10,7 @@
 // Message in: { file, budget }. Messages out: { progress }, { done: result } or { error }.
 import createLazPerf from 'laz-perf/lib/worker/laz-perf.js';
 import lazWasm from 'laz-perf/lib/worker/laz-perf.wasm?url';
+import { readE57 } from './e57.js';
 
 self.onmessage = async ({ data }) => {
   try {
@@ -28,6 +29,7 @@ async function read(file, budget) {
   const name = file.name.toLowerCase();
   if (name.endsWith('.las') || name.endsWith('.laz')) return readLas(file, budget);
   if (name.endsWith('.ply')) return readPly(file, budget);
+  if (name.endsWith('.e57')) return readE57(file, (total, bounds, opts) => new Sink(budget, total, bounds, opts), progress);
   return readText(file, budget);
 }
 

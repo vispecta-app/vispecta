@@ -16,6 +16,17 @@ https://github.com/vispecta-app/vispecta/releases
   a `.tif` and it opens as a terrain, cut to the models and placed in map coordinates.
 - **LandXML export of a terrain** ([#92](https://github.com/vispecta-app/vispecta/issues/92)): *Download LandXML*
   on its card.
+- **Very large point clouds as COPC** ([#52](https://github.com/vispecta-app/vispecta/issues/52)): a cloud-optimised
+  LAZ is read piece by piece, never whole. The parts the view needs are loaded (more detail close up, within the
+  point budget), and the rest is dropped again. Sections and longitudinal profiles load the points along them
+  at full density.
+- **E57 point clouds** ([#52](https://github.com/vispecta-app/vispecta/issues/52)) from terrestrial scanners: all
+  scan positions, placed with their poses. Cartesian or spherical coordinates, intensity and colour are read.
+- **Depth shading (EDL)** for point clouds ([#52](https://github.com/vispecta-app/vispecta/issues/52)): eye-dome
+  lighting, switched on the cloud's card.
+- **Point clouds in projects and workspaces** ([#52](https://github.com/vispecta-app/vispecta/issues/52)): clouds up
+  to 300 MB are stored with the project. Larger ones are kept as a reference (in Chrome/Edge they are opened
+  again from where they are). Their settings are saved too.
 - **Ground filter for point clouds without classes** ([#92](https://github.com/vispecta-app/vispecta/issues/92)): a
   morphological filter removes trees, buildings and vehicles before triangulation. It is the default when
   the cloud has no ground class.

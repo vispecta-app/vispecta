@@ -774,11 +774,76 @@ export class Viewer extends EventTarget {
       if (changed) {
         this._camKey = key;
         clearTimeout(this._lodTimer);
-        this._lodTimer = setTimeout(() => this.invalidate(), 200); // the camera stays: a frame with all points
+        // the camera stays: a frame with all points, and COPC clouds load what this view needs (#52)
+        this._lodTimer = setTimeout(() => { this.invalidate(); this.dispatchEvent(new Event('camerastill')); }, 200);
       }
       for (const c of this.clouds) c.updateLod(moving);
     }
-    this.renderer.render(this.scene, this.camera);
+    if (this.edl && this.clouds.some((c) => c.visible)) this.#renderEdl();
+    else this.renderer.render(this.scene, this.camera);
+  }
+
+  /**
+   * Eye-dome lighting (#52): the scene is drawn into a target with a depth texture, and a pass
+   * darkens each point pixel by how much nearer it is than its neighbours – edges and depth show in
+   * dense clouds without normals. Points mark their pixels in the alpha channel, so models keep
+   * their own shading.
+   */
+  #renderEdl() {
+    const r = this.renderer, size = r.getDrawingBufferSize(new THREE.Vector2());
+    if (!this._edl) {
+      const target = new THREE.WebGLRenderTarget(size.x, size.y, { samples: 4, type: THREE.HalfFloatType });
+      target.depthTexture = new THREE.DepthTexture(size.x, size.y);
+      const mat = new THREE.ShaderMaterial({
+        uniforms: { tColor: { value: target.texture }, tDepth: { value: target.depthTexture }, near: { value: 0.1 }, far: { value: 1000 }, ortho: { value: 0 }, px: { value: new THREE.Vector2() }, strength: { value: 1 }, radius: { value: 1.4 } },
+        vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+        fragmentShader: `#include <packing>
+          uniform sampler2D tColor; uniform sampler2D tDepth; uniform float near; uniform float far; uniform float ortho;
+          uniform vec2 px; uniform float strength; uniform float radius; varying vec2 vUv;
+          float logZ(vec2 uv) {
+            float d = texture2D(tDepth, uv).x;
+            if (d >= 1.0) return 0.0;
+            float z = ortho > 0.5 ? -orthographicDepthToViewZ(d, near, far) : -perspectiveDepthToViewZ(d, near, far);
+            return log2(max(z, 1e-4));
+          }
+          void main() {
+            vec4 c = texture2D(tColor, vUv);
+            if (c.a > 0.4 && c.a < 0.6) {
+              float d0 = logZ(vUv), sum = 0.0;
+              for (int i = 0; i < 8; i++) {
+                float a = float(i) * 0.785398;
+                float dn = logZ(vUv + vec2(cos(a), sin(a)) * px * radius);
+                if (dn != 0.0) sum += max(0.0, d0 - dn); // the background next to a point adds nothing
+              }
+              c.rgb *= exp(-sum / 8.0 * 300.0 * strength * 0.02);
+              c.a = 1.0;
+            }
+            gl_FragColor = c;
+            #include <colorspace_fragment>
+          }`,
+        depthTest: false, depthWrite: false, transparent: true, blending: THREE.NoBlending,
+      });
+      const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
+      quad.frustumCulled = false;
+      this._edl = { target, mat, quad, scene: new THREE.Scene().add(quad), cam: new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1) };
+    }
+    const e = this._edl, cam = this.camera;
+    if (e.target.width !== size.x || e.target.height !== size.y) e.target.setSize(size.x, size.y);
+    e.mat.uniforms.near.value = cam.near;
+    e.mat.uniforms.far.value = cam.far;
+    e.mat.uniforms.ortho.value = cam.isOrthographicCamera ? 1 : 0;
+    e.mat.uniforms.px.value.set(1 / size.x, 1 / size.y);
+    e.mat.uniforms.strength.value = this.edlStrength ?? 1;
+    for (const c of this.clouds) c.edlMark.value = 1;
+    r.setRenderTarget(e.target);
+    r.clear();
+    r.render(this.scene, cam);
+    for (const c of this.clouds) c.edlMark.value = 0;
+    r.setRenderTarget(null);
+    const clip = r.clippingPlanes;
+    r.clippingPlanes = [];
+    r.render(e.scene, e.cam);
+    r.clippingPlanes = clip;
   }
 
   screenshot() {

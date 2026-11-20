@@ -183,6 +183,65 @@ async function main() {
     // 59 × 39 cells, two triangles each, less the cell with the no-data corner (one triangle left)
     check('GeoTIFF height model opens as terrain', dhm.terrain && dhm.tris === 59 * 39 * 2 - 1, `${dhm.tris} triangles`);
     check('terrain contours (auto)', !!cont && cont.levels > 5, cont?.dbg || (cont ? `${cont.levels} levels every ${cont.interval} m` : 'no contour option'));
+
+    // ---------------------------------------------------------------- COPC streaming (#52): the survey as cloud-optimised LAZ
+    const FIX = path.join(ROOT, 'tests/fixtures');
+    const lazSlab = await page2.evaluate(() => {
+      document.querySelector('[data-action="plane-station"]').click();
+      const v = window.onlineIfc.viewer;
+      v.cloudSlab = 3;
+      return null;
+    });
+    await page2.waitForTimeout(1200);
+    const slabCount = () => page2.evaluate(() => { const v = window.onlineIfc.viewer, e = v.planes.find((q) => q.station); return v.clouds[0].slab(e.plane, v.cloudSlab, [], 1e9).length; });
+    const nLaz = await slabCount();
+    await page2.evaluate(() => { const v = window.onlineIfc.viewer; v.removeCloud(v.clouds[0]); });
+    await page2.setInputFiles('#file-input', path.join(FIX, 'survey.copc.laz'));
+    await page2.waitForFunction(() => window.onlineIfc.viewer.clouds[0]?.stream);
+    await idle(page2);
+    await page2.evaluate(() => window.onlineIfc.viewer.clouds[0].stream.whenIdle());
+    const copc = await page2.evaluate(() => { const c = window.onlineIfc.viewer.clouds[0]; return { format: c.format, total: c.total, count: c.count, nodes: c.stream.nodes.size, shown: c.stream.shown.length, placement: c.placement, card: document.querySelector('.pc-stream')?.textContent || '' }; });
+    check('COPC opens and streams (not read whole)', copc.format === 'COPC' && copc.total === 181960 && copc.count < copc.total && copc.nodes === 255 && /COPC/.test(copc.card), `${copc.count} of ${copc.total} points, ${copc.shown} of ${copc.nodes} nodes, ${copc.placement}`);
+    const nCopc = await slabCount();
+    check('COPC: full density in the section', lazSlab === null && nLaz > 50 && nCopc === nLaz, `${nCopc} points in the slab (LAZ ${nLaz}), ${copc.count} loaded`);
+    // a profile along the first alignment loads the nodes along it
+    await page2.evaluate(() => document.querySelector('[data-action="profile"]').click());
+    await page2.waitForSelector('#profile-dialog[open]');
+    await page2.evaluate(() => { const sel = document.querySelector('#prof-path'); sel.value = sel.options[0].value; sel.dispatchEvent(new Event('change')); });
+    await page2.evaluate(() => document.querySelector('[data-action="prof-show"]').click());
+    await page2.waitForFunction(() => document.querySelector('#prof-preview img'));
+    const prof = await page2.evaluate(() => window.onlineIfc.viewer.clouds[0].count);
+    check('COPC: a profile loads the points along the path', prof >= copc.count, `${prof} points loaded`);
+    await page2.keyboard.press('Escape');
+
+    // ---------------------------------------------------------------- E57 (#52): two scans with poses, and a spherical scan
+    await page2.evaluate(() => { const v = window.onlineIfc.viewer; for (const c of [...v.clouds]) v.removeCloud(c); });
+    await page2.setInputFiles('#file-input', [path.join(FIX, 'two-scans.e57'), path.join(FIX, 'spherical.e57')]);
+    await page2.waitForFunction(() => window.onlineIfc.viewer.clouds.length === 2);
+    await idle(page2);
+    const e57 = await page2.evaluate(() => window.onlineIfc.viewer.clouds.map((c) => ({ name: c.name, format: c.format, count: c.count, scans: c.scans, min: c.min, max: c.max, rgb: !!c.rgb })));
+    const [two, sph] = e57;
+    // scan 2 stands at (110, 200, 10) turned 90°: its 10 × 6 m room spans x 107–113, y 195–205
+    check('E57: two scans placed with their poses', two.format === 'E57' && two.count === 50000 && two.scans === 2 && two.rgb
+      && Math.abs(two.min[0] - 95) < 0.01 && Math.abs(two.max[0] - 113) < 0.01 && Math.abs(two.min[1] - 195) < 0.01 && Math.abs(two.max[1] - 205) < 0.01,
+    `${two.count} points, x ${two.min[0].toFixed(2)}–${two.max[0].toFixed(2)}, y ${two.min[1].toFixed(2)}–${two.max[1].toFixed(2)}`);
+    // libE57Format reads 18 021 valid points (the others are marked invalid)
+    check('E57: spherical coordinates, scaled integers, invalid points skipped', sph.count === 18021, `${sph.count} points`);
+
+    // ---------------------------------------------------------------- point clouds in projects (#52): stored, and their settings
+    const proj = await page2.evaluate(async () => {
+      const { viewer: v, projects: pm } = window.onlineIfc;
+      const c = v.clouds.find((q) => q.name === 'two-scans.e57');
+      c.alias = 'Rooms'; c.setMode('intensity'); c.setPointSize(3);
+      await pm.saveNow();
+      const id = pm.current.id;
+      await pm.close();
+      const empty = v.clouds.length;
+      await pm.open(id);
+      const r = v.clouds.find((q) => q.name === 'two-scans.e57');
+      return { empty, n: v.clouds.length, alias: r?.alias, mode: r?.mode, size: r?.pointSize, count: r?.count };
+    });
+    check('point clouds saved in the project and opened again with their settings', proj.empty === 0 && proj.n === 2 && proj.alias === 'Rooms' && proj.mode === 'intensity' && proj.size === 3 && proj.count === 50000, JSON.stringify(proj));
     await page2.context().close();
   } catch (e) {
     check('smoke test ran to the end', false, e.message.split('\n')[0]);
