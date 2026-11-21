@@ -71,6 +71,10 @@ async function main() {
   try {
     // ---------------------------------------------------------------- sample scene
     const page = await newPage(browser, base, errors);
+    // web-ifc (3.5 MB of JavaScript) is loaded with the first model, not with the start screen (code review, C)
+    await page.waitForTimeout(500);
+    const startJs = await page.evaluate(() => performance.getEntriesByType('resource').map((e) => e.name.split('/').pop()).filter((n) => /\.js$/.test(n)));
+    check('start screen without web-ifc', startJs.length > 0 && !startJs.some((n) => /web-ifc/.test(n)), startJs.join(', '));
     await page.click('[data-sample="scene"]');
     await page.waitForFunction(() => window.onlineIfc.viewer.models.length === 11, null, { timeout: 180000 });
     await idle(page);
@@ -83,6 +87,25 @@ async function main() {
     check('sample scene: 11 models', info.models === 11, `${info.elements} elements`);
     check('IFC geometry built in a worker (#58)', /worker|cache/.test(info.sources) && !/main/.test(info.sources), info.sources);
     check('sample scene: alignments Track and Road', info.alignments.includes('Track') && info.alignments.includes('Road'), info.alignments.join(', '));
+    // the picking index (BVH) comes from the IFC worker, and picks exactly like three.js without one
+    const bvh = await page.evaluate(() => {
+      const v = window.onlineIfc.viewer, rect = v.renderer.domElement.getBoundingClientRect();
+      let buckets = 0, fromWorker = 0;
+      for (const m of v.models) for (const b of m.buckets) { buckets++; if (b.bvh) fromWorker++; }
+      let same = 0, hits = 0, n = 0;
+      for (let i = 0; i < 20; i++) for (let j = 0; j < 15; j++) {
+        const x = rect.left + (i + 0.5) * rect.width / 20, y = rect.top + (j + 0.5) * rect.height / 15;
+        const h = v.pick(x, y);
+        v.raycaster.setFromCamera({ x: ((x - rect.left) / rect.width) * 2 - 1, y: -((y - rect.top) / rect.height) * 2 + 1 }, v.camera);
+        const meshes = []; for (const m of v.models) if (m.visible) for (const b of m.buckets) if (b.mesh.visible) meshes.push(b.mesh);
+        const r = v.raycaster.intersectObjects(meshes, false)[0];
+        const key = (p) => (p ? p.toArray().map((q) => q.toFixed(4)).join(',') : '-');
+        n++; if (h) hits++;
+        if (key(h?.point) === key(r?.point)) same++;
+      }
+      return { buckets, fromWorker, n, hits, same };
+    });
+    check('picking index (BVH) built in the IFC worker, picks like three.js', bvh.fromWorker === bvh.buckets && bvh.hits > 20 && bvh.same === bvh.n, JSON.stringify(bvh));
 
     // ---------------------------------------------------------------- station section on Track, section window, SVG
     await page.evaluate(() => document.querySelector('[data-action="plane-station"]').click());
@@ -402,9 +425,12 @@ async function main() {
       const empty = v.clouds.length;
       await pm.open(id);
       const r = v.clouds.find((q) => q.name === 'two-scans.e57');
-      return { empty, n: v.clouds.length, alias: r?.alias, mode: r?.mode, size: r?.pointSize, count: r?.count };
+      // the models come from the geometry cache, with their picking index (BVH)
+      const models = { n: v.models.length, cache: v.models.filter((m) => m.geometrySource === 'cache').length, bvh: v.models.filter((m) => m.buckets.every((b) => b.bvh)).length };
+      return { empty, n: v.clouds.length, alias: r?.alias, mode: r?.mode, size: r?.pointSize, count: r?.count, models };
     });
-    check('point clouds saved in the project and opened again with their settings', proj.empty === 0 && proj.n === 2 && proj.alias === 'Rooms' && proj.mode === 'intensity' && proj.size === 3 && proj.count === 50000, JSON.stringify(proj));
+    check('point clouds saved in the project and opened again with their settings', proj.empty === 0 && proj.n === 2 && proj.alias === 'Rooms' && proj.mode === 'intensity' && proj.size === 3 && proj.count === 50000, JSON.stringify({ ...proj, models: undefined }));
+    check('project models opened from the geometry cache with their picking index', proj.models.n >= 9 && proj.models.cache === proj.models.n && proj.models.bvh === proj.models.n, JSON.stringify(proj.models));
 
     // ---------------------------------------------------------------- coordinate systems (#107)
     // the alignment file and a part of the survey in ETRS89 / UTM 33N (tests/fixtures/make_utm33.py);
@@ -427,6 +453,32 @@ async function main() {
     const c1 = await crsCheck();
     // the fixture's own map conversion is a similarity fitted at its origin: up to 5 mm off at its ends
     check('UTM 33N model converted into the project (UTM 32N)', c1.project === 'EPSG:25832' && c1.crs[0] === 'EPSG:25833' && c1.d < 0.01, `alignment within ${(c1.d * 1000).toFixed(1)} mm`);
+    // a model with geometry in UTM 33N is converted vertex by vertex (warpPositions); the geometry
+    // cache must keep its positions as loaded, or the conversion is applied twice when it is opened again
+    const track33 = fs.readFileSync(path.join(DIST, 'samples/double-track-railway/02-Track.ifc'), 'latin1').replace("IFCPROJECTEDCRS('EPSG:25832'", "IFCPROJECTEDCRS('EPSG:25833'");
+    await page2.setInputFiles('#file-input', { name: 'track-utm33.ifc', mimeType: 'application/x-step', buffer: Buffer.from(track33, 'latin1') });
+    await page2.waitForFunction(() => window.onlineIfc.viewer.models.some((m) => m.name === 'track-utm33.ifc'));
+    await idle(page2);
+    await page2.waitForTimeout(3000); // the cache is written 1.5 s after loading
+    const warp = await page2.evaluate(async () => {
+      const v = window.onlineIfc.viewer, m = v.models.find((x) => x.name === 'track-utm33.ifc');
+      const key = window.onlineIfc.projects.keys.get(m);
+      const db = await new Promise((res, rej) => { const q = indexedDB.open('onlineifc'); q.onsuccess = () => res(q.result); q.onerror = rej; });
+      const rec = await new Promise((res) => { const q = db.transaction('geom').objectStore('geom').get(key); q.onsuccess = () => res(q.result); });
+      db.close();
+      const out = { warped: !!m.warped, cached: !!rec, moved: 0, offOriginal: 0 };
+      if (rec) {
+        const buf = await rec.blob.arrayBuffer();
+        rec.header.buckets.forEach((hb, i) => {
+          const P = new Float32Array(buf, hb.positions[0], hb.positions[1]), b = m.buckets[i];
+          const orig = b.positions0 || b.positions, now = b.geometry.getAttribute('position').array;
+          for (let k = 0; k < P.length; k++) { out.offOriginal = Math.max(out.offOriginal, Math.abs(P[k] - orig[k])); out.moved = Math.max(out.moved, Math.abs(now[k] - orig[k])); }
+        });
+      }
+      v.removeModel(m);
+      return out;
+    });
+    check('geometry cache keeps the positions as loaded, not as converted', warp.warped && warp.cached && warp.moved > 0 && warp.offOriginal === 0, JSON.stringify(warp));
     check('UTM 33N point cloud converted point by point', c1.crs[1] === 'EPSG:25833' && c1.near < 0.002, `${(c1.near * 1000).toFixed(2)} mm`);
     await page2.click('.tab[data-tab="models"]');
     await page2.evaluate(() => { const sel = document.querySelector('.crs-bar select'); sel.value = 'EPSG:25833'; sel.dispatchEvent(new Event('change')); });

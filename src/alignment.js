@@ -4,7 +4,7 @@
 // Used to draw the alignment with station marks and to give station + offset for points.
 import * as THREE from 'three';
 import { OVERLAY_ORDER } from './cutlines.js';
-import * as WebIFC from 'web-ifc';
+import { WebIFC } from './webifc.js'; // loaded with the first model (getApi)
 import { fmtValue } from './ifc.js';
 
 const num = (v) => {

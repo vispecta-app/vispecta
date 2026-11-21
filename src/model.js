@@ -1,7 +1,8 @@
 // A loaded IFC model: geometry, visibility, colours, selection, metadata and editing.
 import * as THREE from 'three';
-import * as WebIFC from 'web-ifc';
-import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh';
+import { WebIFC } from './webifc.js'; // loaded with the first model (getApi)
+import { acceleratedRaycast } from 'three-mesh-bvh';
+import { bvhFor } from './bvh.js';
 import { fmtValue, prettyTypeName, prettyRawName, decodeIfcString } from './ifc.js';
 import { t } from './i18n.js';
 import { ramp, percentiles } from './pointcloud.js';
@@ -454,7 +455,9 @@ export class IfcModel {
         const g = new THREE.BufferGeometry();
         g.setAttribute('position', b.geometry.getAttribute('position'));
         g.setIndex(new THREE.BufferAttribute(b.index, 1));
-        g.boundsTree = new MeshBVH(g, { indirect: true, targetLeafSize: 12 });
+        // built in the IFC worker or read from the cache; built now when there is none, or when the
+        // positions were moved (warpPositions: b.positions0 holds them as loaded)
+        g.boundsTree = bvhFor(g, b.positions0 ? null : b.bvh);
         const mesh = new THREE.Mesh(g, PICK_MATERIAL);
         mesh.raycast = acceleratedRaycast;
         mesh.visible = false;
@@ -463,6 +466,9 @@ export class IfcModel {
         b.itemStarts = Int32Array.from(b.items.map((it) => it.start));
         b.pickMesh = mesh;
         this.group.add(mesh);
+        // its world matrix now, not at the next frame: a pick right away (the first click, or the
+        // first after a coordinate conversion) would otherwise hit in the model's own coordinates
+        mesh.updateWorldMatrix(true, false, true); // (forced: its matrix is never "auto-updated")
       }
       out.push(b.pickMesh);
     }
@@ -846,7 +852,8 @@ export class IfcModel {
       P.needsUpdate = true;
       b.geometry.computeBoundingBox();
       b.geometry.computeBoundingSphere();
-      // picking builds its tree again from the new positions
+      // picking builds its tree again from the new positions (b.bvh from the worker fits the
+      // positions as loaded: it is used again when they are put back)
       if (b.pickMesh) { b.pickMesh.removeFromParent(); b.pickMesh.geometry.boundsTree = null; b.pickMesh = null; }
     }
     this.warped = !!fn;

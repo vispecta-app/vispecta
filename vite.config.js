@@ -49,7 +49,9 @@ export default defineConfig({
       output: {
         advancedChunks: {
           groups: [
-            { name: 'web-ifc', test: /node_modules[\\/]web-ifc/ },
+            // only its JavaScript: the wasm URL (web-ifc.wasm?url) is a string the app needs at once,
+            // and in this group it would make the whole library load with the page
+            { name: 'web-ifc', test: /node_modules[\\/]web-ifc[\\/][^?]*\.m?js$/ },
             { name: 'three', test: /node_modules[\\/](three|three-mesh-bvh)[\\/]/ },
             { name: 'editor', test: /node_modules[\\/](codemirror|@codemirror|@lezer|crelt|style-mod|w3c-keyname|@marijn)/ },
           ],

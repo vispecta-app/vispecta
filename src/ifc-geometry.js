@@ -9,7 +9,7 @@
 // and cell, each with its own bounding box, so three.js skips what is out of view. Elements stay
 // whole (by the centre of their box), and cells with few triangles of a colour are put together
 // again, so the number of draw calls stays small.
-import * as WebIFC from 'web-ifc';
+import { WebIFC } from './webifc.js'; // loaded by the caller first (getApi, or the worker)
 
 /** expressIDs of all objects that can have geometry (same set as StreamAllMeshes, without spaces). */
 const GEOMETRY_TYPES = ['IFCSITE', 'IFCBUILDING', 'IFCBUILDINGSTOREY', 'IFCFACILITY', 'IFCFACILITYPART', 'IFCBRIDGE', 'IFCROAD', 'IFCRAILWAY',

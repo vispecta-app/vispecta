@@ -82,7 +82,8 @@ export class ProjectManager extends EventTarget {
   async #putGeometry(key, g) {
     try {
       const est = await store.estimate();
-      const bytes = g.buckets.reduce((a, b) => a + b.positions.byteLength + b.normals.byteLength + b.index.byteLength + b.items.length * 12, 0);
+      const bvhBytes = (b) => (b.bvh ? b.bvh.indirect.byteLength + b.bvh.roots.reduce((n, r) => n + r.byteLength, 0) : 0);
+      const bytes = g.buckets.reduce((a, b) => a + b.positions.byteLength + b.normals.byteLength + b.index.byteLength + b.items.length * 12 + bvhBytes(b), 0);
       if (est && est.quota && est.usage + bytes > est.quota * 0.8) return; // not enough room: just skip the cache
       await store.putGeometry(key, g);
       // keep the geometry cache within ~30 % of the available space (oldest caches go first)

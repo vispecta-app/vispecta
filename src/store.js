@@ -12,7 +12,8 @@ import * as THREE from 'three';
 const DB_NAME = 'onlineifc';
 const DB_VERSION = 2; // 2: property indexes (#61)
 // Bump when the loader changes in a way that changes the geometry (invalidates the geometry cache).
-export const GEOMETRY_FORMAT = 'g3-webifc0.0.78-seg16-cells'; // g3: long models split into cells (#60)
+// g3: long models split into cells (#60); g4: with the picking index (BVH) of each bucket
+export const GEOMETRY_FORMAT = 'g4-webifc0.0.78-seg16-cells-bvh';
 
 let dbPromise = null;
 function db() {
@@ -128,9 +129,13 @@ export async function putGeometry(key, { buckets, spaceIds, coordMatrix, schema,
   for (const b of buckets) {
     const items = new Uint32Array(b.items.length * 3);
     b.items.forEach((it, i) => { items[i * 3] = it.id; items[i * 3 + 1] = it.start; items[i * 3 + 2] = it.count; });
+    // the picking index (bvh.js): its node buffers and its own triangle index (16 or 32 bits)
+    const bvh = b.bvh?.roots?.length && b.bvh.indirect
+      ? { roots: b.bvh.roots.map((r) => add(new Uint8Array(r))), indirect: add(b.bvh.indirect), bits: b.bvh.indirect.BYTES_PER_ELEMENT * 8 }
+      : null;
     header.buckets.push({
       color: [b.color.r, b.color.g, b.color.b], opacity: b.opacity,
-      positions: add(b.positions), normals: add(b.normals), index: add(b.index), items: add(items),
+      positions: add(b.positions), normals: add(b.normals), index: add(b.index), items: add(items), bvh,
     });
   }
   const blob = new Blob(parts);
@@ -151,6 +156,8 @@ export async function getGeometry(key) {
     return {
       color: new THREE.Color(b.color[0], b.color[1], b.color[2]), opacity: b.opacity,
       positions: view(Float32Array, b.positions), normals: view(Int8Array, b.normals), index: view(Uint32Array, b.index), items: list,
+      // node buffers are copied out: three-mesh-bvh reads each as an ArrayBuffer of its own
+      bvh: b.bvh ? { roots: b.bvh.roots.map(([at, len]) => buf.slice(at, at + len)), indirect: view(b.bvh.bits === 16 ? Uint16Array : Uint32Array, b.bvh.indirect) } : null,
     };
   });
   // remember when it was used (oldest unused caches are removed first). The record is written
