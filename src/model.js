@@ -199,6 +199,7 @@ export class IfcModel {
     m.opacity = op;
     m.depthWrite = !transparent;
     for (const f of b.fades || []) this.#styleFade(b, f);
+    this.onChange?.();
   }
 
   setColor(color) {
@@ -269,6 +270,7 @@ export class IfcModel {
   #applyVisible() {
     this.visible = this.ownVisible !== false && !this.groupHidden;
     this.group.visible = this.visible;
+    this.onChange?.();
   }
 
   /** The name shown in the app: the alias, or the file name. */
@@ -419,7 +421,7 @@ export class IfcModel {
 
   #rebuildAll() {
     for (const b of this.buckets) this.#rebuild(b);
-    this.#updateHighlight();
+    this.#updateHighlight(); // (tells onChange)
   }
 
   hide(ids) { for (const id of ids) this.hidden.add(id); this.#rebuildAll(); }
@@ -516,6 +518,7 @@ export class IfcModel {
       b.highlight = hm;
       this.group.add(hm);
     }
+    this.onChange?.();
   }
 
   /**

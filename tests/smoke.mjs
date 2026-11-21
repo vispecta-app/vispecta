@@ -209,11 +209,48 @@ async function main() {
     const edl = await page.evaluate(() => {
       const v = window.onlineIfc.viewer, was = v.edl;
       v.edl = true; v.renderFrame(); const on = !!v._edl;
+      const tex = v._edl?.target.texture;
+      const format = `${tex?.type === 1009 ? 'uint8' : tex?.type}/${tex?.colorSpace}`; // UnsignedByteType, sRGB
       v.edl = false; v.renderFrame(); const off = !v._edl;
       v.edl = was;
-      return { on, off };
+      return { on, off, format };
     });
-    check('EDL render target freed when depth shading is off', edl.on && edl.off, JSON.stringify(edl));
+    check('EDL render target: 8-bit sRGB, freed when depth shading is off', edl.on && edl.off && edl.format === 'uint8/srgb', JSON.stringify(edl));
+    // an idle view is not drawn again and again, and a change without any input still is drawn
+    const redraw = await page.evaluate(async () => {
+      const v = window.onlineIfc.viewer, orig = v.renderFrame.bind(v);
+      let n = 0;
+      v.renderFrame = (...a) => { if (!a.length) n++; return orig(...a); }; // frames of the render loop (not pictures for autosave)
+      await new Promise((r) => setTimeout(r, 1500)); // settle
+      n = 0;
+      await new Promise((r) => setTimeout(r, 3000));
+      const idle = n;
+      n = 0;
+      const m = v.models[0];
+      m.setColor(0xff0000); // no input event: the model asks for the frame itself
+      await new Promise((r) => setTimeout(r, 300));
+      const changed = n;
+      m.setColor(null);
+      v.renderFrame = orig;
+      return { idle, changed };
+    });
+    // (at most the safety-net frame, every 5 s; it was one every 0.5 s)
+    check('idle view not redrawn; a change still is', redraw.idle <= 1 && redraw.changed > 0, JSON.stringify(redraw));
+    // the Python runtime override (localStorage): only https: or this site, and shown in the About dialog
+    const about = async () => {
+      await page.evaluate(() => document.querySelector('[data-action="about"]').click());
+      await page.waitForSelector('#about-dialog[open]');
+      const text = await page.evaluate(() => document.querySelector('#about-version').textContent);
+      await page.evaluate(() => document.querySelector('#about-dialog').close());
+      return text;
+    };
+    await page.evaluate(() => localStorage.setItem('onlineifc.python', JSON.stringify({ pyodideBase: 'http://mirror.example.com/pyodide/', packages: ['numpy', 'x; import os'] })));
+    const pyBad = await about();
+    await page.evaluate(() => localStorage.setItem('onlineifc.python', JSON.stringify({ pyodideBase: 'https://mirror.example.com/pyodide/' })));
+    const pyOk = await about();
+    await page.evaluate(() => localStorage.removeItem('onlineifc.python'));
+    const pyNone = await about();
+    check('Python override: http: and odd package names ignored, an override shown', /ignored \(pyodideBase, packages\)/.test(pyBad) && /another source.*mirror\.example\.com/.test(pyOk) && !/override/i.test(pyNone), `${pyBad.slice(-120)} | ${pyOk.slice(-80)}`);
 
     // ---------------------------------------------------------------- BCF and workspace files from others (code review)
     const { zipSync, strToU8 } = await import('fflate');

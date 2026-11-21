@@ -11,6 +11,8 @@ const nearIdentity = (m) => m.elements.every((v, i) => Math.abs(v - (i % 5 === 0
 // IFC (Z up) <-> three.js (Y up)
 const Y_UP = new THREE.Matrix4().set(1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1);
 const Z_UP = Y_UP.clone().invert();
+// an idle view is drawn again after this long anyway, in case a change asked for no frame
+const IDLE_REDRAW_MS = 5000;
 
 const AXES = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
 
@@ -92,8 +94,9 @@ export class Viewer extends EventTarget {
     this.renderHooks = []; // functions called every frame after rendering (e.g. measurement labels)
     this.dblclickCenters = true;
     // Render on demand: a frame is drawn while the camera moves, for a short while after any input
-    // or invalidate(), and otherwise twice a second as a safety net. An idle view costs no GPU time,
-    // which matters for large models (fans, battery).
+    // or invalidate() – models and clouds ask for it themselves when their look changes – and
+    // otherwise every few seconds as a safety net. An idle view costs no GPU time, which matters for
+    // large models (fans, battery).
     this.dirtyUntil = 0;
     let lastRender = 0;
     let lastCam = '';
@@ -105,7 +108,7 @@ export class Viewer extends EventTarget {
       requestAnimationFrame(loop);
       const moved = this.controls.update();
       const key = camKey();
-      if (!moved && key === lastCam && now > this.dirtyUntil && now - lastRender < 500) return;
+      if (!moved && key === lastCam && now > this.dirtyUntil && now - lastRender < IDLE_REDRAW_MS) return;
       lastCam = key;
       lastRender = now;
       this.#updateClip();
@@ -196,6 +199,7 @@ export class Viewer extends EventTarget {
     this.#place(model);
     this.models.push(model);
     this.modelRoot.add(model.group);
+    model.onChange = () => this.invalidate(100); // a change of its look is drawn, whatever caused it
     model.setSelection([], this.highlightMaterial);
     for (const c of this.clouds) this.placeCloud(c); // the model may bring the map conversion (#27)
     this.#updateSceneRadius();
@@ -217,6 +221,7 @@ export class Viewer extends EventTarget {
     }
     this.clouds.push(cloud);
     this.modelRoot.add(cloud.points);
+    cloud.onChange = () => this.invalidate(100);
     cloud.setPointSize(cloud.pointSize, this.renderer.getPixelRatio());
     this.placeCloud(cloud);
     this.#updateSceneRadius();
@@ -942,7 +947,10 @@ export class Viewer extends EventTarget {
   #renderEdl() {
     const r = this.renderer, size = r.getDrawingBufferSize(new THREE.Vector2());
     if (!this._edl) {
-      const target = new THREE.WebGLRenderTarget(size.x, size.y, { samples: 4, type: THREE.HalfFloatType });
+      // 8 bits per channel, stored as sRGB (the hardware converts on write and read): no banding in
+      // the dark tones, and half the memory of a half-float target. The alpha channel stays linear
+      // (it carries the point mark, 0.5).
+      const target = new THREE.WebGLRenderTarget(size.x, size.y, { samples: 4, type: THREE.UnsignedByteType, colorSpace: THREE.SRGBColorSpace });
       target.depthTexture = new THREE.DepthTexture(size.x, size.y);
       const mat = new THREE.ShaderMaterial({
         uniforms: { tColor: { value: target.texture }, tDepth: { value: target.depthTexture }, near: { value: 0.1 }, far: { value: 1000 }, ortho: { value: 0 }, px: { value: new THREE.Vector2() }, strength: { value: 1 }, radius: { value: 1.4 } },
