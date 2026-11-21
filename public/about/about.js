@@ -9,6 +9,7 @@
       'nav.features': 'Funktioner', 'nav.privacy': 'Privatliv', 'nav.faq': 'Spørgsmål', 'nav.lang': 'Sprog',
       'cta.open': 'Åbn Vispecta', 'cta.github': 'Kildekoden på GitHub',
       'hero.eyebrow': 'IFC-viewer til infrastruktur',
+      'hero3d.alt': 'Dobbeltspor-eksemplet i 3D, skåret af et tværsnit på broen ved 12+205: det skraverede brodæk med begge spor, rækværket og åen nedenunder',
       'hero.title': 'Snit, stationer og profiler – direkte fra dine IFC-modeller.',
       'hero.lead': 'Vispecta åbner IFC-modeller i browseren og laver tværsnit, længdeprofiler og tegninger – skabt til bane- og vejprojekter. Gratis, open source, og dine filer forlader aldrig din computer.',
       'fact.free': 'Gratis', 'fact.oss': 'Open source · AGPL-3.0', 'fact.local': 'Kører lokalt',
@@ -67,6 +68,7 @@
       'nav.features': 'Funktionen', 'nav.privacy': 'Datenschutz', 'nav.faq': 'Fragen', 'nav.lang': 'Sprache',
       'cta.open': 'Vispecta öffnen', 'cta.github': 'Quellcode auf GitHub',
       'hero.eyebrow': 'IFC-Viewer für Infrastruktur',
+      'hero3d.alt': 'Das zweigleisige Beispiel in 3D, durch einen Querschnitt auf der Brücke bei 12+205 geschnitten: das schraffierte Brückendeck mit beiden Gleisen, das Geländer und der Bach darunter',
       'hero.title': 'Schnitte, Stationen und Profile – direkt aus Ihren IFC-Modellen.',
       'hero.lead': 'Vispecta öffnet IFC-Modelle im Browser und macht daraus Querschnitte, Längsprofile und Zeichnungen – gemacht für Bahn- und Straßenprojekte. Kostenlos, Open Source, und Ihre Dateien verlassen nie Ihren Computer.',
       'fact.free': 'Kostenlos', 'fact.oss': 'Open Source · AGPL-3.0', 'fact.local': 'Läuft lokal',
@@ -126,6 +128,8 @@
   const KEY = 'onlineifc.lang'; // shared with the app
   const els = [...document.querySelectorAll('[data-t]')];
   const en = new Map(els.map((e) => [e, e.textContent]));
+  const alts = [...document.querySelectorAll('[data-t-alt]')];
+  const enAlt = new Map(alts.map((e) => [e, e.alt]));
   const enTitle = document.title;
 
   function pick() {
@@ -143,6 +147,7 @@
   function apply(lang) {
     const d = T[lang] || {};
     for (const e of els) e.textContent = d[e.dataset.t] ?? en.get(e);
+    for (const e of alts) e.alt = d[e.dataset.tAlt] ?? enAlt.get(e);
     document.title = d._title || enTitle;
     document.documentElement.lang = lang;
     document.getElementById('lang').value = lang;
@@ -245,6 +250,20 @@
         }, { threshold: 0.6 });
         mo.observe(conMark);
       }));
+    }
+  }
+
+  // the live 3D hero (hero.js, built from src/about-hero.js): loaded after the page, where it can run –
+  // WebGL 2, gzip in the browser, no reduced motion, no data saver. The poster stays otherwise.
+  const hero = document.getElementById('hero-3d');
+  if (hero && !matchMedia('(prefers-reduced-motion: reduce)').matches && !navigator.connection?.saveData
+    && 'DecompressionStream' in window && 'IntersectionObserver' in window && 'ResizeObserver' in window) {
+    let gl = false;
+    try { const c = document.createElement('canvas').getContext('webgl2'); gl = !!c; c?.getExtension('WEBGL_lose_context')?.loseContext(); } catch { gl = false; }
+    const start = () => import('./hero.js').then((m) => m.startHero(hero, { data: 'hero/rail.bin.gz' })).catch((e) => console.warn('3D hero:', e));
+    if (gl) {
+      if (document.readyState === 'complete') setTimeout(start, 150);
+      else addEventListener('load', () => setTimeout(start, 150), { once: true });
     }
   }
 
