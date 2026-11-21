@@ -7,7 +7,7 @@ This file is updated when a release is made, from the pull requests merged since
 
 ## Unreleased
 
-## v0.0.5 – 20.11.2026
+## v0.0.5 – 21.11.2026
 
 ### Added
 - **Terrain from a height model or a survey, and earthworks** ([#92](https://github.com/vispecta-app/vispecta/issues/92)):
@@ -65,10 +65,26 @@ This file is updated when a release is made, from the pull requests merged since
     time, because the index is kept in the browser.
   - **Autosave no longer stutters:** the project's picture is taken at most once a minute, and never while the
     page is hidden or closing.
+  - **Colours and selection no longer send the model to the graphics card again.** A filter colour sent 16.8 MB
+    for Chesapeake's 13.5 MB of vertices, now 4.1 MB; a selection 0.57 MB, now nothing. While a filter colour is
+    dragged, it is applied at most once a frame.
+  - **The picking index is built in the worker** with the geometry, and kept in the browser with it: the main
+    thread needs 1–2 ms for it instead of 106–170 ms (Chesapeake), seconds for the largest models.
+  - **The start screen loads 1.5 MB of JavaScript instead of 4.9 MB:** the IFC library (web-ifc) is loaded with
+    the first model.
+  - **An idle view is not drawn again** (it was, twice a second, as a safety net): no GPU time while nothing
+    changes.
+  - **Less graphics memory for depth shading (EDL):** a third less while it is on, none while it is off.
 - **Content Security Policy and a bounded offline cache** ([#64](https://github.com/vispecta-app/vispecta/issues/64)):
   - the pages load only from the site itself, and contact no other server than the GitHub API (update check)
     and epsg.io (a looked-up coordinate system);
   - the sample models and the Python runtime are cached apart from the app, only once used, and under 250 MB.
+- **Files from others are checked more strictly:**
+  - a BCF file unpacks only its BCF entries, within limits (a "zip bomb" cannot freeze the page);
+  - a workspace file gives only well-formed views and issues, and its pictures must be images;
+  - drawing presets set only the drawing dialog's fields, and coordinate system definitions are checked;
+  - an override of where the Python runtime comes from (an intranet mirror) must be https: or the site itself,
+    and the About dialog says when one is used.
 - **Layout:**
   - **Floating panels can be moved** by their header: sections, measure, drive, compare and IDS. Positions are
     remembered, and a double-click puts a panel back.
@@ -101,6 +117,11 @@ This file is updated when a release is made, from the pull requests merged since
 - **The welcome screen on phones:**
   - the view cube no longer covers the heading;
   - the sample buttons no longer run off the screen.
+- **A model converted vertex by vertex into the project's coordinate system** (#107) was converted a second time
+  when the project was opened again: the browser kept the converted positions instead of the ones in the file.
+- **A file that fails to load** no longer keeps its memory in the IFC library until the page is reloaded.
+- **A COPC cloud no longer waits for ever** when its worker stops (e.g. out of memory).
+- **A click right after a coordinate conversion** could select in the wrong place.
 
 ## v0.0.4 – 18.11.2026
 
