@@ -127,29 +127,44 @@ export class ViewsPanel {
 
   async openWorkspace(file) {
     const { viewer, issues, toast } = this.ctx;
-    let ws;
+    // A workspace file can come from someone else: only the parts with the expected shape are taken,
+    // checked before anything is changed. (Its texts are only ever shown as text.)
+    const isObj = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
+    const list = (x) => (Array.isArray(x) ? x : []);
+    const isView = (v) => isObj(v) && isObj(v.viewpoint) && (v.models === undefined || Array.isArray(v.models));
+    const image = (x) => (typeof x === 'string' && /^data:image\/(png|jpeg|webp);base64,/.test(x) ? x : null);
+    const bytes = (x) => { try { return typeof x === 'string' ? fromB64(x) : null; } catch { return null; } };
+    let ws, wsViews, wsTopics;
     try {
       ws = JSON.parse(await file.text());
-      if (ws.format !== 'workspace') throw new Error('format');
+      if (!isObj(ws) || ws.format !== 'workspace') throw new Error('format');
+      wsViews = list(ws.views).filter((v) => isView(v) && typeof v.id === 'string' && typeof v.name === 'string')
+        .map((v) => ({ ...v, thumb: image(v.thumb) }));
+      wsTopics = list(ws.issues).filter((tp) => isObj(tp) && typeof tp.guid === 'string').map((tp) => ({
+        ...tp,
+        labels: list(tp.labels).filter((l) => typeof l === 'string'),
+        comments: list(tp.comments).filter(isObj),
+        // _url: an object URL made here, never one from the file
+        viewpoints: list(tp.viewpoints).filter(isObj).map(({ _url, ...vp }) => ({ ...vp, snapshot: bytes(vp.snapshot) })),
+      }));
+      if (ws.current !== undefined && ws.current !== null && !isView(ws.current)) ws.current = null;
+      ws.clouds = list(ws.clouds).filter(isObj);
+      ws.models = list(ws.models).filter(isObj);
     } catch {
       toast(t('views.badFile'));
       return;
     }
     const known = new Set(this.views.map((v) => v.id));
-    for (const v of ws.views || []) if (!known.has(v.id)) this.views.push(v);
+    for (const v of wsViews) if (!known.has(v.id)) this.views.push(v);
     this.#persist();
-    if (issues && ws.issues?.length) {
+    if (issues && wsTopics.length) {
       const have = new Set(issues.topics.map((x) => x.guid));
-      for (const tp of ws.issues) {
-        if (have.has(tp.guid)) continue;
-        tp.viewpoints = (tp.viewpoints || []).map((vp) => ({ ...vp, snapshot: vp.snapshot ? fromB64(vp.snapshot) : null }));
-        issues.topics.push(tp);
-      }
+      for (const tp of wsTopics) if (!have.has(tp.guid)) issues.topics.push(tp);
       issues.render();
     }
-    if (ws.clouds?.length || ws.cloudSlab) this.ctx.restoreClouds?.(ws.clouds || [], { slab: ws.cloudSlab });
+    if (ws.clouds.length || ws.cloudSlab) this.ctx.restoreClouds?.(ws.clouds, { slab: ws.cloudSlab });
     const loaded = new Set([...viewer.models, ...(viewer.clouds || [])].map((m) => m.name));
-    const missing = [...(ws.models || []), ...(ws.clouds || [])].map((m) => m.name).filter((n) => !loaded.has(n));
+    const missing = [...ws.models, ...ws.clouds].map((m) => m.name).filter((n) => typeof n === 'string' && !loaded.has(n));
     this.pendingCurrent = missing.length ? ws.current || null : null; // shown as a button once the models are open
     if (missing.length) toast(t('views.openModels', { names: missing.join(', ') }));
     else if (ws.current) this.apply(ws.current);

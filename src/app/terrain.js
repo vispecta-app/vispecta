@@ -451,7 +451,8 @@ export async function openIfcFiles(list, keys = null, { fit = true } = {}) {
         if (model.truncated) toast(t('msg.truncated', { name: file.name, n: fmtNum(model.elementIds.size) }));
         else if (!model.elementIds.size && !model.alignments.length) toast(t('msg.noGeometry', { name: file.name }));
         // Build the picking index (BVH) in the background so the first click is instant
-        setTimeout(() => { try { model.pickTargets(); } catch { /* built on first pick instead */ } }, 300);
+        // (not for a model that was closed again in the meantime: that would cost seconds for nothing)
+        setTimeout(() => { if (!viewer.models.includes(model)) return; try { model.pickTargets(); } catch { /* built on first pick instead */ } }, 300);
         if (state.spacesVisible) model.show(model.spaceIds);
         if (isTerrainModel(model)) { model.terrain = true; model.setBaseColor(TERRAIN_GREEN); } // natural green; height colours on the card (#90)
       } catch (err) {

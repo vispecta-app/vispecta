@@ -97,37 +97,45 @@ export async function loadIfcFile(file, opts = {}) {
   data = null; // web-ifc has its own copy now
   if (modelID < 0) throw new Error(t('err.notIfc'));
 
-  const schema = api.GetModelSchema(modelID);
-  let merged, spaceIds, coordMatrix;
-  if (cached && cached.schema === schema) {
-    ({ buckets: merged, spaceIds, coordMatrix } = cached);
-  } else {
-    cached = null; // nothing usable stored
-    if (!geo) {
-      // no worker: on the main thread, in batches with a pause between them for the progress bar
-      onProgress(t('load.geometry', { name }), 0.3);
-      await nextFrame();
-      geo = await buildGeometry(api, modelID, {
-        progress: (done, total) => onProgress(t('load.geometryN', { name, done: done.toLocaleString(), total: total.toLocaleString() }), 0.3 + 0.45 * (done / (total || 1))),
-        pause: nextFrame,
-      });
+  // Everything after OpenModel: on an error the model is closed again, or its memory in web-ifc
+  // (up to a few GB for a large file) would stay taken until the page is reloaded.
+  let model = null;
+  try {
+    const schema = api.GetModelSchema(modelID);
+    let merged, spaceIds, coordMatrix;
+    if (cached && cached.schema === schema) {
+      ({ buckets: merged, spaceIds, coordMatrix } = cached);
+    } else {
+      cached = null; // nothing usable stored
+      if (!geo) {
+        // no worker: on the main thread, in batches with a pause between them for the progress bar
+        onProgress(t('load.geometry', { name }), 0.3);
+        await nextFrame();
+        geo = await buildGeometry(api, modelID, {
+          progress: (done, total) => onProgress(t('load.geometryN', { name, done: done.toLocaleString(), total: total.toLocaleString() }), 0.3 + 0.45 * (done / (total || 1))),
+          pause: nextFrame,
+        });
+      }
+      onProgress(t('load.building', { name }), 0.85);
+      merged = geo.buckets.map((b) => ({ ...b, color: new THREE.Color(b.color[0], b.color[1], b.color[2]) }));
+      spaceIds = new Set(geo.spaceIds);
+      coordMatrix = new THREE.Matrix4().fromArray(geo.coordMatrix);
     }
-    onProgress(t('load.building', { name }), 0.85);
-    merged = geo.buckets.map((b) => ({ ...b, color: new THREE.Color(b.color[0], b.color[1], b.color[2]) }));
-    spaceIds = new Set(geo.spaceIds);
-    coordMatrix = new THREE.Matrix4().fromArray(geo.coordMatrix);
+
+    model = new IfcModel({ name, api, modelID, buckets: merged, schema, fileSize, coordMatrix, spaceIds, sourceBlob });
+    model.fromCache = !!cached;
+    model.geometrySource = cached ? 'cache' : geoFromWorker ? 'worker' : 'main'; // (#58)
+    model.truncated = truncated; // the file has no END-ISO-10303-21: it was cut off, the model is incomplete
+
+    onProgress(t('load.structure', { name }), 0.9);
+    await nextFrame();
+    await model.loadStructure(cached?.tree || null);
+    // save geometry and structure for next time (in the background)
+    if (cache && !cached) { const g = { buckets: merged, spaceIds, coordMatrix, schema, tree: model.tree }; setTimeout(() => cache.put(g), 1500); }
+  } catch (e) {
+    try { if (model) model.dispose(); else api.CloseModel(modelID); } catch { /* already closed */ }
+    throw e;
   }
-
-  const model = new IfcModel({ name, api, modelID, buckets: merged, schema, fileSize, coordMatrix, spaceIds, sourceBlob });
-  model.fromCache = !!cached;
-  model.geometrySource = cached ? 'cache' : geoFromWorker ? 'worker' : 'main'; // (#58)
-  model.truncated = truncated; // the file has no END-ISO-10303-21: it was cut off, the model is incomplete
-
-  onProgress(t('load.structure', { name }), 0.9);
-  await nextFrame();
-  await model.loadStructure(cached?.tree || null);
-  // save geometry and structure for next time (in the background)
-  if (cache && !cached) { const g = { buckets: merged, spaceIds, coordMatrix, schema, tree: model.tree }; setTimeout(() => cache.put(g), 1500); }
 
   onProgress(t('load.done'), 1);
   return model;
@@ -209,7 +217,10 @@ export function decodeIfcString(s) {
     })
     .replace(/\\X4\\([0-9A-Fa-f]+)\\X0\\/g, (_, hex) => {
       let out = '';
-      for (let i = 0; i + 8 <= hex.length; i += 8) out += String.fromCodePoint(parseInt(hex.slice(i, i + 8), 16));
+      for (let i = 0; i + 8 <= hex.length; i += 8) {
+        const cp = parseInt(hex.slice(i, i + 8), 16);
+        out += cp <= 0x10ffff ? String.fromCodePoint(cp) : '\uFFFD'; // a corrupt code point must not throw
+      }
       return out;
     })
     .replace(/\\X\\([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))

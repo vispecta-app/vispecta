@@ -175,6 +175,82 @@ async function main() {
     check('empty file: a clear message', msgs.some((m) => /empty\.ifc/.test(m) && /not an IFC file/i.test(m)), msgs.find((m) => /empty\.ifc/.test(m)) || 'no message');
     check('text file: a clear message', msgs.some((m) => /notes\.ifc/.test(m) && /not an IFC file/i.test(m)), msgs.find((m) => /notes\.ifc/.test(m)) || 'no message');
     check('cut-off IFC: reported as incomplete', msgs.some((m) => /cut-off\.ifc/.test(m) && /incomplete/i.test(m)), msgs.find((m) => /cut-off\.ifc/.test(m)) || 'no message');
+
+    // ---------------------------------------------------------------- GPU uploads (code review): colours and selection
+    // Fades and highlights borrow the vertex buffers of their bucket; freeing them must not make the
+    // bucket upload its vertices again. Uploads of the buckets' own vertex arrays are counted.
+    const gpu = await page.evaluate(async () => {
+      const v = window.onlineIfc.viewer;
+      const gl = v.renderer.getContext();
+      const mine = new Set();
+      for (const m of v.models) for (const b of m.buckets) { mine.add(b.positions); mine.add(b.normals); }
+      let bytes = 0;
+      const orig = gl.bufferData;
+      gl.bufferData = function (target, data, ...rest) { if (mine.has(data)) bytes += data.byteLength; return orig.call(this, target, data, ...rest); };
+      const frame = () => new Promise((r) => { v.renderFrame(); setTimeout(r, 50); });
+      const m = [...v.models].sort((a, b) => b.elementIds.size - a.elementIds.size)[0];
+      const ids = [...m.elementIds];
+      const out = {};
+      for (const round of [0, 1, 2]) {
+        m.setElementColors(new Map(ids.filter((_, i) => i % 3 === 0).map((id) => [id, round % 2 ? 0x3366cc : 0xcc3333])));
+        await frame();
+        if (round === 0) bytes = 0; // the first round may draw new meshes; then nothing more
+      }
+      out.colours = bytes;
+      bytes = 0;
+      for (const id of ids.slice(0, 5)) { m.setSelection([id], v.highlightMaterial); await frame(); }
+      out.selection = bytes;
+      m.setSelection([], null); m.setElementColors(new Map()); await frame();
+      gl.bufferData = orig;
+      return out;
+    });
+    check('colours and selection do not upload the vertex buffers again', gpu.colours === 0 && gpu.selection === 0, `colours ${gpu.colours} B, selection ${gpu.selection} B`);
+    // the depth shading target (EDL) is freed when it is not used
+    const edl = await page.evaluate(() => {
+      const v = window.onlineIfc.viewer, was = v.edl;
+      v.edl = true; v.renderFrame(); const on = !!v._edl;
+      v.edl = false; v.renderFrame(); const off = !v._edl;
+      v.edl = was;
+      return { on, off };
+    });
+    check('EDL render target freed when depth shading is off', edl.on && edl.off, JSON.stringify(edl));
+
+    // ---------------------------------------------------------------- BCF and workspace files from others (code review)
+    const { zipSync, strToU8 } = await import('fflate');
+    const markup = (title) => strToU8(`<?xml version="1.0" encoding="UTF-8"?><Markup><Topic Guid="0b6c8e7a-0000-4000-8000-00000000000${title.length % 10}" TopicType="Issue" TopicStatus="Open"><Title>${title}</Title><CreationDate>2026-01-01T00:00:00Z</CreationDate><CreationAuthor>smoke</CreationAuthor></Topic></Markup>`);
+    const version = strToU8('<?xml version="1.0"?><Version VersionId="2.1"/>');
+    const zeros = (mb) => new Uint8Array(mb * 1024 * 1024);
+    const bcfOk = zipSync({ 'bcf.version': version, 'a/markup.bcf': markup('Smoke BCF'), 'a/unused.bin': [zeros(80), { level: 9 }] });
+    const bcfBomb = zipSync({ 'bcf.version': version, 'b/markup.bcf': markup('Bomb'), 'b/snapshot.png': [zeros(60), { level: 9 }] });
+    const tBcf = (await toasts(page)).length;
+    await page.setInputFiles('#file-input', { name: 'ok.bcfzip', mimeType: 'application/zip', buffer: Buffer.from(bcfOk) });
+    await page.waitForTimeout(800);
+    await page.setInputFiles('#file-input', { name: 'bomb.bcfzip', mimeType: 'application/zip', buffer: Buffer.from(bcfBomb) });
+    await page.waitForTimeout(800);
+    const bcfMsgs = (await toasts(page)).slice(tBcf);
+    const bcfTopics = await page.evaluate(() => window.onlineIfc.views.ctx.issues.topics.map((x) => x.title));
+    check('BCF: other files in the archive are not unpacked', bcfTopics.includes('Smoke BCF'), bcfTopics.join(', '));
+    check('BCF: an entry that unpacks to too much is refused', !bcfTopics.includes('Bomb') && bcfMsgs.some((m) => /too large/i.test(m)), bcfMsgs.at(-1) || 'no message');
+    const wsBad = {
+      app: 'Vispecta', format: 'workspace', version: 1,
+      views: [{ id: 'smoke-v1', name: 'From a file', viewpoint: {}, thumb: 'javascript:alert(1)' }, { id: 5 }, 'junk', { id: 'smoke-v2', name: 'No viewpoint' }],
+      issues: [{ guid: 'smoke-ws-1', title: 'From a workspace', viewpoints: [{ _url: 'javascript:alert(1)', snapshot: '!!not base64' }] }, 'junk', { title: 'no guid' }],
+      clouds: {}, models: 'x',
+    };
+    await page.setInputFiles('#file-input', { name: 'other.vispecta.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(wsBad)) });
+    await page.waitForTimeout(800);
+    await page.click('.tab[data-tab="issues"]');
+    await page.waitForTimeout(300);
+    const ws = await page.evaluate(() => {
+      const vs = window.onlineIfc.views, tp = vs.ctx.issues.topics.find((x) => x.guid === 'smoke-ws-1');
+      return {
+        views: vs.views.filter((x) => String(x.id).startsWith('smoke') || x.id === 5).map((x) => `${x.id}:${x.thumb}`),
+        topic: !!tp, url: tp?.viewpoints[0]?._url ?? null, snap: tp?.viewpoints[0]?.snapshot ?? null,
+        js: [...document.querySelectorAll('img')].some((i) => i.getAttribute('src')?.startsWith('javascript:')),
+      };
+    });
+    check('workspace from a file: only well-formed parts are taken', ws.views.join() === 'smoke-v1:null' && ws.topic && !ws.url && !ws.snap && !ws.js, JSON.stringify(ws));
+    await page.click('.tab[data-tab="models"]');
     await page.context().close();
 
     // ---------------------------------------------------------------- railway sample: 9 discipline models and a LAZ survey
@@ -351,8 +427,8 @@ async function main() {
     await browser.close();
     server.close();
   }
-  // errors that are expected: the bad files are logged by the loader on purpose
-  const unexpected = errors.filter((e) => !/empty\.ifc|notes\.ifc|cut-off\.ifc|not an IFC file|ISO-10303-21/i.test(e));
+  // errors that are expected: the bad files (IFC, the BCF "zip bomb") are logged by the loaders on purpose
+  const unexpected = errors.filter((e) => !/empty\.ifc|notes\.ifc|cut-off\.ifc|not an IFC file|ISO-10303-21|snapshot\.png: too large/i.test(e));
   check('no page errors and no console errors', unexpected.length === 0, unexpected.slice(0, 5).join(' | '));
   console.log(`\n${failed ? 'FAILED' : 'OK'} in ${((Date.now() - t0) / 1000).toFixed(0)} s`);
   process.exit(failed ? 1 : 0);

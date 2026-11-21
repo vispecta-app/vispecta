@@ -153,8 +153,9 @@ export async function getGeometry(key) {
       positions: view(Float32Array, b.positions), normals: view(Int8Array, b.normals), index: view(Uint32Array, b.index), items: list,
     };
   });
-  // remember when it was used (oldest unused caches are removed first)
-  put('geom', { ...rec, lastUsed: Date.now() }).catch(() => {});
+  // remember when it was used (oldest unused caches are removed first). The record is written
+  // again with its blob, which can be hundreds of MB: at most once a day.
+  if (!(Date.now() - (rec.lastUsed || 0) < 864e5)) put('geom', { ...rec, lastUsed: Date.now() }).catch(() => {});
   return { buckets, spaceIds: new Set(rec.header.spaceIds), coordMatrix: new THREE.Matrix4().fromArray(rec.header.coordMatrix), schema: rec.header.schema, tree: rec.header.tree || null };
 }
 

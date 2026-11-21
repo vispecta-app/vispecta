@@ -38,8 +38,15 @@ export const CRS_LIST = {
 
 // systems added by the user (EPSG codes looked up, or pasted proj4 definitions): code -> [name, def]
 const CUSTOM_KEY = 'vispecta.crs.custom';
-let custom = {};
-try { custom = JSON.parse(localStorage.getItem(CUSTOM_KEY) || '{}') || {}; } catch { custom = {}; }
+// Definitions also come from projects and saved data: only well-formed codes and [name, def] pairs
+// are taken, into an object without a prototype (a key such as "__proto__" stays a plain key).
+const CODE_RE = /^(EPSG:\d{4,6}|PROJ:[0-9a-z]{1,13})$/;
+const validDef = (code, v) => CODE_RE.test(code) && Array.isArray(v) && typeof v[1] === 'string' && v[1].length < 4096;
+let custom = Object.create(null);
+try {
+  const saved = JSON.parse(localStorage.getItem(CUSTOM_KEY) || '{}');
+  for (const [code, v] of Object.entries(saved && typeof saved === 'object' ? saved : {})) if (validDef(code, v)) custom[code] = [String(v[0] || code), v[1]];
+} catch { /* ignore */ }
 const saveCustom = () => { try { localStorage.setItem(CUSTOM_KEY, JSON.stringify(custom)); } catch { /* ignore */ } };
 
 /** All known systems: [{code, name, group, note}]. */
@@ -64,7 +71,7 @@ export function customDefs(codes) {
 export function addDefs(defs) {
   let n = 0;
   for (const [code, v] of Object.entries(defs || {})) {
-    if (CRS_LIST[code] || !Array.isArray(v) || typeof v[1] !== 'string') continue;
+    if (CRS_LIST[code] || !validDef(code, v)) continue;
     custom[code] = [String(v[0] || code), v[1]]; n++;
   }
   if (n) saveCustom();
@@ -77,6 +84,7 @@ export function addDefs(defs) {
 export async function defineCrs(input) {
   const s = String(input || '').trim();
   if (s.startsWith('+proj=')) {
+    if (s.length >= 4096) throw new Error('definition too long');
     proj4(s); // throws if it cannot be read
     const code = `PROJ:${hashText(s)}`;
     custom[code] = [s.replace(/\s+\+no_defs.*$/, '').slice(0, 60), s];

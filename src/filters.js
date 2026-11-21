@@ -126,7 +126,8 @@ export class FilterPanel {
     if (this.legend) {
       for (const g of this.legend.groups) {
         const color = h('input', { type: 'color', value: hex(g.color), title: t('models.color') });
-        color.addEventListener('input', () => { g.color = parseInt(color.value.slice(1), 16); this.applyColors(); });
+        // while the colour is dragged: at most once a frame
+        color.addEventListener('input', () => { g.color = parseInt(color.value.slice(1), 16); this.#colorsSoon(); });
         const count = [...g.ids.values()].reduce((a, l) => a + l.length, 0);
         const eye = h('button', { class: `eye${g.hidden ? ' off' : ''}`, title: t('tree.toggleVisibility'), text: g.hidden ? '◌' : '●' });
         eye.addEventListener('click', (e) => { e.stopPropagation(); g.hidden = !g.hidden; this.#applyLegendVisibility(); this.render(); });
@@ -260,7 +261,7 @@ export class FilterPanel {
       keySel.addEventListener('change', () => { dl.replaceChildren(...this.#sampleValues(r.key).map((v) => h('option', { value: v }))); });
       op.addEventListener('change', () => { r.op = op.value; val.disabled = r.op === 'exists' || r.op === 'missing'; this.#updateCount(); });
       val.disabled = r.op === 'exists' || r.op === 'missing';
-      val.addEventListener('input', () => { r.value = val.value; this.#updateCount(); });
+      val.addEventListener('input', () => { r.value = val.value; this.#countSoon(); });
       const del = h('button', { class: 'icon-btn', title: t('flt.removeRule'), text: '✕', onclick: () => { this.rules.splice(i, 1); this.render(); } });
       list.append(h('div', { class: 'rule' }, keySel, h('div', { class: 'rule-row' }, op, val, del), dl));
     });
@@ -335,7 +336,20 @@ export class FilterPanel {
     return out;
   }
 
+  /** applyColors once in the next frame (a colour field sends many input events while dragged). */
+  #colorsSoon() {
+    if (this._colorsFrame) return;
+    this._colorsFrame = requestAnimationFrame(() => { this._colorsFrame = 0; this.applyColors(); });
+  }
+
+  /** The match count after typing stops for a moment (it tests every element). */
+  #countSoon() {
+    clearTimeout(this._countTimer);
+    this._countTimer = setTimeout(() => this.#updateCount(), 200);
+  }
+
   #updateCount() {
+    clearTimeout(this._countTimer);
     if (!this.countEl) return;
     let n = 0;
     for (const ids of this.matches().values()) n += ids.length;

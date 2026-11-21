@@ -19,6 +19,16 @@ const XRAY_OPACITY = 0.12;
 const PICK_MATERIAL = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
 
 /**
+ * Frees a geometry that borrows its vertex attributes from a bucket (fades, highlights): only its
+ * own index. three.js deletes the GPU buffers of every attribute of a disposed geometry, and the
+ * bucket would then upload all its vertices again at the next frame.
+ */
+function disposeView(g) {
+  for (const k of Object.keys(g.attributes)) g.deleteAttribute(k);
+  g.dispose();
+}
+
+/**
  * Shared uniforms of the cut faces (cutlines.js): `active` while the hatched cut faces cover the
  * cut, and the spacing of their hatching.
  */
@@ -303,7 +313,7 @@ export class IfcModel {
   #rebuildFades(b) {
     for (const f of b.fades || []) {
       this.group.remove(f);
-      f.geometry.dispose();
+      disposeView(f.geometry);
       f.material.dispose();
     }
     b.fades = [];
@@ -480,7 +490,7 @@ export class IfcModel {
     for (const b of this.buckets) {
       if (b.highlight) {
         this.group.remove(b.highlight);
-        b.highlight.geometry.dispose();
+        disposeView(b.highlight.geometry);
         b.highlight = null;
       }
       if (!this.selected.size || !this.highlightMaterial) continue;
@@ -1449,8 +1459,8 @@ export class IfcModel {
     for (const b of this.buckets) {
       b.geometry.dispose();
       b.material.dispose();
-      if (b.highlight) b.highlight.geometry.dispose();
-      for (const f of b.fades || []) { f.geometry.dispose(); f.material.dispose(); }
+      if (b.highlight) disposeView(b.highlight.geometry);
+      for (const f of b.fades || []) { disposeView(f.geometry); f.material.dispose(); }
       if (b.pickMesh) b.pickMesh.geometry.boundsTree = null;
     }
     this.group.removeFromParent();

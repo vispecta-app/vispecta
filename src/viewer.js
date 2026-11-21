@@ -917,7 +917,20 @@ export class Viewer extends EventTarget {
       for (const c of this.clouds) c.updateLod(moving);
     }
     if (this.edl && this.clouds.some((c) => c.visible)) this.#renderEdl();
-    else this.renderer.render(this.scene, this.camera);
+    else {
+      this.#freeEdl();
+      this.renderer.render(this.scene, this.camera);
+    }
+  }
+
+  /** The EDL target is large (multisampled, half float, the size of the canvas): freed when not used. */
+  #freeEdl() {
+    if (!this._edl) return;
+    const e = this._edl;
+    e.target.dispose(); // with its depth texture
+    e.mat.dispose();
+    e.quad.geometry.dispose();
+    this._edl = null;
   }
 
   /**

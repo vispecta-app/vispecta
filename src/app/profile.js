@@ -81,7 +81,7 @@ export async function showProfile() {
   const box = $('#prof-preview');
   const url = URL.createObjectURL(new Blob([toSvg(r.section, lay, r.info, r.opts)], { type: 'image/svg+xml' }));
   const img = h('img', { src: url, alt: r.info.title });
-  img.addEventListener('load', () => URL.revokeObjectURL(url), { once: true });
+  for (const ev of ['load', 'error']) img.addEventListener(ev, () => URL.revokeObjectURL(url), { once: true });
   box.replaceChildren(img);
   if (!r.n) box.prepend(h('p', { class: 'muted small', text: t('prof.noElements') }));
 }
