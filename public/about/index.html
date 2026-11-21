@@ -65,9 +65,16 @@
               <li>IFC 2x3 · 4 · 4.3</li>
             </ul>
           </div>
-          <figure class="frame hero-shot">
-            <div class="frame-bar"><i></i><i></i><i></i><span>vispecta.com</span></div>
-            <img src="img/hero.webp" width="1800" height="1075" alt="Vispecta with the buildingSMART IFC 4.3 sample scene: rail bridge, road, creek and a house, models grouped in the model browser" />
+          <!-- The live hero (about/hero.js, loaded by about.js where it can run): the double-track sample in 3D
+               with a cross section sliding along the track. The poster is the same view, for everyone else. -->
+          <figure class="hero-3d" id="hero-3d">
+            <img class="hero-poster" src="img/hero-3d.webp" width="1092" height="780" data-t-alt="hero3d.alt" alt="The double-track railway sample in 3D, cut by a cross section on the bridge at 12+205: the hatched bridge deck with both tracks, the railings and the creek below" />
+            <div class="hero-live" hidden>
+              <span class="live-chip"><i aria-hidden="true"></i><span><span class="live-text">Live 3D</span><span class="live-drag"> · drag to turn</span></span></span>
+              <button class="hero-pause" type="button" aria-pressed="false" aria-label="Pause the animation"><span aria-hidden="true"></span></button>
+              <span class="st-chip" aria-hidden="true"></span>
+              <div class="sec-card" aria-hidden="true"><div class="sec-head"><b class="sec-title">Cross section</b><span class="sec-st"></span></div><canvas></canvas></div>
+            </div>
           </figure>
         </div>
       </section>

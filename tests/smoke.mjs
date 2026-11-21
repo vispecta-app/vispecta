@@ -510,6 +510,43 @@ async function main() {
     });
     check('LandXML in UTM 33N converted onto the terrain', lxd.d < 0.01, `${lxd.name}: box within ${(lxd.d * 1000).toFixed(1)} mm`);
     await page2.context().close();
+
+    // ---------------------------------------------------------------- the about page's live 3D hero
+    const ctxA = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+    const pa = await ctxA.newPage();
+    pa.on('pageerror', (e) => errors.push(`about pageerror: ${e.message}`));
+    pa.on('console', (m) => { if (m.type() === 'error') errors.push(`about console: ${m.text()}`); });
+    await pa.goto(`${base}/about/`);
+    await pa.waitForSelector('#hero-3d.is-live', { timeout: 60000 });
+    const hero = await pa.evaluate(async () => {
+      const fig = document.getElementById('hero-3d'), h = fig.hero;
+      h.pause(); h.station(12205);
+      const card = fig.querySelector('.sec-card canvas'), c = card.getContext('2d').getImageData(0, 0, card.width, card.height).data;
+      let inked = 0; for (let i = 3; i < c.length; i += 4) if (c[i] > 0) inked++;
+      const btn = fig.querySelector('.hero-pause');
+      return { segments: h.segments(), inked, station: fig.querySelector('.sec-st').textContent, pressed: btn.getAttribute('aria-pressed'), label: btn.getAttribute('aria-label') };
+    });
+    check('about page: the 3D hero runs and cuts the model live', hero.segments > 100 && hero.inked > 500 && hero.station === '12+205.0', JSON.stringify(hero));
+    await pa.selectOption('#lang', 'da');
+    const heroDa = await pa.evaluate(() => ({ label: document.querySelector('.hero-pause').getAttribute('aria-label'), title: document.querySelector('.sec-title').textContent, alt: document.querySelector('.hero-poster').alt }));
+    check('about page: pause button and hero texts follow the language', hero.pressed === 'true' && heroDa.label === 'Afspil animationen' && heroDa.title === 'Tværsnit' && /broen/.test(heroDa.alt), JSON.stringify(heroDa));
+    await pa.evaluate(fs.readFileSync(path.join(ROOT, 'node_modules/axe-core/axe.min.js'), 'utf8'));
+    const axeHero = await pa.evaluate(async () => {
+      const res = await window.axe.run({ include: [['.hero']] }, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] } });
+      return res.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => `${v.id} (${v.nodes.length}): ${v.nodes[0].target.join(' ')}`);
+    });
+    check('about page hero: no serious WCAG 2.2 AA violations (axe-core)', axeHero.length === 0, axeHero.slice(0, 3).join(' | '));
+    await ctxA.close();
+    // with reduced motion the poster stays, and the 3D code is not even loaded
+    const ctxR = await browser.newContext({ viewport: { width: 1400, height: 900 }, reducedMotion: 'reduce' });
+    const pr = await ctxR.newPage();
+    const loaded = [];
+    pr.on('request', (r) => loaded.push(r.url()));
+    await pr.goto(`${base}/about/`);
+    await pr.waitForTimeout(1500);
+    const still = await pr.evaluate(() => ({ canvas: !!document.querySelector('.hero-canvas'), poster: document.querySelector('.hero-poster').complete && document.querySelector('.hero-poster').naturalWidth > 0 }));
+    check('about page with reduced motion: the poster, no 3D', !still.canvas && still.poster && !loaded.some((u) => /hero\.js|rail\.bin/.test(u)), JSON.stringify(still));
+    await ctxR.close();
   } catch (e) {
     check('smoke test ran to the end', false, e.message.split('\n')[0]);
   } finally {

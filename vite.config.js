@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import { execSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 // Version shown in the About dialog: the latest GitHub release (git tag) plus the number of
 // changes since it, and the commit. Falls back to package.json when git is not available.
@@ -46,7 +47,11 @@ export default defineConfig({
     // The big libraries get files of their own: they rarely change, so after an update of the app
     // the browser (and the offline cache) only fetches the small application file again.
     rolldownOptions: {
+      // the app, and the live 3D hero of the about page (public/about, loaded there as ./hero.js)
+      input: { index: fileURLToPath(new URL('./index.html', import.meta.url)), 'about-hero': fileURLToPath(new URL('./src/about-hero.js', import.meta.url)) },
+      preserveEntrySignatures: 'exports-only', // hero.js is imported for its startHero()
       output: {
+        entryFileNames: (chunk) => (chunk.name === 'about-hero' ? 'about/hero.js' : 'assets/[name]-[hash].js'),
         advancedChunks: {
           groups: [
             // only its JavaScript: the wasm URL (web-ifc.wasm?url) is a string the app needs at once,
