@@ -9,7 +9,7 @@
 // and cell, each with its own bounding box, so three.js skips what is out of view. Elements stay
 // whole (by the centre of their box), and cells with few triangles of a colour are put together
 // again, so the number of draw calls stays small.
-import * as WebIFC from 'web-ifc';
+import { WebIFC } from './webifc.js'; // loaded by the caller first (getApi, or the worker)
 
 /** expressIDs of all objects that can have geometry (same set as StreamAllMeshes, without spaces). */
 const GEOMETRY_TYPES = ['IFCSITE', 'IFCBUILDING', 'IFCBUILDINGSTOREY', 'IFCFACILITY', 'IFCFACILITYPART', 'IFCBRIDGE', 'IFCROAD', 'IFCRAILWAY',
@@ -125,9 +125,10 @@ export async function buildGeometry(api, modelID, { progress = () => {}, pause =
     let g = geomCache.get(gid);
     if (!g) {
       const geom = api.GetGeometry(modelID, gid);
+      // GetVertexArray/GetIndexArray already return copies (web-ifc 0.0.78: heap.subarray(...).slice(0))
       g = {
-        verts: api.GetVertexArray(geom.GetVertexData(), geom.GetVertexDataSize()).slice(),
-        idx: api.GetIndexArray(geom.GetIndexData(), geom.GetIndexDataSize()).slice(),
+        verts: api.GetVertexArray(geom.GetVertexData(), geom.GetVertexDataSize()),
+        idx: api.GetIndexArray(geom.GetIndexData(), geom.GetIndexDataSize()),
       };
       geom.delete();
       // keep small geometries (bolts, sleepers, windows …) which are usually repeated; within a budget
@@ -179,7 +180,8 @@ export async function buildGeometry(api, modelID, { progress = () => {}, pause =
         const l = Math.hypot(nx, ny, nz) || 1;
         nor[q] = Math.round((nx / l) * 127); nor[q + 1] = Math.round((ny / l) * 127); nor[q + 2] = Math.round((nz / l) * 127);
       }
-      mine.push({ key, id: expressID, pos, nor, idx: Uint32Array.from(idx), vc });
+      // the index is only read when the buckets are put together: geometry used by many elements shares it
+      mine.push({ key, id: expressID, pos, nor, idx, vc });
     }
     // the element's centre in plan (three.js: x and z) decides its cell
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;

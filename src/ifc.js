@@ -1,5 +1,5 @@
 // Loading IFC files with web-ifc and formatting of IFC values.
-import * as WebIFC from 'web-ifc';
+import { WebIFC, loadWebIfc } from './webifc.js';
 import wasmUrl from 'web-ifc/web-ifc.wasm?url';
 import * as THREE from 'three';
 import { IfcModel } from './model.js';
@@ -12,6 +12,8 @@ let apiPromise = null;
 export function getApi() {
   if (!apiPromise) {
     apiPromise = (async () => {
+      await loadWebIfc(); // the first model: web-ifc is loaded now, not with the page
+      fillPrettyNames();
       const api = new WebIFC.IfcAPI();
       // Single-thread: kræver ikke COOP/COEP-headere, så det virker på enhver statisk host.
       await api.Init(() => wasmUrl, true);
@@ -23,11 +25,15 @@ export function getApi() {
 }
 
 // Typekode -> pænt klassenavn (IfcWallStandardCase i stedet for IFCWALLSTANDARDCASE).
+// Filled when web-ifc is loaded; until then (no model open) a name is shown as it is.
 const prettyNames = new Map();
-for (const ns of [WebIFC.IFC2X3, WebIFC.IFC4, WebIFC.IFC4X3]) {
-  if (!ns) continue;
-  for (const key of Object.keys(ns)) {
-    if (key.startsWith('Ifc')) prettyNames.set(key.toUpperCase(), key);
+function fillPrettyNames() {
+  if (prettyNames.size) return;
+  for (const ns of [WebIFC.IFC2X3, WebIFC.IFC4, WebIFC.IFC4X3]) {
+    if (!ns) continue;
+    for (const key of Object.keys(ns)) {
+      if (key.startsWith('Ifc')) prettyNames.set(key.toUpperCase(), key);
+    }
   }
 }
 
@@ -48,7 +54,9 @@ export function prettyRawName(raw) {
  */
 export async function loadIfcFile(file, opts = {}) {
   const { onProgress = () => {} } = opts;
-  const api = await getApi();
+  // web-ifc on the main thread (loaded with the first model) while the worker builds the geometry
+  const apiReady = getApi();
+  apiReady.catch(() => {}); // (an error is thrown where it is awaited)
 
   const name = file.name;
   onProgress(t('load.reading', { name }), 0.05);
@@ -93,41 +101,55 @@ export async function loadIfcFile(file, opts = {}) {
   onProgress(t(geo ? 'load.structure' : 'load.parsing', { name }), geo ? 0.8 : 0.15);
   await nextFrame();
   // MEMORY_LIMIT: web-ifc's default is 2 GB; large models (300 MB+ files) need more. 32-bit wasm allows up to 4 GB.
+  const api = await apiReady;
   const modelID = api.OpenModel(data, OPEN_SETTINGS);
   data = null; // web-ifc has its own copy now
   if (modelID < 0) throw new Error(t('err.notIfc'));
 
-  const schema = api.GetModelSchema(modelID);
-  let merged, spaceIds, coordMatrix;
-  if (cached && cached.schema === schema) {
-    ({ buckets: merged, spaceIds, coordMatrix } = cached);
-  } else {
-    cached = null; // nothing usable stored
-    if (!geo) {
-      // no worker: on the main thread, in batches with a pause between them for the progress bar
-      onProgress(t('load.geometry', { name }), 0.3);
-      await nextFrame();
-      geo = await buildGeometry(api, modelID, {
-        progress: (done, total) => onProgress(t('load.geometryN', { name, done: done.toLocaleString(), total: total.toLocaleString() }), 0.3 + 0.45 * (done / (total || 1))),
-        pause: nextFrame,
-      });
+  // Everything after OpenModel: on an error the model is closed again, or its memory in web-ifc
+  // (up to a few GB for a large file) would stay taken until the page is reloaded.
+  let model = null;
+  try {
+    const schema = api.GetModelSchema(modelID);
+    let merged, spaceIds, coordMatrix;
+    if (cached && cached.schema === schema) {
+      ({ buckets: merged, spaceIds, coordMatrix } = cached);
+    } else {
+      cached = null; // nothing usable stored
+      if (!geo) {
+        // no worker: on the main thread, in batches with a pause between them for the progress bar
+        onProgress(t('load.geometry', { name }), 0.3);
+        await nextFrame();
+        geo = await buildGeometry(api, modelID, {
+          progress: (done, total) => onProgress(t('load.geometryN', { name, done: done.toLocaleString(), total: total.toLocaleString() }), 0.3 + 0.45 * (done / (total || 1))),
+          pause: nextFrame,
+        });
+      }
+      onProgress(t('load.building', { name }), 0.85);
+      merged = geo.buckets.map((b) => ({ ...b, color: new THREE.Color(b.color[0], b.color[1], b.color[2]) }));
+      spaceIds = new Set(geo.spaceIds);
+      coordMatrix = new THREE.Matrix4().fromArray(geo.coordMatrix);
     }
-    onProgress(t('load.building', { name }), 0.85);
-    merged = geo.buckets.map((b) => ({ ...b, color: new THREE.Color(b.color[0], b.color[1], b.color[2]) }));
-    spaceIds = new Set(geo.spaceIds);
-    coordMatrix = new THREE.Matrix4().fromArray(geo.coordMatrix);
+
+    model = new IfcModel({ name, api, modelID, buckets: merged, schema, fileSize, coordMatrix, spaceIds, sourceBlob });
+    model.fromCache = !!cached;
+    model.geometrySource = cached ? 'cache' : geoFromWorker ? 'worker' : 'main'; // (#58)
+    model.truncated = truncated; // the file has no END-ISO-10303-21: it was cut off, the model is incomplete
+
+    onProgress(t('load.structure', { name }), 0.9);
+    await nextFrame();
+    await model.loadStructure(cached?.tree || null);
+    // save geometry and structure for next time (in the background). The positions as loaded: a
+    // coordinate conversion may have moved them in place by then (warpPositions keeps the originals
+    // in positions0), and it is applied again when the model is opened from the cache.
+    if (cache && !cached) {
+      const m = model;
+      setTimeout(() => cache.put({ buckets: m.buckets.map((b) => ({ ...b, positions: b.positions0 || b.positions })), spaceIds, coordMatrix, schema, tree: m.tree }), 1500);
+    }
+  } catch (e) {
+    try { if (model) model.dispose(); else api.CloseModel(modelID); } catch { /* already closed */ }
+    throw e;
   }
-
-  const model = new IfcModel({ name, api, modelID, buckets: merged, schema, fileSize, coordMatrix, spaceIds, sourceBlob });
-  model.fromCache = !!cached;
-  model.geometrySource = cached ? 'cache' : geoFromWorker ? 'worker' : 'main'; // (#58)
-  model.truncated = truncated; // the file has no END-ISO-10303-21: it was cut off, the model is incomplete
-
-  onProgress(t('load.structure', { name }), 0.9);
-  await nextFrame();
-  await model.loadStructure(cached?.tree || null);
-  // save geometry and structure for next time (in the background)
-  if (cache && !cached) { const g = { buckets: merged, spaceIds, coordMatrix, schema, tree: model.tree }; setTimeout(() => cache.put(g), 1500); }
 
   onProgress(t('load.done'), 1);
   return model;
@@ -141,6 +163,7 @@ function geometryInWorker(bytes, onProgress, name) {
     w.onmessage = ({ data: d }) => {
       if (d.stage === 'parsing') onProgress(0.15, t('load.parsing', { name }));
       else if (d.stage === 'geometry') onProgress(0.3, t('load.geometry', { name }));
+      else if (d.stage === 'picking') onProgress(0.75, t('load.building', { name }));
       else if (d.progress) {
         const [done, total] = d.progress;
         onProgress(0.3 + 0.45 * (done / (total || 1)), t('load.geometryN', { name, done: done.toLocaleString(), total: total.toLocaleString() }));
@@ -209,7 +232,10 @@ export function decodeIfcString(s) {
     })
     .replace(/\\X4\\([0-9A-Fa-f]+)\\X0\\/g, (_, hex) => {
       let out = '';
-      for (let i = 0; i + 8 <= hex.length; i += 8) out += String.fromCodePoint(parseInt(hex.slice(i, i + 8), 16));
+      for (let i = 0; i + 8 <= hex.length; i += 8) {
+        const cp = parseInt(hex.slice(i, i + 8), 16);
+        out += cp <= 0x10ffff ? String.fromCodePoint(cp) : '\uFFFD'; // a corrupt code point must not throw
+      }
       return out;
     })
     .replace(/\\X\\([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))

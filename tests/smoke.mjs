@@ -71,6 +71,10 @@ async function main() {
   try {
     // ---------------------------------------------------------------- sample scene
     const page = await newPage(browser, base, errors);
+    // web-ifc (3.5 MB of JavaScript) is loaded with the first model, not with the start screen (code review, C)
+    await page.waitForTimeout(500);
+    const startJs = await page.evaluate(() => performance.getEntriesByType('resource').map((e) => e.name.split('/').pop()).filter((n) => /\.js$/.test(n)));
+    check('start screen without web-ifc', startJs.length > 0 && !startJs.some((n) => /web-ifc/.test(n)), startJs.join(', '));
     await page.click('[data-sample="scene"]');
     await page.waitForFunction(() => window.onlineIfc.viewer.models.length === 11, null, { timeout: 180000 });
     await idle(page);
@@ -83,6 +87,25 @@ async function main() {
     check('sample scene: 11 models', info.models === 11, `${info.elements} elements`);
     check('IFC geometry built in a worker (#58)', /worker|cache/.test(info.sources) && !/main/.test(info.sources), info.sources);
     check('sample scene: alignments Track and Road', info.alignments.includes('Track') && info.alignments.includes('Road'), info.alignments.join(', '));
+    // the picking index (BVH) comes from the IFC worker, and picks exactly like three.js without one
+    const bvh = await page.evaluate(() => {
+      const v = window.onlineIfc.viewer, rect = v.renderer.domElement.getBoundingClientRect();
+      let buckets = 0, fromWorker = 0;
+      for (const m of v.models) for (const b of m.buckets) { buckets++; if (b.bvh) fromWorker++; }
+      let same = 0, hits = 0, n = 0;
+      for (let i = 0; i < 20; i++) for (let j = 0; j < 15; j++) {
+        const x = rect.left + (i + 0.5) * rect.width / 20, y = rect.top + (j + 0.5) * rect.height / 15;
+        const h = v.pick(x, y);
+        v.raycaster.setFromCamera({ x: ((x - rect.left) / rect.width) * 2 - 1, y: -((y - rect.top) / rect.height) * 2 + 1 }, v.camera);
+        const meshes = []; for (const m of v.models) if (m.visible) for (const b of m.buckets) if (b.mesh.visible) meshes.push(b.mesh);
+        const r = v.raycaster.intersectObjects(meshes, false)[0];
+        const key = (p) => (p ? p.toArray().map((q) => q.toFixed(4)).join(',') : '-');
+        n++; if (h) hits++;
+        if (key(h?.point) === key(r?.point)) same++;
+      }
+      return { buckets, fromWorker, n, hits, same };
+    });
+    check('picking index (BVH) built in the IFC worker, picks like three.js', bvh.fromWorker === bvh.buckets && bvh.hits > 20 && bvh.same === bvh.n, JSON.stringify(bvh));
 
     // ---------------------------------------------------------------- station section on Track, section window, SVG
     await page.evaluate(() => document.querySelector('[data-action="plane-station"]').click());
@@ -175,6 +198,119 @@ async function main() {
     check('empty file: a clear message', msgs.some((m) => /empty\.ifc/.test(m) && /not an IFC file/i.test(m)), msgs.find((m) => /empty\.ifc/.test(m)) || 'no message');
     check('text file: a clear message', msgs.some((m) => /notes\.ifc/.test(m) && /not an IFC file/i.test(m)), msgs.find((m) => /notes\.ifc/.test(m)) || 'no message');
     check('cut-off IFC: reported as incomplete', msgs.some((m) => /cut-off\.ifc/.test(m) && /incomplete/i.test(m)), msgs.find((m) => /cut-off\.ifc/.test(m)) || 'no message');
+
+    // ---------------------------------------------------------------- GPU uploads (code review): colours and selection
+    // Fades and highlights borrow the vertex buffers of their bucket; freeing them must not make the
+    // bucket upload its vertices again. Uploads of the buckets' own vertex arrays are counted.
+    const gpu = await page.evaluate(async () => {
+      const v = window.onlineIfc.viewer;
+      const gl = v.renderer.getContext();
+      const mine = new Set();
+      for (const m of v.models) for (const b of m.buckets) { mine.add(b.positions); mine.add(b.normals); }
+      let bytes = 0;
+      const orig = gl.bufferData;
+      gl.bufferData = function (target, data, ...rest) { if (mine.has(data)) bytes += data.byteLength; return orig.call(this, target, data, ...rest); };
+      const frame = () => new Promise((r) => { v.renderFrame(); setTimeout(r, 50); });
+      const m = [...v.models].sort((a, b) => b.elementIds.size - a.elementIds.size)[0];
+      const ids = [...m.elementIds];
+      const out = {};
+      for (const round of [0, 1, 2]) {
+        m.setElementColors(new Map(ids.filter((_, i) => i % 3 === 0).map((id) => [id, round % 2 ? 0x3366cc : 0xcc3333])));
+        await frame();
+        if (round === 0) bytes = 0; // the first round may draw new meshes; then nothing more
+      }
+      out.colours = bytes;
+      bytes = 0;
+      for (const id of ids.slice(0, 5)) { m.setSelection([id], v.highlightMaterial); await frame(); }
+      out.selection = bytes;
+      m.setSelection([], null); m.setElementColors(new Map()); await frame();
+      gl.bufferData = orig;
+      return out;
+    });
+    check('colours and selection do not upload the vertex buffers again', gpu.colours === 0 && gpu.selection === 0, `colours ${gpu.colours} B, selection ${gpu.selection} B`);
+    // the depth shading target (EDL) is freed when it is not used
+    const edl = await page.evaluate(() => {
+      const v = window.onlineIfc.viewer, was = v.edl;
+      v.edl = true; v.renderFrame(); const on = !!v._edl;
+      const tex = v._edl?.target.texture;
+      const format = `${tex?.type === 1009 ? 'uint8' : tex?.type}/${tex?.colorSpace}`; // UnsignedByteType, sRGB
+      v.edl = false; v.renderFrame(); const off = !v._edl;
+      v.edl = was;
+      return { on, off, format };
+    });
+    check('EDL render target: 8-bit sRGB, freed when depth shading is off', edl.on && edl.off && edl.format === 'uint8/srgb', JSON.stringify(edl));
+    // an idle view is not drawn again and again, and a change without any input still is drawn
+    const redraw = await page.evaluate(async () => {
+      const v = window.onlineIfc.viewer, orig = v.renderFrame.bind(v);
+      let n = 0;
+      v.renderFrame = (...a) => { if (!a.length) n++; return orig(...a); }; // frames of the render loop (not pictures for autosave)
+      await new Promise((r) => setTimeout(r, 1500)); // settle
+      n = 0;
+      await new Promise((r) => setTimeout(r, 3000));
+      const idle = n;
+      n = 0;
+      const m = v.models[0];
+      m.setColor(0xff0000); // no input event: the model asks for the frame itself
+      await new Promise((r) => setTimeout(r, 300));
+      const changed = n;
+      m.setColor(null);
+      v.renderFrame = orig;
+      return { idle, changed };
+    });
+    // (at most the safety-net frame, every 5 s; it was one every 0.5 s)
+    check('idle view not redrawn; a change still is', redraw.idle <= 1 && redraw.changed > 0, JSON.stringify(redraw));
+    // the Python runtime override (localStorage): only https: or this site, and shown in the About dialog
+    const about = async () => {
+      await page.evaluate(() => document.querySelector('[data-action="about"]').click());
+      await page.waitForSelector('#about-dialog[open]');
+      const text = await page.evaluate(() => document.querySelector('#about-version').textContent);
+      await page.evaluate(() => document.querySelector('#about-dialog').close());
+      return text;
+    };
+    await page.evaluate(() => localStorage.setItem('onlineifc.python', JSON.stringify({ pyodideBase: 'http://mirror.example.com/pyodide/', packages: ['numpy', 'x; import os'] })));
+    const pyBad = await about();
+    await page.evaluate(() => localStorage.setItem('onlineifc.python', JSON.stringify({ pyodideBase: 'https://mirror.example.com/pyodide/' })));
+    const pyOk = await about();
+    await page.evaluate(() => localStorage.removeItem('onlineifc.python'));
+    const pyNone = await about();
+    check('Python override: http: and odd package names ignored, an override shown', /ignored \(pyodideBase, packages\)/.test(pyBad) && /another source.*mirror\.example\.com/.test(pyOk) && !/override/i.test(pyNone), `${pyBad.slice(-120)} | ${pyOk.slice(-80)}`);
+
+    // ---------------------------------------------------------------- BCF and workspace files from others (code review)
+    const { zipSync, strToU8 } = await import('fflate');
+    const markup = (title) => strToU8(`<?xml version="1.0" encoding="UTF-8"?><Markup><Topic Guid="0b6c8e7a-0000-4000-8000-00000000000${title.length % 10}" TopicType="Issue" TopicStatus="Open"><Title>${title}</Title><CreationDate>2026-01-01T00:00:00Z</CreationDate><CreationAuthor>smoke</CreationAuthor></Topic></Markup>`);
+    const version = strToU8('<?xml version="1.0"?><Version VersionId="2.1"/>');
+    const zeros = (mb) => new Uint8Array(mb * 1024 * 1024);
+    const bcfOk = zipSync({ 'bcf.version': version, 'a/markup.bcf': markup('Smoke BCF'), 'a/unused.bin': [zeros(80), { level: 9 }] });
+    const bcfBomb = zipSync({ 'bcf.version': version, 'b/markup.bcf': markup('Bomb'), 'b/snapshot.png': [zeros(60), { level: 9 }] });
+    const tBcf = (await toasts(page)).length;
+    await page.setInputFiles('#file-input', { name: 'ok.bcfzip', mimeType: 'application/zip', buffer: Buffer.from(bcfOk) });
+    await page.waitForTimeout(800);
+    await page.setInputFiles('#file-input', { name: 'bomb.bcfzip', mimeType: 'application/zip', buffer: Buffer.from(bcfBomb) });
+    await page.waitForTimeout(800);
+    const bcfMsgs = (await toasts(page)).slice(tBcf);
+    const bcfTopics = await page.evaluate(() => window.onlineIfc.views.ctx.issues.topics.map((x) => x.title));
+    check('BCF: other files in the archive are not unpacked', bcfTopics.includes('Smoke BCF'), bcfTopics.join(', '));
+    check('BCF: an entry that unpacks to too much is refused', !bcfTopics.includes('Bomb') && bcfMsgs.some((m) => /too large/i.test(m)), bcfMsgs.at(-1) || 'no message');
+    const wsBad = {
+      app: 'Vispecta', format: 'workspace', version: 1,
+      views: [{ id: 'smoke-v1', name: 'From a file', viewpoint: {}, thumb: 'javascript:alert(1)' }, { id: 5 }, 'junk', { id: 'smoke-v2', name: 'No viewpoint' }],
+      issues: [{ guid: 'smoke-ws-1', title: 'From a workspace', viewpoints: [{ _url: 'javascript:alert(1)', snapshot: '!!not base64' }] }, 'junk', { title: 'no guid' }],
+      clouds: {}, models: 'x',
+    };
+    await page.setInputFiles('#file-input', { name: 'other.vispecta.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(wsBad)) });
+    await page.waitForTimeout(800);
+    await page.click('.tab[data-tab="issues"]');
+    await page.waitForTimeout(300);
+    const ws = await page.evaluate(() => {
+      const vs = window.onlineIfc.views, tp = vs.ctx.issues.topics.find((x) => x.guid === 'smoke-ws-1');
+      return {
+        views: vs.views.filter((x) => String(x.id).startsWith('smoke') || x.id === 5).map((x) => `${x.id}:${x.thumb}`),
+        topic: !!tp, url: tp?.viewpoints[0]?._url ?? null, snap: tp?.viewpoints[0]?.snapshot ?? null,
+        js: [...document.querySelectorAll('img')].some((i) => i.getAttribute('src')?.startsWith('javascript:')),
+      };
+    });
+    check('workspace from a file: only well-formed parts are taken', ws.views.join() === 'smoke-v1:null' && ws.topic && !ws.url && !ws.snap && !ws.js, JSON.stringify(ws));
+    await page.click('.tab[data-tab="models"]');
     await page.context().close();
 
     // ---------------------------------------------------------------- railway sample: 9 discipline models and a LAZ survey
@@ -289,9 +425,12 @@ async function main() {
       const empty = v.clouds.length;
       await pm.open(id);
       const r = v.clouds.find((q) => q.name === 'two-scans.e57');
-      return { empty, n: v.clouds.length, alias: r?.alias, mode: r?.mode, size: r?.pointSize, count: r?.count };
+      // the models come from the geometry cache, with their picking index (BVH)
+      const models = { n: v.models.length, cache: v.models.filter((m) => m.geometrySource === 'cache').length, bvh: v.models.filter((m) => m.buckets.every((b) => b.bvh)).length };
+      return { empty, n: v.clouds.length, alias: r?.alias, mode: r?.mode, size: r?.pointSize, count: r?.count, models };
     });
-    check('point clouds saved in the project and opened again with their settings', proj.empty === 0 && proj.n === 2 && proj.alias === 'Rooms' && proj.mode === 'intensity' && proj.size === 3 && proj.count === 50000, JSON.stringify(proj));
+    check('point clouds saved in the project and opened again with their settings', proj.empty === 0 && proj.n === 2 && proj.alias === 'Rooms' && proj.mode === 'intensity' && proj.size === 3 && proj.count === 50000, JSON.stringify({ ...proj, models: undefined }));
+    check('project models opened from the geometry cache with their picking index', proj.models.n >= 9 && proj.models.cache === proj.models.n && proj.models.bvh === proj.models.n, JSON.stringify(proj.models));
 
     // ---------------------------------------------------------------- coordinate systems (#107)
     // the alignment file and a part of the survey in ETRS89 / UTM 33N (tests/fixtures/make_utm33.py);
@@ -314,6 +453,32 @@ async function main() {
     const c1 = await crsCheck();
     // the fixture's own map conversion is a similarity fitted at its origin: up to 5 mm off at its ends
     check('UTM 33N model converted into the project (UTM 32N)', c1.project === 'EPSG:25832' && c1.crs[0] === 'EPSG:25833' && c1.d < 0.01, `alignment within ${(c1.d * 1000).toFixed(1)} mm`);
+    // a model with geometry in UTM 33N is converted vertex by vertex (warpPositions); the geometry
+    // cache must keep its positions as loaded, or the conversion is applied twice when it is opened again
+    const track33 = fs.readFileSync(path.join(DIST, 'samples/double-track-railway/02-Track.ifc'), 'latin1').replace("IFCPROJECTEDCRS('EPSG:25832'", "IFCPROJECTEDCRS('EPSG:25833'");
+    await page2.setInputFiles('#file-input', { name: 'track-utm33.ifc', mimeType: 'application/x-step', buffer: Buffer.from(track33, 'latin1') });
+    await page2.waitForFunction(() => window.onlineIfc.viewer.models.some((m) => m.name === 'track-utm33.ifc'));
+    await idle(page2);
+    await page2.waitForTimeout(3000); // the cache is written 1.5 s after loading
+    const warp = await page2.evaluate(async () => {
+      const v = window.onlineIfc.viewer, m = v.models.find((x) => x.name === 'track-utm33.ifc');
+      const key = window.onlineIfc.projects.keys.get(m);
+      const db = await new Promise((res, rej) => { const q = indexedDB.open('onlineifc'); q.onsuccess = () => res(q.result); q.onerror = rej; });
+      const rec = await new Promise((res) => { const q = db.transaction('geom').objectStore('geom').get(key); q.onsuccess = () => res(q.result); });
+      db.close();
+      const out = { warped: !!m.warped, cached: !!rec, moved: 0, offOriginal: 0 };
+      if (rec) {
+        const buf = await rec.blob.arrayBuffer();
+        rec.header.buckets.forEach((hb, i) => {
+          const P = new Float32Array(buf, hb.positions[0], hb.positions[1]), b = m.buckets[i];
+          const orig = b.positions0 || b.positions, now = b.geometry.getAttribute('position').array;
+          for (let k = 0; k < P.length; k++) { out.offOriginal = Math.max(out.offOriginal, Math.abs(P[k] - orig[k])); out.moved = Math.max(out.moved, Math.abs(now[k] - orig[k])); }
+        });
+      }
+      v.removeModel(m);
+      return out;
+    });
+    check('geometry cache keeps the positions as loaded, not as converted', warp.warped && warp.cached && warp.moved > 0 && warp.offOriginal === 0, JSON.stringify(warp));
     check('UTM 33N point cloud converted point by point', c1.crs[1] === 'EPSG:25833' && c1.near < 0.002, `${(c1.near * 1000).toFixed(2)} mm`);
     await page2.click('.tab[data-tab="models"]');
     await page2.evaluate(() => { const sel = document.querySelector('.crs-bar select'); sel.value = 'EPSG:25833'; sel.dispatchEvent(new Event('change')); });
@@ -351,8 +516,8 @@ async function main() {
     await browser.close();
     server.close();
   }
-  // errors that are expected: the bad files are logged by the loader on purpose
-  const unexpected = errors.filter((e) => !/empty\.ifc|notes\.ifc|cut-off\.ifc|not an IFC file|ISO-10303-21/i.test(e));
+  // errors that are expected: the bad files (IFC, the BCF "zip bomb") are logged by the loaders on purpose
+  const unexpected = errors.filter((e) => !/empty\.ifc|notes\.ifc|cut-off\.ifc|not an IFC file|ISO-10303-21|snapshot\.png: too large/i.test(e));
   check('no page errors and no console errors', unexpected.length === 0, unexpected.slice(0, 5).join(' | '));
   console.log(`\n${failed ? 'FAILED' : 'OK'} in ${((Date.now() - t0) / 1000).toFixed(0)} s`);
   process.exit(failed ? 1 : 0);

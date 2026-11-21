@@ -167,15 +167,21 @@ function currentPreset(name) {
 /** Puts a preset into the dialog (and its section width into the Sections panel). */
 function applyPreset(p) {
   if (!p) return;
+  // only the dialog's own settings: a preset (also one imported from a file) names the fields
+  // it sets, and must not reach any other element on the page
+  const allowed = new Set(presetIds());
   for (const [id, v] of Object.entries(p.values || {})) {
-    const el = $(`#${id}`);
+    if (!allowed.has(id)) continue;
+    const el = document.getElementById(id);
     if (!el) continue;
     if (el.type === 'checkbox') el.checked = !!v;
     else if (el.tagName === 'SELECT') { if ([...el.options].some((o) => o.value === String(v))) el.value = String(v); } else el.value = v ?? '';
   }
   if (p.excluded) for (const b of $$('#ann-classes input')) b.checked = !p.excluded.includes(b.value);
   if ('sectionWidth' in p) {
-    const w = p.sectionWidth;
+    const num = (x) => (Number.isFinite(+x) && +x > 0 ? +x : 0);
+    const w = p.sectionWidth && typeof p.sectionWidth === 'object' && (num(p.sectionWidth.left) || num(p.sectionWidth.right))
+      ? { left: num(p.sectionWidth.left), right: num(p.sectionWidth.right) } : null;
     $('#plane-wl').value = w?.left || ''; $('#plane-wr').value = w?.right || '';
     viewer.setSectionWidth(w || null);
     try { localStorage.setItem('onlineifc.secWidth', JSON.stringify(w || null)); } catch { /* ignore */ }
@@ -220,12 +226,14 @@ $('#drw-preset-file').addEventListener('change', async (e) => {
   if (!file) return;
   try {
     const data = JSON.parse(await file.text());
-    const list = (data?.presets || []).filter((p) => p?.name && p.values);
+    const list = (Array.isArray(data?.presets) ? data.presets : [])
+      .filter((p) => p && typeof p === 'object' && p.name && p.values && typeof p.values === 'object');
     if (!list.length) throw new Error('no presets');
     for (const p of list) {
       let name = String(p.name), n = 2;
       while (userPresets.some((q) => q.name === name)) name = `${p.name} (${n++})`;
-      userPresets.push({ name, values: p.values, excluded: p.excluded || undefined, sectionWidth: p.sectionWidth ?? null });
+      const excluded = Array.isArray(p.excluded) ? p.excluded.filter((x) => typeof x === 'string') : undefined;
+      userPresets.push({ name, values: p.values, excluded, sectionWidth: p.sectionWidth ?? null });
     }
     savePresets();
     renderPresetSelect(`u${userPresets.length - 1}`);

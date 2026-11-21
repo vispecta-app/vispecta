@@ -23,26 +23,38 @@ export async function isCopc(file) {
 /** Opens a COPC file: the hierarchy and a first, coarse overview. Resolves to a PointCloud with a stream. */
 export async function openCopc(file, { budget = pointBudget(), onProgress } = {}) {
   const worker = new Worker(new URL('./copc-worker.js', import.meta.url), { type: 'module' });
+  // A worker that crashes (e.g. out of memory while decompressing) sends no message: every call
+  // waiting then fails instead of waiting for ever.
+  let crashed = null;
   const call = (msg, transfer) => new Promise((resolve, reject) => {
+    if (crashed) { reject(crashed); return; }
     const id = Math.random();
+    const done = () => { worker.removeEventListener('message', on); worker.removeEventListener('error', fail); };
     const on = ({ data }) => {
       if (data.id !== undefined && data.id !== id) return;
-      worker.removeEventListener('message', on);
+      done();
       if (data.error) reject(new Error(data.error)); else resolve(data);
     };
+    const fail = (e) => { done(); reject(crashed || new Error(e?.message || 'COPC worker failed')); };
     worker.addEventListener('message', on);
+    worker.addEventListener('error', fail);
     worker.postMessage({ ...msg, id }, transfer);
   });
-  let info;
-  try { info = (await call({ open: file })).info; } catch (e) { worker.terminate(); throw e; }
-  onProgress?.(0.3);
-  const stream = new CopcStream(file, info, worker, call, budget);
-  // the overview: whole levels from the root, as many as the budget allows (at most a fifth of it)
-  const keys = stream.overviewKeys(Math.min(budget / 5, 1e6));
-  const data = await stream.fetch(keys, (f) => onProgress?.(0.3 + 0.7 * f));
-  const cloud = new PointCloud(file.name, { format: 'COPC', total: info.count, origin: info.origin, min: info.min, max: info.max, crs: info.crs, ...stream.assemble(keys, data) });
-  stream.attach(cloud);
-  return cloud;
+  worker.addEventListener('error', (e) => { crashed = new Error(e?.message || 'COPC worker failed'); });
+  try {
+    const info = (await call({ open: file })).info;
+    onProgress?.(0.3);
+    const stream = new CopcStream(file, info, worker, call, budget);
+    // the overview: whole levels from the root, as many as the budget allows (at most a fifth of it)
+    const keys = stream.overviewKeys(Math.min(budget / 5, 1e6));
+    const data = await stream.fetch(keys, (f) => onProgress?.(0.3 + 0.7 * f));
+    const cloud = new PointCloud(file.name, { format: 'COPC', total: info.count, origin: info.origin, min: info.min, max: info.max, crs: info.crs, ...stream.assemble(keys, data) });
+    stream.attach(cloud);
+    return cloud;
+  } catch (e) {
+    worker.terminate(); // nothing keeps it: its memory (and the file's) goes too
+    throw e;
+  }
 }
 
 export class CopcStream extends EventTarget {

@@ -4,14 +4,19 @@
 // (transferable arrays); then the model is closed and the worker ends, so its memory goes too.
 // The main thread opens the file afterwards for properties, structure and editing.
 //
-// Message in: { bytes: Uint8Array }. Out: { progress: [done, total] }*, then { done: {schema,
-// buckets, spaceIds, coordMatrix} } or { error }.
-import * as WebIFC from 'web-ifc';
+// The picking index (BVH) of every bucket is built here too (bvh.js), so the main thread does not
+// stop for it.
+//
+// Message in: { bytes: Uint8Array }. Out: { stage }, { progress: [done, total] }*, then { done:
+// {schema, buckets (each with bvh: {roots, indirect}), spaceIds, coordMatrix} } or { error }.
 import wasmUrl from 'web-ifc/web-ifc.wasm?url';
+import { loadWebIfc } from './webifc.js';
 import { buildGeometry, OPEN_SETTINGS } from './ifc-geometry.js';
+import { buildBvhData } from './bvh.js';
 
 self.onmessage = async ({ data }) => {
   try {
+    const WebIFC = await loadWebIfc();
     const api = new WebIFC.IfcAPI();
     await api.Init(() => wasmUrl, true);
     api.SetLogLevel?.(WebIFC.LogLevel.LOG_LEVEL_OFF);
@@ -24,8 +29,10 @@ self.onmessage = async ({ data }) => {
     self.postMessage({ stage: 'geometry' });
     const g = await buildGeometry(api, modelID, { progress: (done, total) => self.postMessage({ progress: [done, total] }) });
     api.CloseModel(modelID);
+    self.postMessage({ stage: 'picking' });
+    for (const b of g.buckets) b.bvh = buildBvhData(b.positions, b.index);
     const transfer = [];
-    for (const b of g.buckets) transfer.push(b.positions.buffer, b.normals.buffer, b.index.buffer);
+    for (const b of g.buckets) transfer.push(b.positions.buffer, b.normals.buffer, b.index.buffer, ...b.bvh.roots, b.bvh.indirect.buffer);
     self.postMessage({ done: { schema, ...g } }, transfer);
   } catch (e) {
     self.postMessage({ error: e?.message || String(e) });

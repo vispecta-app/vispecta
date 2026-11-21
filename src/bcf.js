@@ -277,9 +277,29 @@ function parseViewpoint(xml, guid) {
   return vp;
 }
 
+// Unpacking a .bcfzip: only the files BCF uses, and within limits, so a crafted archive (a "zip
+// bomb": a small file that unpacks to gigabytes) cannot freeze or crash the page. The size each
+// entry declares bounds what is unpacked (fflate writes into a buffer of that size).
+const BCF_FILE = /(^|\/)(bcf\.version|[^/]+\.(bcf|bcfv|bcfp|png|jpe?g))$/i;
+const BCF_MAX_FILE = 50 * 1024 * 1024, BCF_MAX_TOTAL = 500 * 1024 * 1024, BCF_MAX_FILES = 20000;
+
+/** The entries of a .bcfzip that importBcf reads (exported for the tests). */
+export function unzipBcf(bytes) {
+  let total = 0, count = 0;
+  return unzipSync(bytes, {
+    filter: (f) => {
+      if (!BCF_FILE.test(f.name)) return false;
+      if (f.originalSize > BCF_MAX_FILE) throw new Error(`${f.name}: too large (${Math.round(f.originalSize / 1048576)} MB)`);
+      total += f.originalSize;
+      if (total > BCF_MAX_TOTAL || ++count > BCF_MAX_FILES) throw new Error('the BCF file unpacks to too much data');
+      return true;
+    },
+  });
+}
+
 /** Reads a .bcfzip (2.0, 2.1 or 3.0). Returns {version, topics}. */
 export function importBcf(bytes) {
-  const files = unzipSync(bytes);
+  const files = unzipBcf(bytes);
   const read = (p) => (files[p] ? strFromU8(files[p]) : null);
   const vfile = read('bcf.version');
   const version = vfile ? new DOMParser().parseFromString(vfile, 'application/xml').documentElement.getAttribute('VersionId') : '2.1';

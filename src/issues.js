@@ -6,10 +6,10 @@ import { fmtValue } from './ifc.js';
 const AUTHOR_KEY = 'onlineifc.bcfAuthor';
 
 export class IssuesPanel {
+  #topics = [];
   /** ctx: {viewer, h, toast, download, root, state, setSelection(Map), setSpacesVisible(bool), afterVisibility()} */
   constructor(ctx) {
     this.ctx = ctx;
-    this.topics = [];
     this.openGuid = null;
     this.showNew = false;
     this.dirty = false;
@@ -36,6 +36,17 @@ export class IssuesPanel {
     const vp = captureViewpoint({ viewer: this.ctx.viewer, selection: this.ctx.state.selection, spacesVisible: this.ctx.state.spacesVisible });
     vp.snapshot = this.#snapshot();
     return vp;
+  }
+
+  get topics() { return this.#topics; }
+  /** Topics that are dropped (deleted, another project) give back the object URLs of their snapshots. */
+  set topics(list) {
+    const keep = new Set(list);
+    for (const tp of this.#topics) {
+      if (keep.has(tp)) continue;
+      for (const vp of tp.viewpoints || []) if (vp._url) { URL.revokeObjectURL(vp._url); vp._url = null; }
+    }
+    this.#topics = list;
   }
 
   #thumb(vp) {

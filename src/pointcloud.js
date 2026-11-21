@@ -118,14 +118,15 @@ export class PointCloud {
     old?.dispose();
     this._screen = null;
     if (this.mode) { this.applyColors(); this.#applyFilter(); }
+    this.onChange?.();
   }
 
   get label() { return this.alias || this.name; }
 
-  setVisible(v) { this.visible = v; this.points.visible = v; }
+  setVisible(v) { this.visible = v; this.points.visible = v; this.onChange?.(); }
 
   /** Point size in CSS pixels (scaled to device pixels with the pixel ratio). */
-  setPointSize(px, pixelRatio = 1) { this.pointSize = px; this.material.size = px * pixelRatio; }
+  setPointSize(px, pixelRatio = 1) { this.pointSize = px; this.material.size = px * pixelRatio; this.onChange?.(); }
 
   setMode(mode) { this.mode = mode; this.applyColors(); }
 
@@ -153,11 +154,12 @@ export class PointCloud {
 
   #applyFilter() {
     const g = this.geometry;
-    if (!this.hiddenClasses.size) { g.setIndex(null); this.updateLod(false); return; }
+    if (!this.hiddenClasses.size) { g.setIndex(null); this.updateLod(false); this.onChange?.(); return; }
     const idx = [];
     for (let i = 0; i < this.count; i++) if (this.shown(i)) idx.push(i);
     g.setIndex(new THREE.BufferAttribute(Uint32Array.from(idx), 1));
     this.updateLod(false);
+    this.onChange?.();
   }
 
   /** Fills the colour attribute for the current mode. */
@@ -184,6 +186,7 @@ export class PointCloud {
       for (let i = 0; i < n; i++) { const [r, g, b] = ramp((z[i] - lo) / span); c[i * 3] = r; c[i * 3 + 1] = g; c[i * 3 + 2] = b; }
     }
     this.colorAttr.needsUpdate = true;
+    this.onChange?.();
   }
 
   /** A colour range; a COPC cloud keeps the first one, so colours stay put while points stream in. */

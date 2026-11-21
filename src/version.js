@@ -1,6 +1,7 @@
 // Version shown in the About dialog: what was built (from git at build time, see vite.config.js)
 // and the latest release on GitHub (fetched when the dialog opens).
 import { t } from './i18n.js';
+import { pythonOverride } from './config.js';
 
 /* global __BUILD_INFO__ */
 const REPO = 'vispecta-app/vispecta';
@@ -20,7 +21,10 @@ async function fetchLatest() {
   const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, { headers: { Accept: 'application/vnd.github+json' } });
   if (!res.ok) throw new Error(String(res.status));
   const r = await res.json();
-  latest = { tag: r.tag_name, name: r.name, url: r.html_url, date: r.published_at };
+  // the link from the answer is only used when it is a page of this repository on GitHub
+  const repoUrl = `https://github.com/${REPO}/`;
+  const url = typeof r.html_url === 'string' && r.html_url.startsWith(repoUrl) ? r.html_url : `${repoUrl}releases`;
+  latest = { tag: String(r.tag_name ?? ''), name: typeof r.name === 'string' ? r.name : '', url, date: r.published_at };
   // is the running build older than that release? (only asked when the tags differ)
   if (BUILD.commit && r.tag_name !== BUILD.release) {
     try {
@@ -42,6 +46,10 @@ export async function renderVersion(el, h) {
   // Checking for a newer release asks GitHub, so it only happens when the user clicks
   const line2 = h('div', { class: 'small' });
   el.replaceChildren(line1, line2);
+  // the Python runtime loaded from somewhere else (an override in this browser): said plainly
+  const py = pythonOverride();
+  if (py?.used.length) el.append(h('div', { class: 'about-update', text: t('about.pyOverride', { from: py.from.join(', ') || py.used.join(', ') }) }));
+  if (py?.ignored.length) el.append(h('div', { class: 'about-update', text: t('about.pyOverrideIgnored', { keys: py.ignored.join(', ') }) }));
   const check = () => showLatest(line2, h);
   if (latest) check();
   else line2.replaceChildren(h('button', { class: 'btn xs', text: t('about.checkUpdate'), title: t('about.checkUpdateTitle'), onclick: check }));

@@ -1,7 +1,8 @@
 // A loaded IFC model: geometry, visibility, colours, selection, metadata and editing.
 import * as THREE from 'three';
-import * as WebIFC from 'web-ifc';
-import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh';
+import { WebIFC } from './webifc.js'; // loaded with the first model (getApi)
+import { acceleratedRaycast } from 'three-mesh-bvh';
+import { bvhFor } from './bvh.js';
 import { fmtValue, prettyTypeName, prettyRawName, decodeIfcString } from './ifc.js';
 import { t } from './i18n.js';
 import { ramp, percentiles } from './pointcloud.js';
@@ -17,6 +18,16 @@ function rampEarth(t) {
 let nextUid = 1;
 const XRAY_OPACITY = 0.12;
 const PICK_MATERIAL = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
+
+/**
+ * Frees a geometry that borrows its vertex attributes from a bucket (fades, highlights): only its
+ * own index. three.js deletes the GPU buffers of every attribute of a disposed geometry, and the
+ * bucket would then upload all its vertices again at the next frame.
+ */
+function disposeView(g) {
+  for (const k of Object.keys(g.attributes)) g.deleteAttribute(k);
+  g.dispose();
+}
 
 /**
  * Shared uniforms of the cut faces (cutlines.js): `active` while the hatched cut faces cover the
@@ -189,6 +200,7 @@ export class IfcModel {
     m.opacity = op;
     m.depthWrite = !transparent;
     for (const f of b.fades || []) this.#styleFade(b, f);
+    this.onChange?.();
   }
 
   setColor(color) {
@@ -259,6 +271,7 @@ export class IfcModel {
   #applyVisible() {
     this.visible = this.ownVisible !== false && !this.groupHidden;
     this.group.visible = this.visible;
+    this.onChange?.();
   }
 
   /** The name shown in the app: the alias, or the file name. */
@@ -303,7 +316,7 @@ export class IfcModel {
   #rebuildFades(b) {
     for (const f of b.fades || []) {
       this.group.remove(f);
-      f.geometry.dispose();
+      disposeView(f.geometry);
       f.material.dispose();
     }
     b.fades = [];
@@ -409,7 +422,7 @@ export class IfcModel {
 
   #rebuildAll() {
     for (const b of this.buckets) this.#rebuild(b);
-    this.#updateHighlight();
+    this.#updateHighlight(); // (tells onChange)
   }
 
   hide(ids) { for (const id of ids) this.hidden.add(id); this.#rebuildAll(); }
@@ -442,7 +455,9 @@ export class IfcModel {
         const g = new THREE.BufferGeometry();
         g.setAttribute('position', b.geometry.getAttribute('position'));
         g.setIndex(new THREE.BufferAttribute(b.index, 1));
-        g.boundsTree = new MeshBVH(g, { indirect: true, targetLeafSize: 12 });
+        // built in the IFC worker or read from the cache; built now when there is none, or when the
+        // positions were moved (warpPositions: b.positions0 holds them as loaded)
+        g.boundsTree = bvhFor(g, b.positions0 ? null : b.bvh);
         const mesh = new THREE.Mesh(g, PICK_MATERIAL);
         mesh.raycast = acceleratedRaycast;
         mesh.visible = false;
@@ -451,6 +466,9 @@ export class IfcModel {
         b.itemStarts = Int32Array.from(b.items.map((it) => it.start));
         b.pickMesh = mesh;
         this.group.add(mesh);
+        // its world matrix now, not at the next frame: a pick right away (the first click, or the
+        // first after a coordinate conversion) would otherwise hit in the model's own coordinates
+        mesh.updateWorldMatrix(true, false, true); // (forced: its matrix is never "auto-updated")
       }
       out.push(b.pickMesh);
     }
@@ -480,7 +498,7 @@ export class IfcModel {
     for (const b of this.buckets) {
       if (b.highlight) {
         this.group.remove(b.highlight);
-        b.highlight.geometry.dispose();
+        disposeView(b.highlight.geometry);
         b.highlight = null;
       }
       if (!this.selected.size || !this.highlightMaterial) continue;
@@ -506,6 +524,7 @@ export class IfcModel {
       b.highlight = hm;
       this.group.add(hm);
     }
+    this.onChange?.();
   }
 
   /**
@@ -833,7 +852,8 @@ export class IfcModel {
       P.needsUpdate = true;
       b.geometry.computeBoundingBox();
       b.geometry.computeBoundingSphere();
-      // picking builds its tree again from the new positions
+      // picking builds its tree again from the new positions (b.bvh from the worker fits the
+      // positions as loaded: it is used again when they are put back)
       if (b.pickMesh) { b.pickMesh.removeFromParent(); b.pickMesh.geometry.boundsTree = null; b.pickMesh = null; }
     }
     this.warped = !!fn;
@@ -1449,8 +1469,8 @@ export class IfcModel {
     for (const b of this.buckets) {
       b.geometry.dispose();
       b.material.dispose();
-      if (b.highlight) b.highlight.geometry.dispose();
-      for (const f of b.fades || []) { f.geometry.dispose(); f.material.dispose(); }
+      if (b.highlight) disposeView(b.highlight.geometry);
+      for (const f of b.fades || []) { disposeView(f.geometry); f.material.dispose(); }
       if (b.pickMesh) b.pickMesh.geometry.boundsTree = null;
     }
     this.group.removeFromParent();
