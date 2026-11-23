@@ -1193,6 +1193,7 @@ export class IfcModel {
       open: true,
       kind: isQto ? 'qto' : 'pset',
       psetId: isPset ? ps.expressID : null,
+      psetName: fmtValue(ps.Name),
       shared,
       isType,
     };
@@ -1404,6 +1405,91 @@ export class IfcModel {
     for (const psid of handled) for (const e of index.psetToElements.get(psid) || []) if (!want.has(e)) others++;
     this.#touch(t('chg.batch', { pset: psetName, name: propName, value: text, count: ids.length }));
     return { edited, added, created: missing.length, others };
+  }
+
+  /**
+   * Copies a property set to other objects of this model – any object, also IfcProject and IfcSite
+   * (IfcRelDefinesByProperties relates property sets to any IfcObjectDefinition; in IFC2X3 to any
+   * IfcObject). The copy is independent: new properties, the source is not touched.
+   * - from: {model, psetId}: the source, in this model or another one;
+   * - name: the name of the copy (the source's name, or another one);
+   * - ids: the objects to copy to. Where an object already has a property set of that name, the
+   *   copied values are set in it (other properties stay); the others share one new property set.
+   * Single, enumerated and list values are copied; other kinds (bounded, table, reference, complex)
+   * are skipped and counted. Units are kept only within the same model.
+   * Returns {props, skipped, created, merged, others}.
+   */
+  copyPropertySet(from, name, ids) {
+    name = String(name || '').trim();
+    if (!name) throw new Error(t('err.nameRequired'));
+    if (!ids.length) throw new Error(t('cp.none'));
+    const api = this.api, mid = this.modelID, src = from.model, sid = src.modelID;
+    const same = src === this;
+    const pset = api.GetLine(sid, from.psetId, false);
+    if (!pset || !Array.isArray(pset.HasProperties)) throw new Error(t('cp.notPset'));
+    const KINDS = { IFCPROPERTYSINGLEVALUE: ['NominalValue', 'Unit'], IFCPROPERTYENUMERATEDVALUE: ['EnumerationValues', 'EnumerationReference'], IFCPROPERTYLISTVALUE: ['ListValues', 'Unit'] };
+    // the properties as {name, kind, args}: what a new entity in this model is made of
+    const props = [];
+    let skipped = 0;
+    for (const hnd of pset.HasProperties) {
+      const p = api.GetLine(sid, hnd.value, false);
+      const kind = p ? String(api.GetNameFromTypeCode(p.type)).toUpperCase() : '';
+      const n = fmtValue(p?.Name);
+      if (!KINDS[kind] || !n) { skipped++; continue; }
+      const [valueKey, refKey] = KINDS[kind];
+      props.push({ name: n, kind, desc: p.Description?.value ?? null, value: p[valueKey] ?? null, ref: same ? p[refKey] ?? null : null });
+    }
+    if (!props.length) throw new Error(t('cp.nothing'));
+    const ident = (x) => api.CreateIfcType(mid, WebIFC.IFCIDENTIFIER, x);
+    const text = (x) => (x === null ? null : api.CreateIfcType(mid, WebIFC.IFCTEXT, x));
+    const make = (pr) => {
+      const code = pr.kind === 'IFCPROPERTYSINGLEVALUE' ? WebIFC.IFCPROPERTYSINGLEVALUE : pr.kind === 'IFCPROPERTYENUMERATEDVALUE' ? WebIFC.IFCPROPERTYENUMERATEDVALUE : WebIFC.IFCPROPERTYLISTVALUE;
+      const e = api.CreateIfcEntity(mid, code, ident(pr.name), text(pr.desc), pr.value, pr.ref);
+      api.WriteLine(mid, e);
+      return new WebIFC.Handle(e.expressID);
+    };
+
+    const index = this.#relIndex();
+    const merged = new Set(), missing = [];
+    for (const id of ids) {
+      const existing = (index.elementToPsets.get(id) || []).find((pid) => {
+        const ps = api.GetLine(mid, pid, false);
+        return ps && Array.isArray(ps.HasProperties) && fmtValue(ps.Name) === name && !(same && pid === from.psetId);
+      });
+      if (same && (index.elementToPsets.get(id) || []).includes(from.psetId) && fmtValue(pset.Name) === name) continue; // it has the source itself
+      if (existing) merged.add(existing); else missing.push(id);
+    }
+    // existing sets of that name: copied values set, other properties kept
+    for (const pid of merged) {
+      const ps = api.GetLine(mid, pid, false);
+      const handles = [...ps.HasProperties];
+      for (const pr of props) {
+        const i = handles.findIndex((hh) => fmtValue(api.GetLine(mid, hh.value, false)?.Name) === pr.name);
+        const cur = i >= 0 ? api.GetLine(mid, handles[i].value, false) : null;
+        if (cur && pr.kind === 'IFCPROPERTYSINGLEVALUE' && 'NominalValue' in cur) { cur.NominalValue = pr.value; api.WriteLine(mid, cur); } else if (i >= 0) handles[i] = make(pr);
+        else handles.push(make(pr));
+      }
+      ps.HasProperties = handles;
+      api.WriteLine(mid, ps);
+    }
+    // the other objects: one new property set for all of them
+    if (missing.length) {
+      const owner = api.GetLine(mid, missing[0], false)?.OwnerHistory ?? null;
+      const ps = api.CreateIfcEntity(mid, WebIFC.IFCPROPERTYSET, api.CreateIFCGloballyUniqueId(mid), owner,
+        api.CreateIfcType(mid, WebIFC.IFCLABEL, name), text(pset.Description?.value ?? null), props.map(make));
+      api.WriteLine(mid, ps);
+      const rel = api.CreateIfcEntity(mid, WebIFC.IFCRELDEFINESBYPROPERTIES, api.CreateIFCGloballyUniqueId(mid), owner,
+        null, null, missing.map((x) => new WebIFC.Handle(x)), new WebIFC.Handle(ps.expressID));
+      api.WriteLine(mid, rel);
+    }
+    // objects outside the request that share a merged set (they change too)
+    const want = new Set(ids);
+    let others = 0;
+    for (const pid of merged) for (const e of index.psetToElements.get(pid) || []) if (!want.has(e)) others++;
+    this._relIndex = null;
+    const count = missing.length + [...merged].reduce((n, pid) => n + (index.psetToElements.get(pid) || []).filter((e) => want.has(e)).length, 0);
+    this.#touch(t('chg.copyPset', { pset: name, n: count }));
+    return { props: props.length, skipped, created: missing.length, merged: count - missing.length, others };
   }
 
   /** The current file content (including edits). */

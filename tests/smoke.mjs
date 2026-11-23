@@ -310,6 +310,52 @@ async function main() {
       };
     });
     check('workspace from a file: only well-formed parts are taken', ws.views.join() === 'smoke-v1:null' && ws.topic && !ws.url && !ws.snap && !ws.js, JSON.stringify(ws));
+
+    // ---------------------------------------------------------------- copy a property set (to the project, sites, another model)
+    const cpSrc = await page.evaluate(async () => {
+      const v = window.onlineIfc.viewer, m = v.models.find((x) => x.name === 'Building-Architecture.ifc');
+      for (const id of m.elementIds) {
+        const sec = (await m.getElementData(id)).sections.find((q) => q.psetId && !q.isType && q.rows.length > 1);
+        if (sec) return { id, pset: sec.psetName, rows: sec.rows.map((r) => `${r[0]}=${r[1]}`) };
+      }
+      return null;
+    });
+    await page.evaluate((id) => {
+      const v = window.onlineIfc.viewer, m = v.models.find((x) => x.name === 'Building-Architecture.ifc');
+      v.dispatchEvent(Object.assign(new Event('pick'), { hit: { model: m, id }, originalEvent: { clientX: 0, clientY: 0 } }));
+    }, cpSrc.id);
+    await page.click('.tab[data-tab="models"]');
+    await page.evaluate(() => document.activeElement?.blur());
+    await page.keyboard.press('e');
+    await page.waitForSelector('#props .sec-copy');
+    await page.evaluate((name) => [...document.querySelectorAll('#props details.sec')].find((d) => d.querySelector('summary span').textContent === name).querySelector('.sec-copy').click(), cpSrc.pset);
+    await page.waitForSelector('#copy-pset-dialog[open]');
+    await page.evaluate(() => { for (const o of document.querySelectorAll('#cp-target option')) o.selected = /^(IfcProject|IfcSite) /.test(o.textContent.replace(/\u00a0/g, ' ').trim()); document.querySelector('#cp-target').dispatchEvent(new Event('change')); });
+    const cpWarn = await page.$eval('#copy-pset-dialog .warn', (w) => !w.hidden);
+    await page.click('#copy-pset-dialog .dialog-btns .btn');
+    await page.waitForSelector('#copy-pset-dialog', { state: 'detached' });
+    const cp = await page.evaluate(async (src) => {
+      const v = window.onlineIfc.viewer, m = v.models.find((x) => x.name === 'Building-Architecture.ifc'), other = v.models.find((x) => x.name === 'Infra-Road.ifc');
+      const rows = async (mm, id) => (await mm.getElementData(id)).sections.find((q) => q.psetName === src.pset)?.rows.map((r) => `${r[0]}=${r[1]}`) || null;
+      const sites = []; const walk = (n) => { if (String(n.type).toUpperCase() === 'IFCSITE') sites.push(n.expressID); for (const c of n.children || []) walk(c); }; walk(m.tree);
+      const project = await rows(m, m.tree.expressID), site = await rows(m, sites[0]);
+      // a second time: into the existing sets (merged), and into another model's project
+      const again = m.copyPropertySet({ model: m, psetId: (await m.getElementData(src.id)).sections.find((q) => q.psetName === src.pset).psetId }, src.pset, [m.tree.expressID]);
+      const cross = other.copyPropertySet({ model: m, psetId: (await m.getElementData(src.id)).sections.find((q) => q.psetName === src.pset).psetId }, 'Copied', [other.tree.expressID]);
+      const otherRows = (await other.getElementData(other.tree.expressID)).sections.find((q) => q.psetName === 'Copied')?.rows.length || 0;
+      // saved and opened again: the project still has it
+      const bytes = await m.getBytes();
+      const before = v.models.length;
+      await window.onlineIfc.openFiles([new File([bytes], 'copied-pset.ifc')]);
+      const re = v.models.length > before ? v.models.at(-1) : null;
+      const reRows = re ? await rows(re, re.tree.expressID) : null;
+      if (re) v.removeModel(re);
+      return { sites: sites.length, project, site, again: { merged: again.merged, created: again.created }, cross: { created: cross.created, rows: otherRows }, reopened: reRows };
+    }, cpSrc);
+    const same = (a) => JSON.stringify(a) === JSON.stringify(cpSrc.rows);
+    check('copy a property set to IfcProject and IfcSite (Pset_ warning shown)', cpWarn && same(cp.project) && same(cp.site) && cp.sites >= 1, `${cpSrc.pset}: ${JSON.stringify({ project: !!cp.project, site: !!cp.site, sites: cp.sites })}`);
+    check('copy again merges; into another model; kept when saved and opened again', cp.again.merged === 1 && cp.again.created === 0 && cp.cross.created === 1 && cp.cross.rows === cpSrc.rows.length && same(cp.reopened), JSON.stringify({ again: cp.again, cross: cp.cross, reopened: !!cp.reopened }));
+    await page.keyboard.press('e');
     await page.click('.tab[data-tab="models"]');
     await page.context().close();
 
