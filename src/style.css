@@ -418,6 +418,10 @@ details.sec > summary { cursor: pointer; padding: 6px 9px; background: var(--pan
 details.sec > summary::before { content: '▸'; color: var(--muted); font-size: 10px; transition: transform 0.1s; }
 details.sec[open] > summary::before { transform: rotate(90deg); }
 details.sec > summary .badge { margin-left: auto; color: var(--muted); font-weight: 400; font-size: var(--fs-xs); }
+details.sec > summary .sec-copy { min-width: 24px; min-height: 24px; margin: -4px -4px -4px 0; font-weight: 400; }
+#copy-pset-dialog { width: min(520px, calc(100vw - 32px)); }
+#copy-pset-dialog select[multiple] { width: 100%; min-height: 180px; }
+#copy-pset-dialog .warn { margin: 6px 0 10px; }
 details.sec.qto > summary { color: var(--ok); }
 details.sec.calc > summary { color: var(--warn); }
 .sec-note { font-size: var(--fs-xs); color: var(--muted); padding: 5px 9px; border-top: 1px solid var(--border); }

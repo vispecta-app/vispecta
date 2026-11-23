@@ -53,6 +53,7 @@ import { crsChanged, projectCrsChosen, setProjectCrsChosen } from './app/crs.js'
 import { buildTerrain, openIfcFiles, renderVolumes, runVolumes, setContours, setVolResult, showVolumeMap, terrainFromGeoTiff, terrainFromLandXml, volumeCsv } from './app/terrain.js';
 import { CLOUD_FILE, cloudSettings, cloudsChanged, fileHandles, fileId, hasScene, openCloudFiles, restoreCloudSettings } from './app/clouds.js';
 import { corridor, findInCorridor, openCorridorDialog, renderCorridorHits, setCorridorHits, showCorridor } from './app/corridor.js';
+import { openCopyPset } from './app/copypset.js';
 
 
 
@@ -1347,8 +1348,15 @@ function renderSection(model, elementId, sec) {
     badge = `${sec.rows.length} · ${t('props.sharedBy', { n: sec.shared })}`;
     if (editing && sec.psetId) warn = t('edit.sharedWarn', { n: sec.shared });
   }
+  // copy the property set to other objects – the project, a site, the selection … (edit mode)
+  const copy = editing && sec.psetId
+    ? h('button', { class: 'icon-btn sec-copy', text: '⧉', title: t('cp.button'), 'aria-label': t('cp.button'), onclick: (e) => {
+      e.preventDefault(); e.stopPropagation();
+      openCopyPset({ model, elementId, psetId: sec.psetId, name: sec.psetName || sec.title, count: sec.rows.length }, commitEdit);
+    } })
+    : null;
   return h('details', { class: `sec${sec.kind === 'qto' ? ' qto' : ''}${sec.kind === 'calc' ? ' calc' : ''}`, open: sec.open },
-    h('summary', {}, h('span', { text: sec.title }), h('span', { class: 'badge', text: badge })),
+    h('summary', {}, h('span', { text: sec.title }), h('span', { class: 'badge', text: badge }), copy),
     warn ? h('div', { class: 'warn', text: warn }) : null,
     sec.note ? h('div', { class: 'sec-note', text: sec.note }) : null,
     h('table', { class: 'props' }, tbody),
