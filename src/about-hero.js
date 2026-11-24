@@ -16,6 +16,11 @@ const TEXT = {
   en: { live: 'Live 3D', drag: ' · drag to turn', pause: 'Pause the animation', play: 'Play the animation', section: 'Cross section' },
   da: { live: 'Live 3D', drag: ' · træk for at dreje', pause: 'Sæt animationen på pause', play: 'Afspil animationen', section: 'Tværsnit' },
   de: { live: 'Live-3D', drag: ' · ziehen zum Drehen', pause: 'Animation anhalten', play: 'Animation abspielen', section: 'Querschnitt' },
+  sv: { live: 'Live 3D', drag: ' · dra för att vrida', pause: 'Pausa animationen', play: 'Spela animationen', section: 'Tvärsektion' },
+  nb: { live: 'Live 3D', drag: ' · dra for å dreie', pause: 'Sett animasjonen på pause', play: 'Spill av animasjonen', section: 'Tverrprofil' },
+  nl: { live: 'Live 3D', drag: ' · sleep om te draaien', pause: 'Animatie pauzeren', play: 'Animatie afspelen', section: 'Dwarsdoorsnede' },
+  fr: { live: '3D en direct', drag: ' · faites glisser pour tourner', pause: 'Mettre l’animation en pause', play: 'Lancer l’animation', section: 'Profil en travers' },
+  es: { live: '3D en directo', drag: ' · arrastra para girar', pause: 'Pausar la animación', play: 'Reproducir la animación', section: 'Sección transversal' },
 };
 const text = () => TEXT[document.documentElement.lang] || TEXT.en;
 

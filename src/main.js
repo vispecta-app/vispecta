@@ -22,7 +22,7 @@ import '@fontsource/jetbrains-mono/latin-ext-500.css';
 // Vispecta – user interface.
 import { loadIfcFile } from './ifc.js';
 import { isSpatialType, KIND_TYPES, COLOR_STYLES, colorStyle, OKABE_ITO } from './model.js';
-import { t, getLang, setLang, applyStaticTranslations, fmtNum } from './i18n.js';
+import { t, getLang, setLang, applyStaticTranslations, fmtNum, decimalSign } from './i18n.js';
 import { PythonPanel } from './scripting.js';
 import { MeasureTool } from './measure.js';
 import { WalkMode } from './walk.js';
@@ -82,8 +82,9 @@ measure.alignments = alignmentLayer;
 
 // ===================================================================== language
 $('#lang-select').value = getLang();
-$('#lang-select').addEventListener('change', (e) => {
-  setLang(e.target.value);
+$('#lang-select').addEventListener('change', async (e) => {
+  // the language is loaded first (a small file); when that fails (offline), the current one stays
+  if (!(await setLang(e.target.value))) { e.target.value = getLang(); return; }
   applyStaticTranslations();
   python.translate();
   measure.refresh();
@@ -1764,7 +1765,7 @@ function renderStoreyItems() {
   const box = $('#storey-items');
   const list = allStoreys().filter((st) => st.model.visible);
   const isActive = (st) => state.storey?.id === st.id && state.storey?.model === st.model;
-  const elev = (v) => (v === null ? '–' : `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2).replace('.', ['da', 'de'].includes(getLang()) ? ',' : '.')}`);
+  const elev = (v) => (v === null ? '–' : `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2).replace('.', decimalSign())}`);
   const row = (st) => {
     const b = h('button', { class: `sto-row${isActive(st) ? ' active' : ''}`, title: `${st.name}${st.elevation !== null ? ` · ${elev(st.elevation)} m` : ''}` },
       h('span', { class: 'sto-dot' }), h('span', { class: 'sto-name', text: st.name }), h('span', { class: 'sto-elev', text: elev(st.elevation) }));
