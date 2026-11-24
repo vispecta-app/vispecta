@@ -122,6 +122,13 @@ async function main() {
     });
     check('section window opens for a station section', sv.open, `${sv.paths} shapes`);
     check('section window draws the cut', sv.paths > 0);
+    // the key plan shows the models seen from above (an image), not only their outlines
+    await page.waitForSelector('.secview .sv-key image', { timeout: 20000 }).catch(() => {});
+    const kp = await page.evaluate(() => {
+      const img = document.querySelector('.secview .sv-key image');
+      return { image: !!img, bytes: img?.getAttribute('href')?.length || 0, boxes: document.querySelectorAll('.secview .sv-key .kp-box').length };
+    });
+    check('key plan of the section shows the model from above', kp.image && kp.bytes > 5000 && kp.boxes === 0, JSON.stringify(kp));
     await page.evaluate(() => [...document.querySelectorAll('.plane-row button')].find((b) => b.textContent.trim() === '2D').click());
     await page.waitForSelector('#drawing-dialog[open]');
     await page.selectOption('#drw-format', 'svg');
@@ -164,6 +171,14 @@ async function main() {
       return { ok, n };
     });
     check('filters: property index with quantities worked out when read', pidx.ok && pidx.n > 300, `${pidx.n} elements`);
+    // the Filters tab has the selection bar too: what the filter selected is counted there, and cleared with one click
+    await page.evaluate(() => { const v = document.querySelector('#filters .rule input'); v.value = 'IfcSlab'; v.dispatchEvent(new Event('input')); });
+    await page.waitForTimeout(300);
+    await page.evaluate(() => [...document.querySelectorAll('#filters .flt-btns .btn.primary')].at(-1).click());
+    const fsel = await page.evaluate(() => ({ count: document.querySelector('#tab-filters .sel-count').textContent, clear: getComputedStyle(document.querySelector('#tab-filters .sel-clear')).display !== 'none' }));
+    await page.click('#tab-filters .sel-clear');
+    const fclr = await page.evaluate(() => ({ n: [...window.onlineIfc.state.selection.values()].reduce((a, q) => a + q.size, 0), count: document.querySelector('#tab-filters .sel-count').textContent, clear: getComputedStyle(document.querySelector('#tab-filters .sel-clear')).display !== 'none' }));
+    check('filters: the selection is shown and cleared in the tab itself', /^\d+ selected$/.test(fsel.count) && fsel.clear && fclr.n === 0 && fclr.count === 'Nothing selected' && !fclr.clear, `${fsel.count} → ${fclr.count}`);
     // ---------------------------------------------------------------- accessibility (#62): axe-core, WCAG 2.2 A/AA
     await page.click('.tab[data-tab="models"]');
     // evaluated by the test driver, not as a <script>: the page's Content Security Policy (#64) allows no inline scripts
@@ -356,6 +371,31 @@ async function main() {
     check('copy a property set to IfcProject and IfcSite (Pset_ warning shown)', cpWarn && same(cp.project) && same(cp.site) && cp.sites >= 1, `${cpSrc.pset}: ${JSON.stringify({ project: !!cp.project, site: !!cp.site, sites: cp.sites })}`);
     check('copy again merges; into another model; kept when saved and opened again', cp.again.merged === 1 && cp.again.created === 0 && cp.cross.created === 1 && cp.cross.rows === cpSrc.rows.length && same(cp.reopened), JSON.stringify({ again: cp.again, cross: cp.cross, reopened: !!cp.reopened }));
     await page.keyboard.press('e');
+
+    // ---------------------------------------------------------------- settings (⚙): what is set once, in one place
+    await page.click('#settings-btn');
+    await page.waitForSelector('#settings-dialog[open]');
+    const fmt2 = await page.$$eval('#station-format option', (o) => o[1].value);
+    await page.selectOption('#station-format', fmt2);
+    await page.selectOption('#plane-outline', 'black');
+    await page.selectOption('#measure-unit', 'mm');
+    await page.selectOption('#settings-theme', 'dark');
+    await page.uncheck('#settings-viewcube');
+    const set = await page.evaluate(() => ({
+      fmt: document.querySelector('#station-format').value, outline: window.onlineIfc.viewer.cutlines.style, unit: window.onlineIfc.measure.unit,
+      theme: document.documentElement.dataset.theme, cube: !!document.querySelector('.viewcube')?.hidden,
+      // the controls moved here, not repeated in menus and panels
+      once: ['#station-format', '#station-interval', '#plane-outline', '#plane-hatch', '#measure-unit'].every((q) => document.querySelectorAll(q).length === 1 && document.querySelector(q).closest('#settings-dialog')),
+      formats: document.querySelectorAll('.station-format').length,
+    }));
+    // back as it was, for the rest of the test
+    await page.selectOption('#station-format', 'km');
+    await page.selectOption('#plane-outline', 'yellow');
+    await page.selectOption('#measure-unit', 'm');
+    await page.selectOption('#settings-theme', 'auto');
+    await page.check('#settings-viewcube');
+    await page.keyboard.press('Escape');
+    check('settings: stationing, cut outline, unit, theme and view cube in one dialog', set.fmt === fmt2 && set.outline === 'black' && set.unit === 'mm' && set.theme === 'dark' && set.cube && set.once && set.formats === 1, JSON.stringify(set));
     await page.click('.tab[data-tab="models"]');
     await page.context().close();
 
@@ -374,6 +414,56 @@ async function main() {
     });
     check('long model split into cells for view culling (#60)', cells.buckets > cells.colours && cells.ids === cells.elements, `${cells.buckets} buckets for ${cells.colours} colours, ${cells.ids} elements`);
     check('railway sample: 9 models and a LAZ survey placed in map coordinates', rail.cloud === 'map', `terrain models: ${rail.terrain}`);
+    // measuring snaps to the corners of a cut, and onto the cut face (a free section across the track, like "cut by face")
+    await page2.waitForTimeout(3000); // the sample's opening camera move
+    await page2.evaluate(async () => {
+      const v = window.onlineIfc.viewer, V3 = v.camera.position.constructor;
+      const al = v.models.find((x) => x.name === '01-Alignment.ifc').alignments[0];
+      const k = al.cum.findIndex((x) => x > 30), box = v.models.find((x) => x.name === '03-Earthworks.ifc').getBox();
+      const p0 = v.fromIfc(al.poly[k - 1][0], al.poly[k - 1][1], 0), p1 = v.fromIfc(al.poly[k][0], al.poly[k][1], 0);
+      const c = new V3(p0.x, (box.min.y + box.max.y) / 2, p0.z);
+      const n = p0.clone().sub(p1).setY(0).normalize().applyAxisAngle(new V3(0, 1, 0), 0.05); // 3° off: a free plane
+      window.__snapPlane = v.addPlane('custom', { normal: n, point: c });
+      const cam = c.clone().addScaledVector(n, 16).addScaledVector(new V3(-n.z, 0, n.x), 6); cam.y += 5;
+      v.camera.position.copy(cam); v.controls.target.copy(c); v.camera.lookAt(c); v.controls.update();
+      v.renderFrame({ still: true });
+      await new Promise((r) => setTimeout(r, 400));
+      v.camera.position.copy(cam); v.controls.target.copy(c); v.camera.lookAt(c); v.controls.update();
+      v.renderFrame({ still: true });
+      window.onlineIfc.measure.setMode('distance');
+    });
+    const targets = await page2.evaluate(() => {
+      const v = window.onlineIfc.viewer, cut = v.cutlines.snapData(), V3 = v.camera.position.constructor;
+      const rect = v.renderer.domElement.getBoundingClientRect(), W = rect.width, H = rect.height;
+      const pts = [];
+      for (let i = 0; i < cut.corners.length; i += 3) {
+        const p = new V3(cut.corners[i], cut.corners[i + 1], cut.corners[i + 2]), s = v.toScreen(p);
+        if (s && s.x > 40 && s.y > 40 && s.x < W - 40 && s.y < H - 40) pts.push({ p: p.toArray(), x: rect.left + s.x, y: rect.top + s.y });
+      }
+      const apart = pts.filter((a) => !pts.some((b) => b !== a && Math.hypot(a.x - b.x, a.y - b.y) < 14));
+      // a point well inside the cut face: the centre of its largest triangle
+      let face = null, big = 0;
+      for (const m of v.cutlines.faceGroup.children) {
+        const T = m.geometry.attributes.position.array;
+        for (let i = 0; i < T.length; i += 9) {
+          const a = new V3(T[i], T[i + 1], T[i + 2]), b = new V3(T[i + 3], T[i + 4], T[i + 5]), c = new V3(T[i + 6], T[i + 7], T[i + 8]);
+          const area = b.clone().sub(a).cross(c.clone().sub(a)).length();
+          if (area > big) { big = area; const s = v.toScreen(a.add(b).add(c).multiplyScalar(1 / 3)); face = s ? { x: rect.left + s.x, y: rect.top + s.y } : null; }
+        }
+      }
+      return { corners: apart.slice(0, 8), face };
+    });
+    let caught = 0;
+    for (const c of targets.corners) {
+      await page2.mouse.move(c.x + 4, c.y + 3);
+      const h = await page2.evaluate(() => { const s = window.onlineIfc.measure.hover; return s && { kind: s.kind, p: s.point.toArray() }; });
+      if (h?.kind === 'vertex' && Math.hypot(h.p[0] - c.p[0], h.p[1] - c.p[1], h.p[2] - c.p[2]) < 0.002) caught++;
+    }
+    await page2.mouse.move(targets.face.x, targets.face.y);
+    const onFace = await page2.evaluate(() => { const s = window.onlineIfc.measure.hover; return s && { kind: s.kind, off: Math.abs(window.__snapPlane.plane.distanceToPoint(s.point)) }; });
+    check('measuring snaps to the corners of a cut and onto the cut face', targets.corners.length >= 4 && caught === targets.corners.length && onFace?.off < 1e-6,
+      `${caught} of ${targets.corners.length} corners, cut face: ${onFace?.kind} ${onFace ? `${(onFace.off * 1000).toFixed(3)} mm off the plane` : ''}`);
+    await page2.evaluate(() => { const v = window.onlineIfc.viewer; window.onlineIfc.measure.setMode(null); v.removePlane(window.__snapPlane); v.fitAll?.(); });
     // contours on the terrain (#92)
     await page2.click('.tab[data-tab="models"]');
     await page2.evaluate(() => {

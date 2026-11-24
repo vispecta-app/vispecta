@@ -1,5 +1,6 @@
 // Measuring: point-to-point distance, chained lengths (polyline) and spot measurements
-// (coordinates and elevation). Points snap to vertices, edge midpoints and edges.
+// (coordinates and elevation). Points snap to vertices, edge midpoints and edges – of the model, and
+// of the cut where a section plane cuts it (its corners, the midpoints of its straight runs, the runs).
 import * as THREE from 'three';
 import { t, fmtNum } from './i18n.js';
 import { formatStation } from './alignment.js';
@@ -7,6 +8,9 @@ import { formatStation } from './alignment.js';
 const SNAP_VERTEX_PX = 12;
 const SNAP_MID_PX = 10;
 const SNAP_EDGE_PX = 7;
+// a corner of the cut is preferred to a model vertex this much nearer to the cursor: with a section,
+// the cut is what is measured
+const CUT_BONUS_PX = 4;
 const SNAP_PROBES = [[8, 0], [-8, 0], [0, 8], [0, -8]];
 const COLORS = { distance: 0x2f7de1, chain: 0x8e44ad, spot: 0x1fa971 };
 
@@ -203,27 +207,42 @@ export class MeasureTool extends EventTarget {
   }
 
   #snapModels(clientX, clientY) {
-    const center = this.viewer.pick(clientX, clientY);
-    if (!this.snapOn) return center ? { point: center.point, kind: 'face', hit: center } : null;
+    const v = this.viewer;
+    const center = v.pick(clientX, clientY);
+    const rect = v.renderer.domElement.getBoundingClientRect();
+    // With a section, the hatched cut faces cover the opening: what lies behind them (the inside of a
+    // cut solid) is not seen. Where a ray crosses a cut face before it hits the model, the cut face
+    // is what is under the cursor – in the section plane – and the hit and its triangle's corners
+    // are hidden.
+    const cut = v.cutlines?.snapData?.() || null;
+    const capOf = (dx, dy, h) => (cut?.caps.length ? this.#capPoint(this.#ray(clientX - rect.left + dx, clientY - rect.top + dy, rect), cut.caps, h?.point) : null);
+    const capPoint = capOf(0, 0, center);
+    const surface = capPoint ? { point: capPoint, kind: 'face', hit: center } : center ? { point: center.point, kind: 'face', hit: center } : null;
+    if (!this.snapOn) return surface;
     // Also look at the surfaces just around the cursor, so corners can be caught from either side.
-    const hits = center ? [center] : [];
+    const hits = center && !capPoint ? [center] : [];
     for (const [dx, dy] of SNAP_PROBES) {
-      const h = this.viewer.pick(clientX + dx, clientY + dy);
-      if (h?.face && !hits.some((x) => x.object === h.object && x.face.a === h.face.a && x.face.b === h.face.b)) hits.push(h);
+      const h = v.pick(clientX + dx, clientY + dy);
+      if (h?.face && !capOf(dx, dy, h) && !hits.some((x) => x.object === h.object && x.face.a === h.face.a && x.face.b === h.face.b)) hits.push(h);
     }
-    if (!hits.length) return null;
-    const rect = this.viewer.renderer.domElement.getBoundingClientRect();
     const mouse = { x: clientX - rect.left, y: clientY - rect.top };
     const px = (p) => {
-      const s = this.viewer.toScreen(p);
-      return s ? Math.hypot(s.x - mouse.x, s.y - mouse.y) : Infinity;
+      const sc = v.toScreen(p);
+      return sc ? Math.hypot(sc.x - mouse.x, sc.y - mouse.y) : Infinity;
     };
     const tris = hits.filter((h) => h.face).map((h) => {
       const pos = h.object.geometry.getAttribute('position');
       const mw = h.object.matrixWorld;
       return { hit: h, v: [h.face.a, h.face.b, h.face.c].map((i) => new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(mw)) };
     });
-    // vertices
+    // the cut (#measure): its corners, runs and their midpoints, where they can be seen – not behind
+    // what is under the cursor
+    const cam = v.camera.position;
+    const depth = surface ? surface.point.distanceTo(cam) : Infinity;
+    const seen = (p) => p.distanceTo(cam) <= depth + Math.max(0.05, depth * 0.01);
+    const q = new THREE.Vector3(), q2 = new THREE.Vector3();
+
+    // vertices: of the triangles around the cursor, and the corners of the cut
     let best = null;
     for (const tri of tris) {
       for (const p of tri.v) {
@@ -231,27 +250,78 @@ export class MeasureTool extends EventTarget {
         if (d <= SNAP_VERTEX_PX && (!best || d < best.d)) best = { d, point: p, kind: 'vertex', hit: tri.hit };
       }
     }
+    if (cut) {
+      const C = cut.corners;
+      for (let i = 0; i < C.length; i += 3) {
+        q.set(C[i], C[i + 1], C[i + 2]);
+        const d = px(q);
+        if (d <= SNAP_VERTEX_PX && (!best || d - CUT_BONUS_PX < best.d) && seen(q)) best = { d: d - CUT_BONUS_PX, point: q.clone(), kind: 'vertex', hit: center };
+      }
+    }
     if (best) return best;
-    if (!center?.face) return center ? { point: center.point, kind: 'face', hit: center } : null;
-    const hit = center;
-    const v = tris[0].v;
-    // edge midpoints and edges (of the triangle under the cursor)
-    const edges = [[v[0], v[1]], [v[1], v[2]], [v[2], v[0]]];
+
+    // edge midpoints: of the triangle under the cursor, and of the cut's straight runs
+    const v3 = center?.face && !capPoint && tris[0]?.hit === center ? tris[0].v : null;
+    const edges = v3 ? [[v3[0], v3[1]], [v3[1], v3[2]], [v3[2], v3[0]]] : [];
     for (const [a, b] of edges) {
       const mid = a.clone().add(b).multiplyScalar(0.5);
       const d = px(mid);
-      if (d <= SNAP_MID_PX && (!best || d < best.d)) best = { d, point: mid, kind: 'mid' };
+      if (d <= SNAP_MID_PX && (!best || d < best.d)) best = { d, point: mid, kind: 'mid', hit: center };
     }
-    if (best) return { ...best, hit };
+    const R = cut?.runs || [];
+    const ray = this.#ray(clientX - rect.left, clientY - rect.top, rect);
+    for (let i = 0; i < R.length; i += 6) {
+      q.set((R[i] + R[i + 3]) / 2, (R[i + 1] + R[i + 4]) / 2, (R[i + 2] + R[i + 5]) / 2);
+      const d = px(q);
+      if (d <= SNAP_MID_PX && (!best || d < best.d) && seen(q)) best = { d, point: q.clone(), kind: 'mid', hit: center };
+    }
+    if (best) return best;
+
+    // edges: of the triangle under the cursor, and the cut's runs (the point nearest to the ray)
     const line = new THREE.Line3();
     for (const [a, b] of edges) {
       line.set(a, b);
-      const c = line.closestPointToPoint(hit.point, true, new THREE.Vector3());
+      const c = line.closestPointToPoint(center.point, true, new THREE.Vector3());
       const d = px(c);
-      if (d <= SNAP_EDGE_PX && (!best || d < best.d)) best = { d, point: c, kind: 'edge' };
+      if (d <= SNAP_EDGE_PX && (!best || d < best.d)) best = { d, point: c, kind: 'edge', hit: center };
     }
-    if (best) return { ...best, hit };
-    return { point: hit.point, kind: 'face', hit };
+    for (let i = 0; i < R.length; i += 6) {
+      q.set(R[i], R[i + 1], R[i + 2]); q2.set(R[i + 3], R[i + 4], R[i + 5]);
+      const on = new THREE.Vector3();
+      ray.distanceSqToSegment(q, q2, null, on);
+      const d = px(on);
+      if (d <= SNAP_EDGE_PX && (!best || d < best.d) && seen(on)) best = { d, point: on, kind: 'edge', hit: center };
+    }
+    if (best) return best;
+    return surface;
+  }
+
+  /** The ray under a pixel of the canvas. */
+  #ray(x, y, rect) {
+    const rc = new THREE.Raycaster();
+    rc.setFromCamera(new THREE.Vector2((x / rect.width) * 2 - 1, -(y / rect.height) * 2 + 1), this.viewer.camera);
+    return rc.ray;
+  }
+
+  /**
+   * Where the ray meets a cut face before it reaches `behind` (the model hit; null: nothing hit), or
+   * null: the nearest point where it crosses a section plane inside one of that plane's cut faces.
+   */
+  #capPoint(ray, caps, behind) {
+    const far = behind ? ray.origin.distanceTo(behind) + 1e-6 : Infinity;
+    let best = null, bestT = Infinity;
+    const q = new THREE.Vector3(), tri = new THREE.Triangle();
+    for (const { plane, others, tris } of caps) {
+      if (!ray.intersectPlane(plane, q)) continue;
+      const tt = ray.origin.distanceTo(q);
+      if (tt > far || tt >= bestT) continue;
+      if (others.some((o) => o.distanceToPoint(q) < -1e-6)) continue;
+      for (let i = 0; i < tris.length; i += 9) {
+        tri.a.set(tris[i], tris[i + 1], tris[i + 2]); tri.b.set(tris[i + 3], tris[i + 4], tris[i + 5]); tri.c.set(tris[i + 6], tris[i + 7], tris[i + 8]);
+        if (tri.containsPoint(q)) { bestT = tt; best = q.clone(); break; }
+      }
+    }
+    return best;
   }
 
   /**

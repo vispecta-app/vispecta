@@ -135,7 +135,7 @@ export function restoreCloudSettings(list = [], { slab, edl } = {}) {
 }
 
 /** Eye-dome lighting (#52): depth shading for point clouds, remembered in this browser. */
-function setEdl(on) {
+export function setEdl(on) {
   viewer.edl = !!on;
   try { localStorage.setItem('vispecta.edl', on ? '1' : '0'); } catch { /* ignore */ }
   viewer.invalidate();

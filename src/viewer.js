@@ -540,6 +540,84 @@ export class Viewer extends EventTarget {
   }
 
   // ------------------------------------------------------------ picking
+  /**
+   * The visible models seen from above, for the key plan of a section: {url (PNG data URL), x0, y0,
+   * x1, y1 (its extent in IFC plan coordinates, metres)}, or null. Drawn without the sections, point
+   * clouds and overlays, with the models' colours and hidden elements as they are shown. Kept until
+   * the models or what is shown of them change, so a moving section costs nothing. cachedOnly: only
+   * an image made already (null otherwise).
+   */
+  planImage(maxPx = 640, { cachedOnly = false } = {}) {
+    const models = this.models.filter((m) => m.visible && m.elementIds.size);
+    if (!models.length) return null;
+    const sig = models.map((m) => {
+      const e = m.group.matrixWorld.elements;
+      return [m.uid, m.version, m.hidden.size, m.elementColor.size, m.elementOpacity.size, m.opacity, m.overrideColor?.getHex() ?? '', m.heightColors || '', e[12].toFixed(2), e[13].toFixed(2), e[14].toFixed(2)].join(':');
+    }).join('|');
+    if (this._plan?.sig === sig) return this._plan.img;
+    if (cachedOnly) return null;
+    // the extent in IFC coordinates
+    let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+    for (const m of models) {
+      const b = m.getBox();
+      if (b.isEmpty()) continue;
+      for (const x of [b.min.x, b.max.x]) for (const y of [b.min.y, b.max.y]) for (const z of [b.min.z, b.max.z]) {
+        const q = this.toIfc(new THREE.Vector3(x, y, z));
+        x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y); z0 = Math.min(z0, q.z); z1 = Math.max(z1, q.z);
+      }
+    }
+    if (!(x1 > x0) && !(y1 > y0)) return null;
+    const pad = 0.02 * Math.max(x1 - x0, y1 - y0, 1);
+    x0 -= pad; y0 -= pad; x1 += pad; y1 += pad;
+    const w = x1 - x0, h = y1 - y0;
+    // drawn into a corner of the 3D view's own canvas (the shaders it uses are compiled already; a
+    // render target of its own would compile them all again), read at once, and the view drawn again
+    // before the browser shows anything
+    const r = this.renderer, el = r.domElement, pr = r.getPixelRatio();
+    const fit = Math.min(maxPx, el.width, el.height);
+    const W = Math.max(8, Math.floor(w >= h ? fit : (fit * w) / h)), H = Math.max(8, Math.floor(h >= w ? fit : (fit * h) / w));
+    // a camera looking straight down, its image axes along IFC x (right) and y (up)
+    const o = this.fromIfc(0, 0, 0);
+    const up = this.fromIfc(0, 1, 0).sub(o).normalize();
+    const top = this.fromIfc((x0 + x1) / 2, (y0 + y1) / 2, z1 + 10), below = this.fromIfc((x0 + x1) / 2, (y0 + y1) / 2, z0 - 10);
+    const cam = new THREE.OrthographicCamera(-w / 2, w / 2, h / 2, -h / 2, 0.1, top.distanceTo(below) + 1);
+    cam.position.copy(top);
+    cam.up.copy(up);
+    cam.lookAt(below);
+    cam.updateMatrixWorld();
+    // only the models: no overlays, point clouds, sections, background or fog
+    const off = [];
+    for (const c of this.scene.children) if (c !== this.modelRoot && !c.isLight && c.visible) { c.visible = false; off.push(c); }
+    for (const c of this.clouds) if (c.points.visible) { c.points.visible = false; off.push(c.points); }
+    const clip = r.clippingPlanes, bg = this.scene.background, fog = this.scene.fog;
+    const clear = r.getClearColor(new THREE.Color()), alpha = r.getClearAlpha();
+    const canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    try {
+      r.clippingPlanes = [];
+      this.scene.background = null; this.scene.fog = null;
+      r.setClearColor(0xffffff, 1);
+      r.setViewport(0, 0, W / pr, H / pr);
+      r.setScissor(0, 0, W / pr, H / pr);
+      r.setScissorTest(true);
+      r.clear();
+      r.render(this.scene, cam);
+      ctx.drawImage(el, 0, el.height - H, W, H, 0, 0, W, H); // the bottom left corner (GL: from the bottom)
+    } finally {
+      r.setScissorTest(false);
+      r.setViewport(0, 0, el.width / pr, el.height / pr);
+      r.clippingPlanes = clip;
+      this.scene.background = bg; this.scene.fog = fog;
+      r.setClearColor(clear, alpha);
+      for (const c of off) c.visible = true;
+      this.renderFrame(); // the view again, in the same task: nothing of the above is ever shown
+    }
+    const img = { url: canvas.toDataURL('image/png'), x0, y0, x1, y1 };
+    this._plan = { sig, img };
+    return img;
+  }
+
   /** IFC (metres, Z up) -> viewer coordinates. Inverse of toIfc. */
   fromIfc(x, y, z) {
     const q = new THREE.Vector3(x, z, -y);
