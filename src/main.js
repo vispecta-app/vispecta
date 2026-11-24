@@ -558,7 +558,8 @@ function setSelectionVisible(visible) {
 function renderSelBars() {
   const n = selectionCount();
   for (const bar of $$('.sel-bar')) {
-    bar.querySelector('.sel-count').textContent = n ? t('sel.count', { n: fmtNum(n) }) : t('sel.hint');
+    // without a selection: a hint (about clicking rows; the Filters tab says just that nothing is selected)
+    bar.querySelector('.sel-count').textContent = n ? t('sel.count', { n: fmtNum(n) }) : t(bar.dataset.hint || 'sel.hint');
     for (const b of $$('button[data-needs-sel]', bar)) b.disabled = !n;
   }
 }

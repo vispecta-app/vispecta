@@ -331,7 +331,9 @@ label.swatch-dot input { position: absolute; inset: 0; width: 100%; height: 100%
 .node .count { color: var(--muted); font-size: var(--fs-xs); margin-left: auto; padding-left: 6px; }
 .tree-more { padding: 4px 8px; font-size: var(--fs-sm); }
 .sel-bar { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 5px 6px; margin-bottom: 6px; position: sticky; top: -8px; z-index: 1; }
-.sel-bar .sel-count { flex: 1 1 100%; font-size: 11.5px; color: var(--muted); }
+.sel-bar .sel-head { flex: 1 1 100%; display: flex; align-items: center; gap: 6px; min-height: 24px; }
+.sel-bar .sel-count { flex: 1; font-size: 11.5px; color: var(--muted); }
+.sel-bar .sel-clear:disabled { display: none; } /* only while something is selected */
 .sel-opacity { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-sm); color: var(--muted); }
 .sel-opacity input { width: 90px; }
 

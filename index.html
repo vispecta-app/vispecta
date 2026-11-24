@@ -246,12 +246,11 @@
         <section class="tab-body" id="tab-tree">
           <input class="search" id="tree-search" type="search" data-i18n-placeholder="tree.search" />
           <div class="sel-bar">
-            <span class="sel-count"></span>
+            <div class="sel-head"><span class="sel-count"></span><button class="btn xs sel-clear" data-action="sel-clear" data-needs-sel data-i18n-title="sel.clearTitle">✕ <span data-i18n="sel.clearShort"></span></button></div>
             <button class="btn xs" data-action="sel-hide" data-needs-sel data-i18n="sel.hide" data-i18n-title="sel.hideTitle"></button>
             <button class="btn xs" data-action="sel-show" data-needs-sel data-i18n="sel.show" data-i18n-title="sel.showTitle"></button>
             <button class="btn xs" data-action="sel-isolate" data-needs-sel data-i18n="sel.isolate" data-i18n-title="sel.isolateTitle"></button>
             <button class="btn xs" data-action="show-all" data-i18n="sel.showAll" data-i18n-title="tb.showAllTitle"></button>
-            <button data-action="sel-clear" data-needs-sel class="btn xs icon-only" data-i18n-title="sel.clear">✕</button>
             <label class="sel-opacity" data-i18n-title="sel.opacityTitle"><span data-i18n="sel.opacity"></span>
               <input type="range" min="0.05" max="1" step="0.05" value="1" data-sel-opacity data-needs-sel /></label>
             <button class="btn xs" data-action="sel-opacity-reset" data-i18n="sel.opacityReset" data-i18n-title="sel.opacityResetTitle"></button>
@@ -265,16 +264,25 @@
           <div id="issues"></div>
         </section>
         <section class="tab-body" id="tab-filters">
-          <div id="filters"></div>
-        </section>
-        <section class="tab-body" id="tab-classes">
-          <div class="sel-bar">
-            <span class="sel-count"></span>
+          <div class="sel-bar" data-hint="sel.none">
+            <div class="sel-head"><span class="sel-count"></span><button class="btn xs sel-clear" data-action="sel-clear" data-needs-sel data-i18n-title="sel.clearTitle">✕ <span data-i18n="sel.clearShort"></span></button></div>
             <button class="btn xs" data-action="sel-hide" data-needs-sel data-i18n="sel.hide" data-i18n-title="sel.hideTitle"></button>
             <button class="btn xs" data-action="sel-show" data-needs-sel data-i18n="sel.show" data-i18n-title="sel.showTitle"></button>
             <button class="btn xs" data-action="sel-isolate" data-needs-sel data-i18n="sel.isolate" data-i18n-title="sel.isolateTitle"></button>
             <button class="btn xs" data-action="show-all" data-i18n="sel.showAll" data-i18n-title="tb.showAllTitle"></button>
-            <button data-action="sel-clear" data-needs-sel class="btn xs icon-only" data-i18n-title="sel.clear">✕</button>
+            <label class="sel-opacity" data-i18n-title="sel.opacityTitle"><span data-i18n="sel.opacity"></span>
+              <input type="range" min="0.05" max="1" step="0.05" value="1" data-sel-opacity data-needs-sel /></label>
+            <button class="btn xs" data-action="sel-opacity-reset" data-i18n="sel.opacityReset" data-i18n-title="sel.opacityResetTitle"></button>
+          </div>
+          <div id="filters"></div>
+        </section>
+        <section class="tab-body" id="tab-classes">
+          <div class="sel-bar">
+            <div class="sel-head"><span class="sel-count"></span><button class="btn xs sel-clear" data-action="sel-clear" data-needs-sel data-i18n-title="sel.clearTitle">✕ <span data-i18n="sel.clearShort"></span></button></div>
+            <button class="btn xs" data-action="sel-hide" data-needs-sel data-i18n="sel.hide" data-i18n-title="sel.hideTitle"></button>
+            <button class="btn xs" data-action="sel-show" data-needs-sel data-i18n="sel.show" data-i18n-title="sel.showTitle"></button>
+            <button class="btn xs" data-action="sel-isolate" data-needs-sel data-i18n="sel.isolate" data-i18n-title="sel.isolateTitle"></button>
+            <button class="btn xs" data-action="show-all" data-i18n="sel.showAll" data-i18n-title="tb.showAllTitle"></button>
             <label class="sel-opacity" data-i18n-title="sel.opacityTitle"><span data-i18n="sel.opacity"></span>
               <input type="range" min="0.05" max="1" step="0.05" value="1" data-sel-opacity data-needs-sel /></label>
             <button class="btn xs" data-action="sel-opacity-reset" data-i18n="sel.opacityReset" data-i18n-title="sel.opacityResetTitle"></button>

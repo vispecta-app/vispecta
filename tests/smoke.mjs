@@ -164,6 +164,14 @@ async function main() {
       return { ok, n };
     });
     check('filters: property index with quantities worked out when read', pidx.ok && pidx.n > 300, `${pidx.n} elements`);
+    // the Filters tab has the selection bar too: what the filter selected is counted there, and cleared with one click
+    await page.evaluate(() => { const v = document.querySelector('#filters .rule input'); v.value = 'IfcSlab'; v.dispatchEvent(new Event('input')); });
+    await page.waitForTimeout(300);
+    await page.evaluate(() => [...document.querySelectorAll('#filters .flt-btns .btn.primary')].at(-1).click());
+    const fsel = await page.evaluate(() => ({ count: document.querySelector('#tab-filters .sel-count').textContent, clear: getComputedStyle(document.querySelector('#tab-filters .sel-clear')).display !== 'none' }));
+    await page.click('#tab-filters .sel-clear');
+    const fclr = await page.evaluate(() => ({ n: [...window.onlineIfc.state.selection.values()].reduce((a, q) => a + q.size, 0), count: document.querySelector('#tab-filters .sel-count').textContent, clear: getComputedStyle(document.querySelector('#tab-filters .sel-clear')).display !== 'none' }));
+    check('filters: the selection is shown and cleared in the tab itself', /^\d+ selected$/.test(fsel.count) && fsel.clear && fclr.n === 0 && fclr.count === 'Nothing selected' && !fclr.clear, `${fsel.count} → ${fclr.count}`);
     // ---------------------------------------------------------------- accessibility (#62): axe-core, WCAG 2.2 A/AA
     await page.click('.tab[data-tab="models"]');
     // evaluated by the test driver, not as a <script>: the page's Content Security Policy (#64) allows no inline scripts
