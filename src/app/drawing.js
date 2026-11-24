@@ -1,6 +1,6 @@
 // 2D drawings of sections (#63, moved out of main.js): the drawing dialog, its options, the
 // annotated points chosen by hand (#48) and the drawing presets (#51).
-import { t, getLang, fmtNum } from '../i18n.js';
+import { t, fmtNum, decimalSign } from '../i18n.js';
 import { heightAt, formatStation } from '../alignment.js';
 import { computeSection, planeAxes, layout, toSvg, toPdf, toDxf, renderBackground, SCALES } from '../drawing.js';
 import { $, $$, download, h, toast, viewer, withLoading } from './core.js';
@@ -275,7 +275,7 @@ export function annotOptions({ force = false } = {}) {
     angle: Math.min(89, Math.max(1, +$('#ann-angle').value || 10)),
     minDist: Math.max(0, +String($('#ann-mindist').value).replace(',', '.') || 0),
     editsFor: (entry) => annotEdits.get(editKey(entry)) || null,
-    dec: $('#ann-dec').value !== 'auto' ? $('#ann-dec').value : ['da', 'de'].includes(getLang()) ? ',' : '.',
+    dec: $('#ann-dec').value !== 'auto' ? $('#ann-dec').value : decimalSign(),
     labels: { offset: t('ann.offset'), height: t('ann.height'), dist: t('ann.dist') },
     // label content and number formats (#49)
     offsetRef: $('#ann-off-ref').value,

@@ -10,7 +10,7 @@
 
 An IFC viewer and editor that runs entirely in the browser. Files are processed locally (WebAssembly) and are never uploaded.
 
-The interface is in **English**, **Danish**, **German** and **Hindi** (language picker in the top right corner; the choice is remembered). There is a light and a dark theme (moon/sun button).
+The interface is in **English**, **Danish**, **German**, **Swedish**, **Norwegian (bokmål)**, **Dutch**, **French**, **Spanish** and **Hindi** (language picker in the top right corner; the choice is remembered). There is a light and a dark theme (moon/sun button).
 
 Vispecta is an open-source project by Rasmus Roien Molbaek (AGPL-3.0 licence). It grows out of the challenges I met in my work as an engineer in railway projects: alignments and stationing, cross sections and longitudinal profiles, combining the models of several disciplines, and quick checks of metadata.
 
@@ -297,7 +297,7 @@ Built with [three.js](https://threejs.org), [three-mesh-bvh](https://github.com/
 | `src/ifc.js`, `src/model.js` | loading IFC, metadata and metadata editing (web-ifc) |
 | `src/python.js`, `src/python-worker.js` | Pyodide/IfcOpenShell worker and merge logic |
 | `src/scripting.js`, `src/examples.js` | Python panel and example scripts |
-| `src/i18n.js` | translations (en/da/de/hi) |
+| `src/i18n.js`, `src/i18n/*.js` | translations: English in `i18n.js`; da/de/sv/nb/nl/fr/es/hi each in `src/i18n/<code>.js`, loaded only when chosen |
 | `src/config.js` | where the Python runtime is loaded from |
 | `scripts/fetch-python.mjs`, `scripts/python-wheels.json` | collects the Python runtime into `public/py` at build time (pinned, sha256-checked) |
 

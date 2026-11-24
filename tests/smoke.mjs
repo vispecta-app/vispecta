@@ -69,12 +69,44 @@ async function main() {
   const errors = [];
   const t0 = Date.now();
   try {
+    // ---------------------------------------------------------------- languages: every text in every language
+    // (checked here in Node: the language files are plain modules; a key missing in Hindi falls back to English)
+    const { _dicts } = await import('../src/i18n.js');
+    const en = _dicts.en;
+    const marks = (s, re) => (String(s).match(re) || []).sort().join(' ');
+    const vars = { n: 2, w: 10, h: 20, c: 2, p: 5, f: 8, crs: 'EPSG:25832', cut: 1, fill: 2, net: 1, area: 3, ex: 'a', de: 'b', g: 1 };
+    const langs = [];
+    let complete = true;
+    for (const l of ['da', 'de', 'sv', 'nb', 'nl', 'fr', 'es', 'hi']) {
+      const d = (await import(`../src/i18n/${l}.js`)).default;
+      const missing = Object.keys(en).filter((k) => !(k in d));
+      const bad = Object.entries(d).filter(([k, v]) => !(k in en) || (typeof v === 'function') !== (typeof en[k] === 'function')
+        || (typeof v === 'function' ? typeof v(vars) !== 'string' || v(vars).includes('undefined')
+          : marks(v, /\{\w+\}/g) !== marks(en[k], /\{\w+\}/g) || marks(v, /<[^>]+>/g) !== marks(en[k], /<[^>]+>/g))).map(([k]) => k);
+      if (bad.length || (missing.length && l !== 'hi')) complete = false;
+      langs.push(`${l} ${Object.keys(d).length - bad.length}/${Object.keys(en).length}${bad.length ? ` (wrong: ${bad.slice(0, 3).join(', ')})` : ''}`);
+    }
+    check('translations: every key, the same {placeholders} and HTML as English', complete, langs.join(' · '));
+
     // ---------------------------------------------------------------- sample scene
     const page = await newPage(browser, base, errors);
     // web-ifc (3.5 MB of JavaScript) is loaded with the first model, not with the start screen (code review, C)
     await page.waitForTimeout(500);
     const startJs = await page.evaluate(() => performance.getEntriesByType('resource').map((e) => e.name.split('/').pop()).filter((n) => /\.js$/.test(n)));
     check('start screen without web-ifc', startJs.length > 0 && !startJs.some((n) => /web-ifc/.test(n)), startJs.join(', '));
+    // the other languages are a small file each, loaded when chosen
+    await page.selectOption('#lang-select', 'sv');
+    await page.waitForFunction(() => document.documentElement.lang === 'sv');
+    const svLang = await page.evaluate(() => ({
+      open: document.querySelector('[data-i18n="tb.open"]').textContent,
+      files: performance.getEntriesByType('resource').map((e) => e.name.split('/').pop()).filter((n) => /^(da|de|hi|sv|nb|nl|fr|es)-[\w-]+\.js$/.test(n)),
+    }));
+    await page.selectOption('#lang-select', 'en');
+    await page.waitForFunction(() => document.documentElement.lang === 'en');
+    const backEn = await page.evaluate(() => document.querySelector('[data-i18n="tb.open"]').textContent);
+    check('language: Swedish loaded when chosen (not before), and back to English',
+      !startJs.some((n) => /^(da|de|hi|sv|nb|nl|fr|es)-/.test(n)) && svLang.open === 'Öppna IFC' && svLang.files.length === 1 && /^sv-/.test(svLang.files[0]) && backEn === 'Open IFC',
+      JSON.stringify({ ...svLang, backEn }));
     await page.click('[data-sample="scene"]');
     await page.waitForFunction(() => window.onlineIfc.viewer.models.length === 11, null, { timeout: 180000 });
     await idle(page);
@@ -683,6 +715,22 @@ async function main() {
     const still = await pr.evaluate(() => ({ canvas: !!document.querySelector('.hero-canvas'), poster: document.querySelector('.hero-poster').complete && document.querySelector('.hero-poster').naturalWidth > 0 }));
     check('about page with reduced motion: the poster, no 3D', !still.canvas && still.poster && !loaded.some((u) => /hero\.js|rail\.bin/.test(u)), JSON.stringify(still));
     await ctxR.close();
+
+    // ---------------------------------------------------------------- a first visit follows the browser's language
+    // (nynorsk and "no" are shown in Norwegian bokmål), in the app and on the about page
+    const ctxL = await browser.newContext({ viewport: { width: 1400, height: 900 }, locale: 'nn-NO', reducedMotion: 'reduce' });
+    const pl = await ctxL.newPage();
+    pl.on('pageerror', (e) => errors.push(`nn pageerror: ${e.message}`));
+    pl.on('console', (m) => { if (m.type() === 'error') errors.push(`nn console: ${m.text()}`); });
+    await pl.goto(`${base}/?app`);
+    await pl.waitForFunction(() => window.onlineIfc?.viewer);
+    const appNb = await pl.evaluate(() => ({ lang: document.documentElement.lang, open: document.querySelector('[data-i18n="tb.open"]').textContent, sel: document.querySelector('#lang-select').value }));
+    await pl.goto(`${base}/about/`);
+    const aboutNb = await pl.evaluate(() => ({ lang: document.documentElement.lang, sel: document.querySelector('#lang').value, langs: document.querySelector('[data-t="g8.t"]').textContent }));
+    check('first visit in the browser language: nynorsk gets Norwegian bokmål (app and about page)',
+      appNb.lang === 'nb' && appNb.open === 'Åpne IFC' && appNb.sel === 'nb' && aboutNb.lang === 'nb' && aboutNb.sel === 'nb' && aboutNb.langs === 'Ni språk',
+      JSON.stringify({ appNb, aboutNb }));
+    await ctxL.close();
   } catch (e) {
     check('smoke test ran to the end', false, e.message.split('\n')[0]);
   } finally {
