@@ -171,6 +171,66 @@ export function triangulate(loops, out) {
   }
 }
 
+/**
+ * Points to snap to in the cut (#measure): the outline's segments joined where they meet (ends
+ * matched to 0.1 mm), its corners – where it turns, ends or branches, not the points in between that
+ * only come from the triangles – and the straight runs from corner to corner.
+ * segs: world x, y, z of segment ends, two per segment. Returns {corners: Float32Array (xyz), runs:
+ * Float32Array (xyz pairs)}.
+ */
+export function cutSnapPoints(segs) {
+  const nodes = new Map(); // key -> {p: [x, y, z], segs: [segment index, …]}
+  const keyOf = (i) => `${Math.round(segs[i] * 1e4)},${Math.round(segs[i + 1] * 1e4)},${Math.round(segs[i + 2] * 1e4)}`;
+  const n = segs.length / 6;
+  const ends = new Array(n * 2);
+  for (let k = 0; k < n; k++) {
+    for (let e = 0; e < 2; e++) {
+      const i = k * 6 + e * 3, key = keyOf(i);
+      let node = nodes.get(key);
+      if (!node) nodes.set(key, (node = { p: [segs[i], segs[i + 1], segs[i + 2]], segs: [] }));
+      node.segs.push(k);
+      ends[k * 2 + e] = node;
+    }
+  }
+  const dir = (k, from) => { // unit direction of segment k, away from node `from`
+    const a = ends[k * 2] === from ? 0 : 3, b = 3 - a, o = k * 6;
+    const x = segs[o + b] - segs[o + a], y = segs[o + b + 1] - segs[o + a + 1], z = segs[o + b + 2] - segs[o + a + 2];
+    const l = Math.hypot(x, y, z) || 1;
+    return [x / l, y / l, z / l];
+  };
+  const isCorner = (node) => {
+    if (node.segs.length !== 2) return true;
+    const [u, w] = [dir(node.segs[0], node), dir(node.segs[1], node)];
+    return u[0] * w[0] + u[1] * w[1] + u[2] * w[2] > -0.9994; // not straight on (turns by more than ~2°)
+  };
+  const corners = [], runs = [];
+  const done = new Uint8Array(n);
+  for (const node of nodes.values()) {
+    if (!isCorner(node)) continue;
+    node.corner = true;
+    corners.push(...node.p);
+  }
+  // runs: from a corner along its segments to the next corner
+  for (const start of nodes.values()) {
+    if (!start.corner) continue;
+    for (const k0 of start.segs) {
+      if (done[k0]) continue;
+      let k = k0, at = start, guard = n;
+      while (guard-- > 0) {
+        done[k] = 1;
+        const next = ends[k * 2] === at ? ends[k * 2 + 1] : ends[k * 2];
+        at = next;
+        if (next.corner) break;
+        const k2 = next.segs.find((x) => x !== k && !done[x]);
+        if (k2 === undefined) break;
+        k = k2;
+      }
+      if (at !== start) runs.push(...start.p, ...at.p);
+    }
+  }
+  return { corners: new Float32Array(corners), runs: new Float32Array(runs) };
+}
+
 export class CutOutline {
   constructor(viewer) {
     this.viewer = viewer;
@@ -201,6 +261,15 @@ export class CutOutline {
     this.ms = 0; // time of the last computation (for tests)
     this.count = 0; // outline segments shown
     this.triangles = 0; // face triangles shown
+    this.snap = null; // corners and runs of the cut, for measuring (snapData)
+  }
+
+  /**
+   * What measuring can snap to in the cut, while it is shown: {caps: [{plane, others, tris}] (the cut
+   * faces, empty when they are off), corners, runs} (see cutSnapPoints), or null.
+   */
+  snapData() {
+    return this.shown && this.ready && this.snap?.corners.length ? this.snap : null;
   }
 
   /** Outline: 'yellow' | 'black' | 'object' (darker object colour) | 'off'. */
@@ -269,7 +338,7 @@ export class CutOutline {
     if (sig === this.sig) return;
     this.sig = sig;
     clearTimeout(this.timer);
-    if (!planes.length || !meshes.length) { this.#show(null, []); return; }
+    if (!planes.length || !meshes.length) { this.snap = null; this.#show(null, []); return; }
     if (still) { this.#compute(planes, meshes); return; }
     this.ready = false;
     this.#visible();
@@ -283,6 +352,7 @@ export class CutOutline {
   #compute(planes, meshes) {
     const t0 = performance.now();
     const pos = [], col = [];
+    const snapSegs = []; // the outline, also when it is not drawn: for snapping
     const faces = []; // per plane: {plane, others, tris: [x, y, z, …]}
     const outline = this.style !== 'off';
     const fixed = OUTLINE_STYLES[this.style];
@@ -347,7 +417,6 @@ export class CutOutline {
             q.copy(a).sub(O); const ax = q.dot(U), ay = q.dot(V);
             q.copy(b).sub(O); segs.push(ax, ay, q.dot(U), q.dot(V));
           }
-          if (!outline) continue;
           // the outline: cut against the other planes (keep what is on their kept side)
           let keep = true;
           for (const o of others) {
@@ -356,6 +425,8 @@ export class CutOutline {
             if (da < 0) { q.copy(a).lerp(b, da / (da - db)); a.copy(q); } else if (db < 0) { q.copy(a).lerp(b, da / (da - db)); b.copy(q); }
           }
           if (!keep || a.distanceToSquared(b) < 1e-12) continue;
+          snapSegs.push(a.x, a.y, a.z, b.x, b.y, b.z);
+          if (!outline) continue;
           pos.push(a.x, a.y, a.z, b.x, b.y, b.z);
           col.push(c.r, c.g, c.b, c.r, c.g, c.b);
         }
@@ -371,6 +442,10 @@ export class CutOutline {
         faces.push({ plane: p.plane, others, tris });
       }
     }
+    // caps: the cut faces per plane (world triangles), to tell when the cursor is on one
+    this.snap = snapSegs.length
+      ? { caps: faces.map((f) => ({ plane: f.plane.clone(), others: f.others.map((o) => o.clone()), tris: f.tris })), ...cutSnapPoints(snapSegs) }
+      : null;
     this.ms = Math.round(performance.now() - t0);
     this.#show(pos.length ? { pos, col } : null, faces);
   }

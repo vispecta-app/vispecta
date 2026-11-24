@@ -382,6 +382,56 @@ async function main() {
     });
     check('long model split into cells for view culling (#60)', cells.buckets > cells.colours && cells.ids === cells.elements, `${cells.buckets} buckets for ${cells.colours} colours, ${cells.ids} elements`);
     check('railway sample: 9 models and a LAZ survey placed in map coordinates', rail.cloud === 'map', `terrain models: ${rail.terrain}`);
+    // measuring snaps to the corners of a cut, and onto the cut face (a free section across the track, like "cut by face")
+    await page2.waitForTimeout(3000); // the sample's opening camera move
+    await page2.evaluate(async () => {
+      const v = window.onlineIfc.viewer, V3 = v.camera.position.constructor;
+      const al = v.models.find((x) => x.name === '01-Alignment.ifc').alignments[0];
+      const k = al.cum.findIndex((x) => x > 30), box = v.models.find((x) => x.name === '03-Earthworks.ifc').getBox();
+      const p0 = v.fromIfc(al.poly[k - 1][0], al.poly[k - 1][1], 0), p1 = v.fromIfc(al.poly[k][0], al.poly[k][1], 0);
+      const c = new V3(p0.x, (box.min.y + box.max.y) / 2, p0.z);
+      const n = p0.clone().sub(p1).setY(0).normalize().applyAxisAngle(new V3(0, 1, 0), 0.05); // 3° off: a free plane
+      window.__snapPlane = v.addPlane('custom', { normal: n, point: c });
+      const cam = c.clone().addScaledVector(n, 16).addScaledVector(new V3(-n.z, 0, n.x), 6); cam.y += 5;
+      v.camera.position.copy(cam); v.controls.target.copy(c); v.camera.lookAt(c); v.controls.update();
+      v.renderFrame({ still: true });
+      await new Promise((r) => setTimeout(r, 400));
+      v.camera.position.copy(cam); v.controls.target.copy(c); v.camera.lookAt(c); v.controls.update();
+      v.renderFrame({ still: true });
+      window.onlineIfc.measure.setMode('distance');
+    });
+    const targets = await page2.evaluate(() => {
+      const v = window.onlineIfc.viewer, cut = v.cutlines.snapData(), V3 = v.camera.position.constructor;
+      const rect = v.renderer.domElement.getBoundingClientRect(), W = rect.width, H = rect.height;
+      const pts = [];
+      for (let i = 0; i < cut.corners.length; i += 3) {
+        const p = new V3(cut.corners[i], cut.corners[i + 1], cut.corners[i + 2]), s = v.toScreen(p);
+        if (s && s.x > 40 && s.y > 40 && s.x < W - 40 && s.y < H - 40) pts.push({ p: p.toArray(), x: rect.left + s.x, y: rect.top + s.y });
+      }
+      const apart = pts.filter((a) => !pts.some((b) => b !== a && Math.hypot(a.x - b.x, a.y - b.y) < 14));
+      // a point well inside the cut face: the centre of its largest triangle
+      let face = null, big = 0;
+      for (const m of v.cutlines.faceGroup.children) {
+        const T = m.geometry.attributes.position.array;
+        for (let i = 0; i < T.length; i += 9) {
+          const a = new V3(T[i], T[i + 1], T[i + 2]), b = new V3(T[i + 3], T[i + 4], T[i + 5]), c = new V3(T[i + 6], T[i + 7], T[i + 8]);
+          const area = b.clone().sub(a).cross(c.clone().sub(a)).length();
+          if (area > big) { big = area; const s = v.toScreen(a.add(b).add(c).multiplyScalar(1 / 3)); face = s ? { x: rect.left + s.x, y: rect.top + s.y } : null; }
+        }
+      }
+      return { corners: apart.slice(0, 8), face };
+    });
+    let caught = 0;
+    for (const c of targets.corners) {
+      await page2.mouse.move(c.x + 4, c.y + 3);
+      const h = await page2.evaluate(() => { const s = window.onlineIfc.measure.hover; return s && { kind: s.kind, p: s.point.toArray() }; });
+      if (h?.kind === 'vertex' && Math.hypot(h.p[0] - c.p[0], h.p[1] - c.p[1], h.p[2] - c.p[2]) < 0.002) caught++;
+    }
+    await page2.mouse.move(targets.face.x, targets.face.y);
+    const onFace = await page2.evaluate(() => { const s = window.onlineIfc.measure.hover; return s && { kind: s.kind, off: Math.abs(window.__snapPlane.plane.distanceToPoint(s.point)) }; });
+    check('measuring snaps to the corners of a cut and onto the cut face', targets.corners.length >= 4 && caught === targets.corners.length && onFace?.off < 1e-6,
+      `${caught} of ${targets.corners.length} corners, cut face: ${onFace?.kind} ${onFace ? `${(onFace.off * 1000).toFixed(3)} mm off the plane` : ''}`);
+    await page2.evaluate(() => { const v = window.onlineIfc.viewer; window.onlineIfc.measure.setMode(null); v.removePlane(window.__snapPlane); v.fitAll?.(); });
     // contours on the terrain (#92)
     await page2.click('.tab[data-tab="models"]');
     await page2.evaluate(() => {
