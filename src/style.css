@@ -103,6 +103,13 @@ input[type='checkbox'], input[type='radio'] { accent-color: var(--accent); margi
 .tab-body .search { width: 100%; margin: 0 0 8px; }
 .chk { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); font-size: var(--fs-sm); cursor: pointer; }
 .field { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+/* settings */
+#settings-dialog .set-section { border-top: 1px solid var(--border); padding: 10px 0 4px; }
+#settings-dialog .set-section:first-of-type { border-top: 0; padding-top: 0; }
+#settings-dialog h3 { font-size: var(--fs); margin: 0 0 4px; }
+#settings-dialog .set-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+#settings-dialog .set-section > .chk { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+#settings-dialog #station-custom { width: 80px; }
 .field > span { color: var(--muted); font-size: var(--fs-sm); }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .grid2 .field { margin: 0; }
@@ -138,7 +145,8 @@ input[type='checkbox'], input[type='radio'] { accent-color: var(--accent); margi
 .toolbar {
   display: flex; align-items: center; gap: 4px; padding: 6px 10px;
   background: var(--panel); border-bottom: 1px solid var(--border);
-  overflow-x: auto; scrollbar-width: none; z-index: 5;
+  overflow-x: auto; scrollbar-width: none;
+  position: relative; z-index: 20; /* its menus open over the 3D view and the view cube (z-index 5) */
 }
 .toolbar > * { flex-shrink: 0; }
 .brand { display: flex; align-items: center; gap: 7px; font-family: var(--display); font-weight: 600; font-size: 16px; margin-right: 8px; letter-spacing: -0.025em; }

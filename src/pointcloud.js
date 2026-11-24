@@ -24,8 +24,11 @@ export function movingBudget() {
   return coarse || mem <= 2 ? 3e5 : mem <= 4 ? 6e5 : 1.2e6;
 }
 
-/** A point budget that fits the device: fewer points on phones and small devices. */
+/** A point budget that fits the device: fewer points on phones and small devices – or the one chosen in the settings. */
 export function pointBudget() {
+  let chosen = 0;
+  try { chosen = +localStorage.getItem('vispecta.pointBudget') || 0; } catch { /* ignore */ }
+  if (chosen >= 1e5) return chosen;
   const mem = navigator.deviceMemory || 8;
   const coarse = matchMedia?.('(pointer: coarse)').matches;
   if (coarse || mem <= 2) return 1.5e6;

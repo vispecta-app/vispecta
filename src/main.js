@@ -51,7 +51,7 @@ import { addStationPlane, allAlignments, autoSecView, renderPlanes, secViewer } 
 import { groupOf, modelTitle, newModelGroup, renderModels } from './app/browser.js';
 import { crsChanged, projectCrsChosen, setProjectCrsChosen } from './app/crs.js';
 import { buildTerrain, openIfcFiles, renderVolumes, runVolumes, setContours, setVolResult, showVolumeMap, terrainFromGeoTiff, terrainFromLandXml, volumeCsv } from './app/terrain.js';
-import { CLOUD_FILE, cloudSettings, cloudsChanged, fileHandles, fileId, hasScene, openCloudFiles, restoreCloudSettings } from './app/clouds.js';
+import { CLOUD_FILE, cloudSettings, cloudsChanged, fileHandles, fileId, hasScene, openCloudFiles, restoreCloudSettings, setEdl } from './app/clouds.js';
 import { corridor, findInCorridor, openCorridorDialog, renderCorridorHits, setCorridorHits, showCorridor } from './app/corridor.js';
 import { openCopyPset } from './app/copypset.js';
 
@@ -67,8 +67,8 @@ function setViewCube(on) {
   viewCube.setVisible(on);
   floating.settleAll();
   try { localStorage.setItem(VIEWCUBE_KEY, on ? '1' : '0'); } catch { /* ignore */ }
-  const c = document.getElementById('viewcube-check');
-  if (c) c.textContent = on ? '☑' : '☐';
+  const c = document.getElementById('settings-viewcube');
+  if (c) c.checked = on;
 }
 export const walk = new WalkMode(viewer);
 walk.addEventListener('change', () => {
@@ -681,6 +681,7 @@ document.addEventListener('click', (e) => {
       try { localStorage.setItem(THEME_KEY, currentTheme() === 'dark' ? 'light' : 'dark'); } catch { /* ignore */ }
       applyTheme();
     },
+    settings: () => openSettings(btn.dataset.settings),
     projects: () => openProjectsDialog(),
     'project-rename': async () => {
       if (!projects.current) { await projects.saveNow(); if (!projects.current) return toast(t('proj.off')); }
@@ -721,7 +722,6 @@ document.addEventListener('click', (e) => {
     'vol-run': () => runVolumes(),
     'vol-csv': () => volumeCsv(),
     'vol-clear': () => { setVolResult(null); showVolumeMap(false); renderVolumes(); },
-    'toggle-viewcube': () => setViewCube(viewCube.el.hidden),
     'toggle-ortho': () => { if (walk.active) walk.stop(); setOrtho(!viewer.isOrtho); },
     walk: () => walk.toggle(),
     qto: () => qto.open(),
@@ -1458,7 +1458,6 @@ function renderMeasure() {
   for (const b of $$('#measure-modes [data-measure]')) b.classList.toggle('on', b.dataset.measure === measure.mode);
   $('#measure-hint').textContent = measure.mode ? t(`measure.hint.${measure.mode}`) : t('measure.hint.off');
   $('#measure-foot').hidden = !rows.length;
-  $('.spot-opts').hidden = measure.mode !== 'spot';
   $('.lock-opts').hidden = measure.mode !== 'distance';
   const list = $('#measure-list');
   list.replaceChildren(...rows.map((r) => h('div', { class: `m-item ${r.m.type}` },
@@ -1524,6 +1523,46 @@ for (const cb of $$('[data-spot-show]')) {
   cb.checked = !!measure.spotShow[cb.dataset.spotShow];
   cb.addEventListener('change', () => measure.setSpotShow(cb.dataset.spotShow, cb.checked));
 }
+
+// ===================================================================== settings
+// What is set once and kept in this browser: stationing, the look of the cut, measuring, the view.
+// Most controls are the app's own (wired up where they belong, above and in app/profile.js); here
+// only language, theme, view cube, depth shading and the point budget, which have a button or a
+// card of their own too.
+const BUDGET_KEY = 'vispecta.pointBudget';
+function openSettings(section = null) {
+  $('#settings-lang').value = getLang();
+  let theme = null;
+  try { theme = localStorage.getItem(THEME_KEY); } catch { /* ignore */ }
+  $('#settings-theme').value = theme === 'dark' || theme === 'light' ? theme : 'auto';
+  $('#settings-viewcube').checked = !viewCube.el.hidden;
+  $('#settings-edl').checked = !!viewer.edl;
+  let budget = null;
+  try { budget = localStorage.getItem(BUDGET_KEY); } catch { /* ignore */ }
+  $('#settings-budget').value = [...$('#settings-budget').options].some((o) => o.value === budget) ? budget : 'auto';
+  const d = $('#settings-dialog');
+  if (!d.open) d.showModal();
+  // opened from a panel: its part of the settings
+  const part = section && $(`#settings-dialog [data-settings-section="${section}"]`);
+  if (part) { part.scrollIntoView({ block: 'start' }); part.querySelector('select, input')?.focus(); }
+}
+$('#settings-lang').addEventListener('change', (e) => {
+  const sel = $('#lang-select');
+  sel.value = e.target.value;
+  sel.dispatchEvent(new Event('change'));
+});
+$('#settings-theme').addEventListener('change', (e) => {
+  try {
+    if (e.target.value === 'auto') localStorage.setItem(THEME_KEY, 'auto'); // follows the system (currentTheme)
+    else localStorage.setItem(THEME_KEY, e.target.value);
+  } catch { /* ignore */ }
+  applyTheme();
+});
+$('#settings-viewcube').addEventListener('change', (e) => setViewCube(e.target.checked));
+$('#settings-edl').addEventListener('change', (e) => { setEdl(e.target.checked); renderModels(); });
+$('#settings-budget').addEventListener('change', (e) => {
+  try { localStorage.setItem(BUDGET_KEY, e.target.value === 'auto' ? '' : e.target.value); } catch { /* ignore */ }
+});
 
 // ====================================================================== filters
 const filters = new FilterPanel({

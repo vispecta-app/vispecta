@@ -371,6 +371,31 @@ async function main() {
     check('copy a property set to IfcProject and IfcSite (Pset_ warning shown)', cpWarn && same(cp.project) && same(cp.site) && cp.sites >= 1, `${cpSrc.pset}: ${JSON.stringify({ project: !!cp.project, site: !!cp.site, sites: cp.sites })}`);
     check('copy again merges; into another model; kept when saved and opened again', cp.again.merged === 1 && cp.again.created === 0 && cp.cross.created === 1 && cp.cross.rows === cpSrc.rows.length && same(cp.reopened), JSON.stringify({ again: cp.again, cross: cp.cross, reopened: !!cp.reopened }));
     await page.keyboard.press('e');
+
+    // ---------------------------------------------------------------- settings (⚙): what is set once, in one place
+    await page.click('#settings-btn');
+    await page.waitForSelector('#settings-dialog[open]');
+    const fmt2 = await page.$$eval('#station-format option', (o) => o[1].value);
+    await page.selectOption('#station-format', fmt2);
+    await page.selectOption('#plane-outline', 'black');
+    await page.selectOption('#measure-unit', 'mm');
+    await page.selectOption('#settings-theme', 'dark');
+    await page.uncheck('#settings-viewcube');
+    const set = await page.evaluate(() => ({
+      fmt: document.querySelector('#station-format').value, outline: window.onlineIfc.viewer.cutlines.style, unit: window.onlineIfc.measure.unit,
+      theme: document.documentElement.dataset.theme, cube: !!document.querySelector('.viewcube')?.hidden,
+      // the controls moved here, not repeated in menus and panels
+      once: ['#station-format', '#station-interval', '#plane-outline', '#plane-hatch', '#measure-unit'].every((q) => document.querySelectorAll(q).length === 1 && document.querySelector(q).closest('#settings-dialog')),
+      formats: document.querySelectorAll('.station-format').length,
+    }));
+    // back as it was, for the rest of the test
+    await page.selectOption('#station-format', 'km');
+    await page.selectOption('#plane-outline', 'yellow');
+    await page.selectOption('#measure-unit', 'm');
+    await page.selectOption('#settings-theme', 'auto');
+    await page.check('#settings-viewcube');
+    await page.keyboard.press('Escape');
+    check('settings: stationing, cut outline, unit, theme and view cube in one dialog', set.fmt === fmt2 && set.outline === 'black' && set.unit === 'mm' && set.theme === 'dark' && set.cube && set.once && set.formats === 1, JSON.stringify(set));
     await page.click('.tab[data-tab="models"]');
     await page.context().close();
 
