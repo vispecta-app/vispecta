@@ -286,12 +286,17 @@ async function main() {
       return { on, off, format };
     });
     check('EDL render target: 8-bit sRGB, freed when depth shading is off', edl.on && edl.off && edl.format === 'uint8/srgb', JSON.stringify(edl));
-    // an idle view is not drawn again and again, and a change without any input still is drawn
+    // an idle view is not drawn again and again – also in the tail of the controls' damping after a
+    // turn, which shrinks by 15 % a frame but never quite reaches 0 (compared exactly, that drew the
+    // view without end) – and a change without any input, or a move of a pixel, still is drawn
     const redraw = await page.evaluate(async () => {
       const v = window.onlineIfc.viewer, orig = v.renderFrame.bind(v);
       let n = 0;
       v.renderFrame = (...a) => { if (!a.length) n++; return orig(...a); }; // frames of the render loop (not pictures for autosave)
       await new Promise((r) => setTimeout(r, 1500)); // settle
+      // a turn too small to see (1e-9 rad) left in the damping (OrbitControls' own state)
+      v.controls._sphericalDelta.theta = 1e-9;
+      await new Promise((r) => setTimeout(r, 250));
       n = 0;
       await new Promise((r) => setTimeout(r, 3000));
       const idle = n;
@@ -301,11 +306,33 @@ async function main() {
       await new Promise((r) => setTimeout(r, 300));
       const changed = n;
       m.setColor(null);
+      // a camera moved by about a pixel is drawn again (a thousandth of its distance to the target)
+      await new Promise((r) => setTimeout(r, 300));
+      n = 0;
+      const px = v.camera.position.distanceTo(v.controls.target) * 1e-3;
+      v.camera.position.x += px; v.controls.target.x += px;
+      await new Promise((r) => setTimeout(r, 300));
+      const nudged = n;
       v.renderFrame = orig;
-      return { idle, changed };
+      return { idle, changed, nudged };
     });
-    // (at most the safety-net frame, every 5 s; it was one every 0.5 s)
-    check('idle view not redrawn; a change still is', redraw.idle <= 1 && redraw.changed > 0, JSON.stringify(redraw));
+    // (at most the safety-net frame, every 5 s; it was one every 0.5 s, and in the damping tail every frame)
+    check('idle view not redrawn, also in the tail of the damping; a change and a move of a pixel still are', redraw.idle <= 1 && redraw.changed > 0 && redraw.nudged > 0, JSON.stringify(redraw));
+    // the section planes as see-through sheets: off by default, remembered when turned on
+    const helpers = await page.evaluate(() => {
+      const v = window.onlineIfc.viewer, cb = document.querySelector('#plane-helpers');
+      const before = { box: cb.checked, viewer: v.showPlaneHelpers };
+      const e = v.addPlane('x');
+      const hidden = !e.helper.visible;
+      v.setPlaneHighlight(e); const pointed = e.helper.visible; v.setPlaneHighlight(null);
+      cb.checked = true; cb.dispatchEvent(new Event('change'));
+      const on = e.helper.visible, stored = localStorage.getItem('onlineifc.planeHelpers');
+      cb.checked = false; cb.dispatchEvent(new Event('change'));
+      v.removePlane(e);
+      return { ...before, hidden, pointed, on, stored, after: localStorage.getItem('onlineifc.planeHelpers') };
+    });
+    check('section planes not shown as sheets by default; the one pointed at is; the choice is remembered',
+      !helpers.box && !helpers.viewer && helpers.hidden && helpers.pointed && helpers.on && helpers.stored === '1' && helpers.after === '0', JSON.stringify(helpers));
     // the Python runtime override (localStorage): only https: or this site, and shown in the About dialog
     const about = async () => {
       await page.evaluate(() => document.querySelector('[data-action="about"]').click());

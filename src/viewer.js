@@ -13,6 +13,12 @@ const Y_UP = new THREE.Matrix4().set(1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 
 const Z_UP = Y_UP.clone().invert();
 // an idle view is drawn again after this long anyway, in case a change asked for no frame
 const IDLE_REDRAW_MS = 5000;
+// a camera that moved less than this has not moved: 1e-5 of its distance to the target (about a
+// hundredth of a pixel), and a turn of about 1e-5 rad (1 − |q·q'|)
+const CAM_EPS_REL = 1e-5;
+const CAM_EPS_ROT = 1e-11;
+// at most one frame per this long (rAF runs at the screen's rate; 120 Hz screens get every second one)
+const MIN_FRAME_MS = 10;
 
 const AXES = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
 
@@ -82,7 +88,7 @@ export class Viewer extends EventTarget {
     this.planes = []; // {id, plane, axis, helper, enabled}
     this.cutlines = new CutOutline(this); // hatched cut faces and their outline (#37, #68)
     this.planeSeq = 1;
-    this.showPlaneHelpers = true;
+    this.showPlaneHelpers = false; // the planes as see-through sheets: off unless chosen in the settings
 
     this.raycaster = new THREE.Raycaster();
     this.#bindPointer();
@@ -99,17 +105,30 @@ export class Viewer extends EventTarget {
     // large models (fans, battery).
     this.dirtyUntil = 0;
     let lastRender = 0;
-    let lastCam = '';
-    const camKey = () => {
-      const c = this.camera, p = c.position, q = c.quaternion;
-      return `${this.isOrtho ? `o${this.orthoHeight}` : 'p'}|${p.x},${p.y},${p.z}|${q.x},${q.y},${q.z},${q.w}`;
+    // The camera of the last frame. A camera at rest is compared with a tolerance: the controls
+    // recompute its position from angles on every update, and for most resting cameras that flips
+    // the last bits back and forth (1e-14 m) – compared exactly, the view was drawn without end.
+    const lastPos = new THREE.Vector3(Infinity, Infinity, Infinity);
+    const lastQuat = new THREE.Quaternion();
+    let lastOrtho = 0;
+    const camMoved = () => {
+      const c = this.camera, o = this.isOrtho ? this.orthoHeight : -1;
+      const eps = CAM_EPS_REL * Math.max(1e-3, c.position.distanceTo(this.controls.target), this.isOrtho ? this.orthoHeight : 0);
+      return c.position.distanceToSquared(lastPos) > eps * eps
+        || 1 - Math.abs(c.quaternion.dot(lastQuat)) > CAM_EPS_ROT
+        || Math.abs(o - lastOrtho) > eps;
     };
     const loop = (now = performance.now()) => {
       requestAnimationFrame(loop);
       const moved = this.controls.update();
-      const key = camKey();
-      if (!moved && key === lastCam && now > this.dirtyUntil && now - lastRender < IDLE_REDRAW_MS) return;
-      lastCam = key;
+      // at most about 60 frames a second, also on 120 Hz screens: a heavy model at 120 frames keeps
+      // the GPU at its limit and the view lags behind the mouse (Chrome draws at the screen's rate,
+      // Safari at 60)
+      if (now - lastRender < MIN_FRAME_MS) return;
+      if (!moved && !camMoved() && now > this.dirtyUntil && now - lastRender < IDLE_REDRAW_MS) return;
+      lastPos.copy(this.camera.position);
+      lastQuat.copy(this.camera.quaternion);
+      lastOrtho = this.isOrtho ? this.orthoHeight : -1;
       lastRender = now;
       this.#updateClip();
       this.renderFrame();
@@ -939,7 +958,8 @@ export class Viewer extends EventTarget {
     h.material.opacity = hi ? 0.16 : 0.08;
     h.children[0].material.color.setHex(hi ? 0x0e8c84 : 0x3aa0ff);
     h.children[0].material.opacity = hi ? 1 : 0.6;
-    h.visible = this.showPlaneHelpers && entry.enabled && entry.cut3d !== false && !entry.boxPart;
+    // the plane pointed at in the list is shown also with the planes off: which one it is
+    h.visible = (this.showPlaneHelpers || hi) && entry.enabled && entry.cut3d !== false && !entry.boxPart;
     const box = this.sceneBox();
     const size = box.isEmpty() ? 10 : box.getSize(new THREE.Vector3()).length() * 0.8;
     const center = box.isEmpty() ? new THREE.Vector3() : box.getCenter(new THREE.Vector3());
