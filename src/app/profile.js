@@ -299,7 +299,13 @@ for (const id of ['#plane-wl', '#plane-wr']) {
     if (secViewer?.isOpen) { secViewer.view = null; secViewer.update(); }
   });
 }
-$('#plane-helpers').addEventListener('change', (e) => viewer.setHelpersVisible(e.target.checked));
+// the planes as see-through sheets in 3D: off by default, remembered in this browser
+try { $('#plane-helpers').checked = localStorage.getItem('onlineifc.planeHelpers') === '1'; } catch { /* ignore */ }
+viewer.setHelpersVisible($('#plane-helpers').checked);
+$('#plane-helpers').addEventListener('change', (e) => {
+  viewer.setHelpersVisible(e.target.checked);
+  try { localStorage.setItem('onlineifc.planeHelpers', e.target.checked ? '1' : '0'); } catch { /* ignore */ }
+});
 // outline along the cut faces in 3D (#68): yellow by default, remembered
 try { const v = localStorage.getItem('onlineifc.cutOutline'); if (v) $('#plane-outline').value = v; } catch { /* ignore */ }
 if (!$('#plane-outline').value) $('#plane-outline').value = 'yellow';
