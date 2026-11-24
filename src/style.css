@@ -596,6 +596,7 @@ body.py-open .planes-panel { max-height: calc(100% - 60px); }
   background: rgba(255, 255, 255, 0.92); border: 1px solid #c9d6d5; border-radius: 6px; box-shadow: 0 1px 4px rgba(12, 42, 48, 0.15);
 }
 .sv-key .kp-box { fill: #dfe9e8; stroke: #9db3b2; stroke-width: 1; }
+.sv-key .kp-img { opacity: 0.85; }
 .sv-key .kp-line { fill: none; stroke: #F08A24; stroke-width: 1.6; }
 .sv-key .kp-cut { fill: none; stroke: #C8372D; stroke-width: 2.2; stroke-dasharray: 8 3 2 3; }
 .sv-key .kp-arrow { fill: #C8372D; stroke: none; }

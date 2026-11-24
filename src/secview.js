@@ -457,8 +457,8 @@ export class SectionViewer {
   }
 
   /**
-   * Key plan in the corner: the visible models (outlines), alignments and the cut line with its
-   * view direction, so it is clear where the section is taken.
+   * Key plan in the corner: the visible models seen from above, alignments and the cut line with
+   * its view direction, so it is clear where the section is taken.
    */
   renderKey() {
     const svg = this.keySvg;
@@ -471,6 +471,7 @@ export class SectionViewer {
     const xs = [], ys = [];
     const add = (q) => { xs.push(q[0]); ys.push(q[1]); };
     for (const b of k.boxes) { add([b[0], b[1]]); add([b[2], b[3]]); }
+    if (k.image) { add([k.image.x0, k.image.y0]); add([k.image.x1, k.image.y1]); }
     for (const l of k.lines) for (const q of l) add(q);
     if (k.cut) { add(k.cut.A); add(k.cut.B); }
     if (!xs.length) { svg.style.display = 'none'; return; }
@@ -484,7 +485,13 @@ export class SectionViewer {
     svg.setAttribute('viewBox', `${cx - w / 2} ${-cy - hh / 2} ${w} ${hh}`);
     const u = w / W; // metres per pixel
     const ns = { 'vector-effect': 'non-scaling-stroke' };
-    for (const b of k.boxes) svg.append(mk('rect', { x: b[0], y: -b[3], width: Math.max(b[2] - b[0], u), height: Math.max(b[3] - b[1], u), class: 'kp-box', ...ns }));
+    // the models from above; their outlines only where there is no image
+    if (k.image) {
+      const im = k.image;
+      const img = mk('image', { x: im.x0, y: -im.y1, width: im.x1 - im.x0, height: im.y1 - im.y0, preserveAspectRatio: 'none', class: 'kp-img' });
+      img.setAttribute('href', im.url);
+      svg.append(img);
+    } else for (const b of k.boxes) svg.append(mk('rect', { x: b[0], y: -b[3], width: Math.max(b[2] - b[0], u), height: Math.max(b[3] - b[1], u), class: 'kp-box', ...ns }));
     for (const l of k.lines) if (l.length > 1) svg.append(mk('path', { d: `M${l.map((q) => `${q[0]} ${-q[1]}`).join('L')}`, class: 'kp-line', ...ns }));
     if (k.cut) {
       const { A, B, v } = k.cut;

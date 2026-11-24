@@ -122,6 +122,13 @@ async function main() {
     });
     check('section window opens for a station section', sv.open, `${sv.paths} shapes`);
     check('section window draws the cut', sv.paths > 0);
+    // the key plan shows the models seen from above (an image), not only their outlines
+    await page.waitForSelector('.secview .sv-key image', { timeout: 20000 }).catch(() => {});
+    const kp = await page.evaluate(() => {
+      const img = document.querySelector('.secview .sv-key image');
+      return { image: !!img, bytes: img?.getAttribute('href')?.length || 0, boxes: document.querySelectorAll('.secview .sv-key .kp-box').length };
+    });
+    check('key plan of the section shows the model from above', kp.image && kp.bytes > 5000 && kp.boxes === 0, JSON.stringify(kp));
     await page.evaluate(() => [...document.querySelectorAll('.plane-row button')].find((b) => b.textContent.trim() === '2D').click());
     await page.waitForSelector('#drawing-dialog[open]');
     await page.selectOption('#drw-format', 'svg');

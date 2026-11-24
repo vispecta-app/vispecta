@@ -238,8 +238,9 @@ function openSecView(p, { popOut = false } = {}) {
 }
 
 /**
- * Key plan of a section plane, in IFC plan coordinates (metres): outlines of the visible models,
- * the alignments and the cut line with the view direction.
+ * Key plan of a section plane, in IFC plan coordinates (metres): the visible models seen from above
+ * (an image; their outlines where there is none), the alignments and the cut line with the view
+ * direction.
  */
 function keyPlan(pl) {
   const boxes = [];
@@ -275,7 +276,19 @@ function keyPlan(pl) {
     const half = 0.6 * D;
     cut = { A: [P0.x + ny * half, P0.y - nx * half], B: [P0.x - ny * half, P0.y + nx * half], v: [nx, ny], letter: '' };
   }
-  return { boxes, lines, cut, note };
+  // the models themselves seen from above (instead of their outlines). The first time it is drawn
+  // (the whole model, also what the view never showed): just after, so the window opens at once.
+  const image = viewer.planImage(640, { cachedOnly: true });
+  if (!image) planSoon();
+  return { boxes, lines, cut, note, image };
+}
+let planTimer = 0;
+function planSoon() {
+  if (planTimer) return;
+  planTimer = setTimeout(() => {
+    planTimer = 0;
+    try { if (viewer.planImage()) secViewer?.renderKey?.(); } catch (e) { console.warn('key plan image', e); }
+  }, 60);
 }
 
 /**
