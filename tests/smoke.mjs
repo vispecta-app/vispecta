@@ -458,6 +458,24 @@ async function main() {
     await page.click('.tab[data-tab="models"]');
     await page.context().close();
 
+
+    // ---------------------------------------------------------------- structure gauge maths (#127), in Node
+    {
+      const g = await import('../src/clearance.js');
+      const e = [g.curveWidening(200), g.curveWidening(275), g.curveWidening(400)];
+      const dh = g.roundingDelta(2000);
+      const D = g.profileAt({ id: 'D' }, { e: 0, R: Infinity, dh: 0 });
+      const Dw = g.profileAt({ id: 'D' }, { e: 75, R: 200, dh: 0 });
+      const width = (pr, h) => Math.max(...pr.polys.flatMap((q) => q.filter(([, y]) => Math.abs(y - h) < 1e-6).map(([b]) => b)));
+      // a mast 1.9 m from the track centre, 0.2 m wide: reaches 100 mm into profile D (profiles in m)
+      const mast = [[1.9, 0], [2.1, 0], [2.1, 4], [1.9, 4]]; // m
+      const hit = g.intrusion(D.polys[0], mast);
+      const custom = g.profileAt({ id: 'custom', custom: { points: [[0, 0], [1500, 0], [1500, 4000], [0, 4000]], symmetric: true, widen: 100, raise: 0, curveRules: false } }, { e: 75, R: 200, dh: 0 });
+      check('structure gauge: BN1-166-1 curve widening, vertical allowance, profile D and an own profile',
+        Math.abs(e[0] - 75) < 1e-9 && Math.abs(e[1] - 3750 / 275) < 1e-9 && e[2] === 0 && Math.abs(dh - 25) < 1e-9
+          && Math.abs(width(D, 3.3) - 2) < 1e-9 && Math.abs(width(Dw, 3.3) - 2.075) < 1e-9 && hit && Math.abs(hit.depth - 0.1) < 1e-3 && Math.abs(width(custom, 4) - 1.6) < 1e-9,
+        `e ${e.map((x) => x.toFixed(1)).join('/')} mm, Δh ${dh} mm, D at 3.3 m: ${width(D, 3.3)} → ${width(Dw, 3.3)} m, mast ${hit?.depth?.toFixed(3)} m, own ${width(custom, 4)} m`);
+    }
     // ---------------------------------------------------------------- railway sample: 9 discipline models and a LAZ survey
     const page2 = await newPage(browser, base, errors);
     await page2.click('[data-sample="rail"]');
@@ -523,6 +541,89 @@ async function main() {
     check('measuring snaps to the corners of a cut and onto the cut face', targets.corners.length >= 4 && caught === targets.corners.length && onFace?.off < 1e-6,
       `${caught} of ${targets.corners.length} corners, cut face: ${onFace?.kind} ${onFace ? `${(onFace.off * 1000).toFixed(3)} mm off the plane` : ''}`);
     await page2.evaluate(() => { const v = window.onlineIfc.viewer; window.onlineIfc.measure.setMode(null); v.removePlane(window.__snapPlane); v.fitAll?.(); });
+
+    // structure gauge along the track (#127): the dialog checks the railway sample and draws the profile
+    await page2.evaluate(() => document.querySelector('[data-action="clearance"]').click());
+    await page2.waitForSelector('#clearance-dialog[open]');
+    await page2.evaluate(() => { const s = document.querySelector('#clr-profile'); s.value = 'D'; s.dispatchEvent(new Event('change')); document.querySelector('[data-action="clr-run"]').click(); });
+    await page2.waitForFunction(() => document.querySelector('#clr-results table, #clr-results .clr-ok'), null, { timeout: 120000 });
+    const gaugeRes = await page2.evaluate(() => ({
+      rows: document.querySelectorAll('#clr-results .clr-row').length, ok: !!document.querySelector('#clr-results .clr-ok'),
+      drawn: window.onlineIfc.viewer.clearance.group.children.length, text: document.querySelector('#clr-results p')?.textContent,
+    }));
+    check('structure gauge: the railway sample is checked along the track and the profile drawn', (gaugeRes.rows > 0 || gaugeRes.ok) && gaugeRes.drawn > 0, `${gaugeRes.text} · ${gaugeRes.drawn} objects drawn`);
+    await page2.evaluate(() => { document.querySelector('[data-action="clr-clear"]').click(); document.querySelector('#clearance-dialog').close(); });
+    // two elements under the mouse: for the object distance and the annotations
+    await page2.evaluate(() => window.onlineIfc.viewer.fitAll?.());
+    await page2.waitForTimeout(1500); // the camera's flight
+    const twoHits = await page2.evaluate(() => {
+      const v = window.onlineIfc.viewer, rect = v.renderer.domElement.getBoundingClientRect();
+      v.renderFrame({ still: true });
+      const found = [];
+      for (let j = 2; j < 18 && found.length < 2; j++) {
+        for (let i = 2; i < 18 && found.length < 2; i++) {
+          const x = rect.left + rect.width * i / 20, y = rect.top + rect.height * j / 20, hit = v.pick(x, y);
+          if (hit && !found.some((f) => f.model === hit.model.name && f.id === hit.id)) found.push({ x, y, model: hit.model.name, id: hit.id });
+        }
+      }
+      return found;
+    });
+    // distance between two objects (#128): nearest points and centre to centre
+    const objD = await page2.evaluate((pts) => {
+      const m = window.onlineIfc.measure;
+      m.setMode('objects');
+      for (const p of pts) m.handleClick(p.x, p.y);
+      const it = m.items.at(-1);
+      m.setMode(null);
+      return it && { type: it.type, dist: it.dist, cdist: it.cdist, rows: m.rows().at(-1)?.lines?.length ?? 0 };
+    }, twoHits);
+    check('distance between two objects: nearest points and centre to centre', twoHits.length === 2 && objD?.type === 'objects' && objD.dist >= 0 && objD.dist <= objD.cdist + 1e-9,
+      objD ? `${objD.dist.toFixed(3)} m nearest, ${objD.cdist.toFixed(3)} m between centres` : `${twoHits.length} elements found`);
+    // annotations in the view (#130): a note typed in the panel, an arrow; kept in a saved view and as BCF lines
+    await page2.keyboard.press('n');
+    await page2.mouse.click(twoHits[0].x, twoHits[0].y);
+    await page2.waitForFunction(() => document.activeElement?.matches('#notes-list textarea'));
+    await page2.keyboard.type('Mast 12: check');
+    await page2.waitForFunction(() => window.onlineIfc.notes.items[0]?.text === 'Mast 12: check');
+    const ann = await page2.evaluate(() => {
+      const { notes, views, viewer } = window.onlineIfc;
+      notes.add({ p: notes.items[0].p.clone(), q: notes.items[0].p.clone().add(new notes.items[0].p.constructor(3, 2, 0)), text: 'here' });
+      const sprites = notes.group.children.filter((o) => o.isSprite && o.visible).length;
+      const view = views.capture('notes', { thumb: false });
+      notes.clear();
+      const cleared = notes.items.length;
+      views.apply(view);
+      const back = notes.items.map((x) => [x.text, !!x.q]);
+      const near = notes.items[0] && notes.items[0].p.distanceTo(view.viewpoint && viewer.fromIfc(...view.viewpoint.markup[0].p)) < 1e-3;
+      notes.setMode(null);
+      return { sprites, cleared, back, near, lines: view.viewpoint.lines.length, panel: !document.querySelector('#notes-panel').hidden };
+    });
+    check('annotations: a note and an arrow in the view, kept in a saved view (arrow as a BCF line)',
+      ann.sprites >= 3 && ann.cleared === 0 && JSON.stringify(ann.back) === '[["Mast 12: check",false],["here",true]]' && ann.near && ann.lines === 1, JSON.stringify(ann));
+    await page2.evaluate(() => window.onlineIfc.notes.clear());
+    // split (#129): five elements of the overhead line as a new IFC file, opened in the view
+    const nBeforeSplit = await page2.evaluate(() => {
+      const { viewer, state } = window.onlineIfc;
+      const m = viewer.models.find((x) => x.name === '06-Overhead-line.ifc');
+      state.selection.clear();
+      state.selection.set(m, new Set([...m.elementIds].slice(0, 5)));
+      window.__splitIds = [...m.elementIds].slice(0, 5);
+      document.querySelector('[data-action="split"]').click();
+      return viewer.models.length;
+    });
+    await page2.waitForSelector('#split-dialog[open]');
+    await page2.uncheck('#split-download');
+    await page2.check('#split-open');
+    await page2.evaluate(() => document.querySelector('[data-action="split-run"]').click());
+    await page2.waitForFunction((n) => window.onlineIfc.viewer.models.length === n + 1, nBeforeSplit, { timeout: 60000 });
+    await idle(page2);
+    const split = await page2.evaluate(() => {
+      const { viewer } = window.onlineIfc;
+      const m = viewer.models.find((x) => x.name === '06-Overhead-line-split.ifc'), src = viewer.models.find((x) => x.name === '06-Overhead-line.ifc');
+      return m && { ids: window.__splitIds.every((id) => m.elementIds.has(id)), n: m.elementIds.size, of: src.elementIds.size, schema: m.schema };
+    });
+    check('split: the selected elements saved as a new IFC file that opens again', split?.ids && split.n >= 5 && split.n < split.of, JSON.stringify(split));
+    await page2.evaluate(() => { const { viewer } = window.onlineIfc; viewer.removeModel(viewer.models.find((x) => x.name === '06-Overhead-line-split.ifc')); window.onlineIfc.state.selection.clear(); });
     // contours on the terrain (#92)
     await page2.click('.tab[data-tab="models"]');
     await page2.evaluate(() => {

@@ -13,7 +13,7 @@
 // Bytes are decoded with "x-user-defined" (a 1:1 byte <-> character mapping), so the content
 // is written back byte for byte, whatever encoding the exporter used.
 
-const SPATIAL = new Set([
+export const SPATIAL = new Set([
   'IFCSITE', 'IFCBUILDING', 'IFCBUILDINGSTOREY', 'IFCSPACE', 'IFCEXTERNALSPATIALELEMENT', 'IFCSPATIALZONE',
   'IFCFACILITY', 'IFCFACILITYPART', 'IFCBRIDGE', 'IFCBRIDGEPART', 'IFCROAD', 'IFCROADPART', 'IFCRAILWAY', 'IFCRAILWAYPART',
   'IFCMARINEFACILITY', 'IFCMARINEPART', 'IFCTUNNEL', 'IFCTUNNELPART', 'IFCFACILITYPARTCOMMON',
@@ -30,7 +30,7 @@ const CHUNK = 8 * 1024 * 1024;
 
 let decoder = null;
 try { decoder = new TextDecoder('x-user-defined'); } catch { /* not in every runtime: plain byte -> char below */ }
-function decode(bytes) {
+export function decode(bytes) {
   if (decoder) return decoder.decode(bytes);
   let s = '';
   for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
@@ -38,7 +38,7 @@ function decode(bytes) {
 }
 
 /** Characters back to the original bytes (inverse of the x-user-defined decoding). */
-function encode(str) {
+export function encode(str) {
   const out = new Uint8Array(str.length);
   for (let i = 0; i < str.length; i++) {
     const c = str.charCodeAt(i);
@@ -65,7 +65,7 @@ function lead(r) {
  * Yields the records of a STEP file (text up to and including the ';' that ends it, quotes and
  * comments respected) together with the fraction of the file read so far.
  */
-async function* records(blob) {
+export async function* records(blob) {
   let rest = '';
   let pos = 0;
   while (pos < blob.size || rest.length) {
@@ -117,7 +117,7 @@ async function* records(blob) {
 }
 
 /** Applies fn to the parts of a record outside of quoted strings. */
-function outside(rec, fn) {
+export function outside(rec, fn) {
   if (rec.indexOf("'") < 0) return fn(rec);
   const parts = rec.split("'");
   for (let i = 0; i < parts.length; i += 2) parts[i] = fn(parts[i]);

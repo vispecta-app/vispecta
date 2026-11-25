@@ -143,8 +143,8 @@ export async function readAlignments(model) {
     }
     if (poly.length < 2) continue;
     // the exact horizontal from the design parameters, when it matches web-ifc's ends (#79)
+    const hsegs = [];
     try {
-      const hsegs = [];
       for (const child of nests.get(aid) || []) {
         if (typeName(child) !== 'IFCALIGNMENTHORIZONTAL') continue;
         for (const sid of nests.get(child) || []) {
@@ -173,6 +173,17 @@ export async function readAlignments(model) {
     if (place) for (const p of poly) { v3.set(p[0], p[1], 0).applyMatrix4(place); p[0] = v3.x; p[1] = v3.y; }
     const cum = [0];
     for (let k = 1; k < poly.length; k++) cum.push(cum[k - 1] + Math.hypot(poly[k][0] - poly[k - 1][0], poly[k][1] - poly[k - 1][1]));
+    // the horizontal segments with their radii (structure gauge, #127): kept when they add up to the
+    // length of the line (else the radius is estimated from the line itself, see radiusAt)
+    let horizontal = null;
+    {
+      const hs = hsegs.filter((x) => x.L > 0);
+      const total = hs.reduce((a, x) => a + x.L * scale, 0);
+      if (hs.length && Math.abs(total - cum[cum.length - 1]) < Math.max(0.5, 0.005 * total)) {
+        let s0 = 0;
+        horizontal = hs.map((x) => { const o = { s0, L: x.L * scale, type: x.type, r0: Math.abs(x.r0 || 0) * scale, r1: Math.abs(x.r1 || 0) * scale }; s0 += o.L; return o; });
+      }
+    }
     // vertical profile
     const vertical = [];
     for (const child of nests.get(aid) || []) {
@@ -181,15 +192,38 @@ export async function readAlignments(model) {
         const seg = api.GetLine(mid, sid, false);
         const dp = seg?.DesignParameters?.value ? api.GetLine(mid, seg.DesignParameters.value, false) : null;
         if (!dp) continue;
-        vertical.push({
+        const vs = {
           s0: num(dp.StartDistAlong) * scale, L: num(dp.HorizontalLength) * scale, h0: num(dp.StartHeight) * scale,
           g0: num(dp.StartGradient) ?? 0, g1: num(dp.EndGradient) ?? num(dp.StartGradient) ?? 0,
           type: dp.PredefinedType?.value || 'CONSTANTGRADIENT',
-        });
+        };
+        // radius of a rounding (vertical) curve: given, or from the change of gradient over its length
+        const rv = Math.abs(num(dp.RadiusOfCurvature) || 0) * scale;
+        vs.R = vs.type === 'CONSTANTGRADIENT' ? 0 : rv || (Math.abs(vs.g1 - vs.g0) > 1e-9 ? vs.L / Math.abs(vs.g1 - vs.g0) : 0);
+        vertical.push(vs);
       }
     }
     vertical.sort((a, b) => a.s0 - b.s0);
     if (place) { const dz = place.elements[14]; if (dz) for (const vs of vertical) vs.h0 += dz; }
+    // cant (#127): the heights of the left and right rail above the profile, along the alignment
+    let cant = null;
+    for (const child of nests.get(aid) || []) {
+      if (typeName(child) !== 'IFCALIGNMENTCANT') continue;
+      const c = api.GetLine(mid, child, false);
+      const segs = [];
+      for (const sid of nests.get(child) || []) {
+        const seg = api.GetLine(mid, sid, false);
+        const dp = seg?.DesignParameters?.value ? api.GetLine(mid, seg.DesignParameters.value, false) : null;
+        if (!dp) continue;
+        const cl0 = num(dp.StartCantLeft) ?? 0, cr0 = num(dp.StartCantRight) ?? 0;
+        segs.push({
+          s0: num(dp.StartDistAlong) * scale, L: num(dp.HorizontalLength) * scale,
+          cl0: cl0 * scale, cl1: (num(dp.EndCantLeft) ?? cl0) * scale, cr0: cr0 * scale, cr1: (num(dp.EndCantRight) ?? cr0) * scale,
+        });
+      }
+      segs.sort((a, b) => a.s0 - b.s0);
+      if (segs.length) cant = { railHead: (num(c.RailHeadDistance) || 1.5) * scale, segs };
+    }
     // stationing from referents (IfcReferent with Pset_Stationing.Station)
     const referents = [];
     for (const child of nests.get(aid) || []) {
@@ -216,44 +250,13 @@ export async function readAlignments(model) {
     }
     const st = referents.filter((x) => x.station !== null && x.along !== null).sort((a, b) => a.along - b.along);
     const station0 = st.length ? st[0].station - st[0].along : 0;
-    out.push({ id: aid, model, name: fmtValue(line?.Name) || `Alignment #${aid}`, poly, cum, length: cum[cum.length - 1], vertical, referents, station0 });
+    out.push({ id: aid, model, name: fmtValue(line?.Name) || `Alignment #${aid}`, poly, cum, length: cum[cum.length - 1], vertical, horizontal, cant, referents, station0 });
   }
   return out;
 }
 
-/** Height of the vertical profile at distance s (null without a profile). */
-export function heightAt(al, s) {
-  const v = al.vertical || [];
-  if (!v.length) {
-    // a drawn line: heights of its points, interpolated
-    if (!al.zs) return null;
-    const { cum, zs } = al;
-    if (s <= 0) return zs[0];
-    let k = 1;
-    while (k < cum.length - 1 && cum[k] < s) k++;
-    const L = cum[k] - cum[k - 1] || 1;
-    return zs[k - 1] + ((zs[k] - zs[k - 1]) * Math.min(1, Math.max(0, (s - cum[k - 1]) / L)));
-  }
-  let seg = v[0];
-  for (const x of v) if (s >= x.s0 - 1e-9) seg = x;
-  const d = Math.min(Math.max(s - seg.s0, 0), seg.L || 0);
-  if (seg.type === 'CONSTANTGRADIENT' || !seg.L) return seg.h0 + seg.g0 * d;
-  // parabolic and circular arcs: gradient changes linearly (circular arc approximated, exact for small gradients)
-  return seg.h0 + seg.g0 * d + ((seg.g1 - seg.g0) / (2 * seg.L)) * d * d;
-}
-
-/** Point and direction of the horizontal alignment at distance s. */
-export function pointAt(al, s) {
-  const { poly, cum } = al;
-  s = Math.min(Math.max(s, 0), al.length);
-  let k = 1;
-  while (k < cum.length - 1 && cum[k] < s) k++;
-  const a = poly[k - 1], b = poly[k];
-  const L = cum[k] - cum[k - 1] || 1;
-  const tt = (s - cum[k - 1]) / L;
-  const dx = (b[0] - a[0]) / L, dy = (b[1] - a[1]) / L;
-  return { x: a[0] + (b[0] - a[0]) * tt, y: a[1] + (b[1] - a[1]) * tt, dx, dy };
-}
+export { heightAt, pointAt } from './alignment-math.js';
+import { heightAt, pointAt } from './alignment-math.js';
 
 /**
  * Projects an IFC point (x, y[, z]) onto the alignment.

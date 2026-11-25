@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { t, fmtNum } from './i18n.js';
 import { formatStation } from './alignment.js';
+import { MeshBVH } from 'three-mesh-bvh';
 
 const SNAP_VERTEX_PX = 12;
 const SNAP_MID_PX = 10;
@@ -12,7 +13,7 @@ const SNAP_EDGE_PX = 7;
 // the cut is what is measured
 const CUT_BONUS_PX = 4;
 const SNAP_PROBES = [[8, 0], [-8, 0], [0, 8], [0, -8]];
-const COLORS = { distance: 0x2f7de1, chain: 0x8e44ad, spot: 0x1fa971 };
+const COLORS = { distance: 0x2f7de1, chain: 0x8e44ad, spot: 0x1fa971, objects: 0xd35400 };
 
 let seq = 1;
 
@@ -21,7 +22,8 @@ export class MeasureTool extends EventTarget {
     super();
     this.viewer = viewer;
     this.container = container;
-    this.mode = null; // 'distance' | 'chain' | 'spot' | null
+    this.mode = null; // 'distance' | 'chain' | 'spot' | 'objects' | null
+    this.firstObject = null; // objects mode (#128): the element clicked first {model, id, point}
     this.snapOn = true;
     this.unit = 'm'; // 'm' | 'mm'
     this.lockXY = false;
@@ -55,6 +57,7 @@ export class MeasureTool extends EventTarget {
   // ------------------------------------------------------------------- modes
   setMode(mode) {
     if (this.current) this.#finishCurrent();
+    this.#clearFirstObject();
     this.mode = mode;
     this.viewer.dblclickCenters = !mode;
     this.container.classList.toggle('measuring', !!mode);
@@ -99,6 +102,7 @@ export class MeasureTool extends EventTarget {
 
   /** Called by the UI for a click in the viewport while measuring. */
   handleClick(clientX, clientY) {
+    if (this.mode === 'objects') { this.#objectClick(clientX, clientY); return; }
     const s = this.#snap(clientX, clientY);
     if (!s) return;
     const p = this.#locked(s.point);
@@ -124,8 +128,36 @@ export class MeasureTool extends EventTarget {
     this.#emit();
   }
 
+  // ------------------------------------------------------------ between two objects (#128)
+  #objectClick(clientX, clientY) {
+    const hit = this.viewer.pick(clientX, clientY);
+    if (!hit) return;
+    const f = this.firstObject;
+    if (!f) {
+      const el = this.#dot('objects');
+      this.firstObject = { model: hit.model, id: hit.id, point: hit.point, dot: { el, at: hit.point } };
+      this.#emit();
+      return;
+    }
+    if (f.model === hit.model && f.id === hit.id) return; // the same element again
+    const r = objectDistance(this.viewer, f, { model: hit.model, id: hit.id });
+    this.#clearFirstObject();
+    if (!r) return;
+    const name = (o) => `${o.model.typeName(o.id)} – ${o.model.label(o.id)}`;
+    this.#add({ type: 'objects', points: [r.a, r.b], centres: [r.ca, r.cb], names: [name(f), name(hit)], dist: r.dist, cdist: r.ca.distanceTo(r.cb) });
+  }
+
+  #clearFirstObject() {
+    if (this.firstObject?.dot) this.firstObject.dot.el.remove();
+    this.firstObject = null;
+  }
+
+  /** The element picked first in objects mode, for the panel's hint. */
+  get waitingForSecond() { return !!this.firstObject; }
+
   /** Esc: cancels the measurement in progress, or leaves the mode. Returns true if handled. */
   cancel() {
+    if (this.firstObject) { this.#clearFirstObject(); this.#emit(); return true; }
     if (this.current) {
       if (this.current.type === 'chain' && this.current.points.length >= 2) this.#finishCurrent();
       else this.#discard(this.current);
@@ -429,6 +461,22 @@ export class MeasureTool extends EventTarget {
       const el = this.#label('spot');
       el.textContent = this.#spotLabel(m.info);
       o.labels.push({ el, at: pts[0], offset: -18 });
+    } else if (m.type === 'objects') {
+      // the shortest distance (solid) and centre to centre (dashed)
+      const main = this.#line(pts, color);
+      this.group.add(main);
+      o.lines.push(main);
+      const el = this.#label('objects');
+      el.textContent = this.fmtLen(m.dist);
+      o.labels.push({ el, at: pts[0].clone().add(pts[1]).multiplyScalar(0.5) });
+      const cc = this.#line(m.centres, color, true);
+      cc.material.opacity = 0.5;
+      this.group.add(cc);
+      o.lines.push(cc);
+      for (const c of m.centres) o.dots.push({ el: this.#dot('objects centre'), at: c });
+      const el2 = this.#label('objects centre');
+      el2.textContent = `⌖ ${this.fmtLen(m.cdist)}`;
+      o.labels.push({ el: el2, at: m.centres[0].clone().add(m.centres[1]).multiplyScalar(0.5) });
     } else if (pts.length >= 2) {
       const main = this.#line(pts, color);
       this.group.add(main);
@@ -469,6 +517,7 @@ export class MeasureTool extends EventTarget {
       for (const d of m.objects.dots) place(d.el, d.at);
       for (const l of m.objects.labels) place(l.el, l.at, l.offset || 0);
     }
+    if (this.firstObject?.dot) place(this.firstObject.dot.el, this.firstObject.dot.at);
     if (this.previewLabel && !this.previewLabel.hidden && this.previewLabel._anchor) place(this.previewLabel, this.previewLabel._anchor);
     this.#positionMarker();
   }
@@ -484,6 +533,7 @@ export class MeasureTool extends EventTarget {
 
   // ------------------------------------------------------------------ values
   length(m) {
+    if (m.type === 'objects') return m.dist;
     let l = 0;
     for (let i = 1; i < m.points.length; i++) l += m.points[i - 1].distanceTo(m.points[i]);
     return l;
@@ -576,6 +626,20 @@ export class MeasureTool extends EventTarget {
         }
         return { m, n, title: `${t('measure.spot')} ${n}`, value: this.#spotLabel(info).replace(/\n/g, ' · '), lines };
       }
+      if (m.type === 'objects') {
+        const c = this.components(m);
+        const cc = this.components({ points: m.centres });
+        return {
+          m, n, title: `${t('measure.objects')} ${n}`, value: this.fmtLen(m.dist),
+          lines: [
+            [t('measure.nearest'), this.fmtLen(m.dist)],
+            [t('measure.horizontal'), this.fmtLen(c.horizontal)], [t('measure.dz'), this.fmtLen(c.dz, true)],
+            [t('measure.centres'), this.fmtLen(m.cdist)],
+            [`${t('measure.centres')} – ${t('measure.horizontal').toLowerCase()}`, this.fmtLen(cc.horizontal)], [`${t('measure.centres')} – ΔZ`, this.fmtLen(cc.dz, true)],
+            ['A', m.names[0]], ['B', m.names[1]],
+          ],
+        };
+      }
       const len = this.length(m);
       const lines = [];
       if (m.points.length >= 2) {
@@ -621,8 +685,46 @@ export class MeasureTool extends EventTarget {
   focus(id) {
     const m = this.items.find((x) => x.id === id);
     if (!m?.points.length) return;
-    const box = new THREE.Box3().setFromPoints(m.points);
+    const box = new THREE.Box3().setFromPoints([...m.points, ...(m.centres || [])]);
     box.expandByScalar(Math.max(1, box.getSize(new THREE.Vector3()).length() * 0.3));
     this.viewer.fitBox(box);
   }
+}
+
+/** The triangles of an element, in world coordinates (non-indexed). */
+function elementTriangles(model, id) {
+  model.group.updateMatrixWorld(true);
+  const M = model.group.matrixWorld, v = new THREE.Vector3(), out = [];
+  for (const b of model.buckets) {
+    const P = b.positions, I = b.index;
+    for (const it of b.items) {
+      if (it.id !== id) continue;
+      for (let k = it.start; k < it.start + it.count; k++) {
+        const vi = I[k] * 3;
+        v.set(P[vi], P[vi + 1], P[vi + 2]).applyMatrix4(M);
+        out.push(v.x, v.y, v.z);
+      }
+    }
+  }
+  return new Float32Array(out);
+}
+
+/**
+ * Shortest distance between the surfaces of two elements ({model, id}) and their centres (the
+ * middle of their bounding boxes), in viewer coordinates (#128): {a, b (nearest points), dist, ca, cb},
+ * or null when one has no geometry. Touching or overlapping elements give 0.
+ */
+export function objectDistance(viewer, A, B) {
+  const pa = elementTriangles(A.model, A.id), pb = elementTriangles(B.model, B.id);
+  if (pa.length < 9 || pb.length < 9) return null;
+  const geom = (p) => { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(p, 3)); g.boundsTree = new MeshBVH(g); return g; };
+  const ga = geom(pa), gb = geom(pb);
+  const t1 = { point: new THREE.Vector3(), distance: Infinity }, t2 = { point: new THREE.Vector3(), distance: Infinity };
+  ga.boundsTree.closestPointToGeometry(gb, new THREE.Matrix4(), t1, t2);
+  // surfaces that cross each other: distance 0 where they meet
+  let dist = t1.distance;
+  if (dist > 0 && ga.boundsTree.intersectsGeometry(gb, new THREE.Matrix4())) dist = 0;
+  const ca = A.model.getBox([A.id]).getCenter(new THREE.Vector3()), cb = B.model.getBox([B.id]).getCenter(new THREE.Vector3());
+  ga.dispose(); gb.dispose();
+  return { a: t1.point.clone(), b: t2.point.clone(), dist, ca, cb };
 }
