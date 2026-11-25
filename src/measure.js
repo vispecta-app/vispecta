@@ -9,6 +9,7 @@ import { MeshBVH } from 'three-mesh-bvh';
 const SNAP_VERTEX_PX = 12;
 const SNAP_MID_PX = 10;
 const SNAP_EDGE_PX = 7;
+const SNAP_PERP_PX = 10; // perpendicular from the last point onto an edge
 // a corner of the cut is preferred to a model vertex this much nearer to the cursor: with a section,
 // the cut is what is measured
 const CUT_BONUS_PX = 4;
@@ -309,8 +310,28 @@ export class MeasureTool extends EventTarget {
     }
     if (best) return best;
 
-    // edges: of the triangle under the cursor, and the cut's runs (the point nearest to the ray)
+    // perpendicular: the foot of the perpendicular from the last point onto an edge near the cursor
+    // (of the triangle under it, or of the cut) – where a measurement meets an edge at a right angle
     const line = new THREE.Line3();
+    const last = (this.mode === 'distance' || this.mode === 'chain') ? this.current?.points.at(-1) : null;
+    if (last) {
+      const foot = (a, b) => {
+        line.set(a, b);
+        const tt = line.closestPointToPointParameter(last, false);
+        return tt > 1e-6 && tt < 1 - 1e-6 && line.distance() > 1e-6 ? line.at(tt, new THREE.Vector3()) : null;
+      };
+      const cand = [...edges];
+      for (let i = 0; i < R.length; i += 6) cand.push([new THREE.Vector3(R[i], R[i + 1], R[i + 2]), new THREE.Vector3(R[i + 3], R[i + 4], R[i + 5])]);
+      for (const [a, b] of cand) {
+        const f = foot(a, b);
+        if (!f || f.distanceTo(last) < 1e-6) continue;
+        const d = px(f);
+        if (d <= SNAP_PERP_PX && (!best || d < best.d) && seen(f)) best = { d, point: f, kind: 'perp', hit: center };
+      }
+      if (best) return best;
+    }
+
+    // edges: of the triangle under the cursor, and the cut's runs (the point nearest to the ray)
     for (const [a, b] of edges) {
       line.set(a, b);
       const c = line.closestPointToPoint(center.point, true, new THREE.Vector3());

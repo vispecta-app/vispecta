@@ -500,3 +500,139 @@ export class ClearanceLayer {
     return this.outlineAt(d.al, s, d.def, d.manualCant).map((poly) => [...poly, poly[0]].map((q) => this.viewer.fromIfc(q[0], q[1], q[2])));
   }
 }
+
+// ------------------------------------------------------------------ the gauge as an IFC model
+const B64 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$';
+function ifcGuid() {
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  let n = 0n;
+  for (const x of b) n = (n << 8n) | BigInt(x);
+  let s = '';
+  for (let i = 0; i < 22; i++) { s = B64[Number(n & 63n)] + s; n >>= 6n; }
+  return s;
+}
+const ifcStr = (s) => `'${String(s).replace(/\\/g, '\\\\').replace(/'/g, "''").replace(/[^\x20-\x7e]/g, (c) => `\\X2\\${c.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}\\X0\\`)}'`;
+const ifcNum = (x) => {
+  if (!Number.isFinite(x)) return '0.';
+  const s = String(Math.round(x * 10000) / 10000);
+  return s.includes('.') || s.includes('e') ? s : `${s}.`;
+};
+const ifcReal = (x) => { const s = String(+x).replace(/^(-?\d+)(?=e)/, '$1.').replace('e', 'E'); return /[.E]/.test(s) ? s : `${s}.`; };
+
+/** Triangles of the cap of a ring (a flat polygon in 3D): indices into the ring. */
+function capTriangles(ring) {
+  // the plane of the ring (Newell), and the ring in 2D in it
+  const n = new THREE.Vector3();
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i], b = ring[(i + 1) % ring.length];
+    n.x += (a[1] - b[1]) * (a[2] + b[2]); n.y += (a[2] - b[2]) * (a[0] + b[0]); n.z += (a[0] - b[0]) * (a[1] + b[1]);
+  }
+  if (n.lengthSq() < 1e-18) return [];
+  n.normalize();
+  const u = Math.abs(n.z) < 0.9 ? new THREE.Vector3(0, 0, 1).cross(n).normalize() : new THREE.Vector3(1, 0, 0);
+  const v = n.clone().cross(u);
+  const pts = ring.map((q) => new THREE.Vector2(q[0] * u.x + q[1] * u.y + q[2] * u.z, q[0] * v.x + q[1] * v.y + q[2] * v.z));
+  return THREE.ShapeUtils.triangulateShape(pts, []);
+}
+
+/**
+ * The gauge shown (layer.def) as an IFC4X3 file: one IfcBuildingElementProxy per `chunk` metres of
+ * track, a closed tessellated body per polygon of the profile, sampled every `step` metres. In the
+ * coordinates of the view's reference model (the alignment's), with its map conversion.
+ * meta: {name, profile, alignment, standard, georef}. Returns the STEP text.
+ */
+export function gaugeToIfc(layer, meta = {}, { step = 2, chunk = 100 } = {}) {
+  const d = layer.def;
+  if (!d) throw new Error('no gauge shown');
+  const { al } = d;
+  const s0 = Math.max(0, Math.min(d.from, d.to)), s1 = Math.min(al.length, Math.max(d.from, d.to));
+  const at = (s) => layer.outlineAt(al, s, d.def, d.manualCant);
+  const first = at(s0)[0]?.[0] || [0, 0, 0];
+  const ox = Math.round(first[0]), oy = Math.round(first[1]), oz = Math.round(first[2]);
+  const L = [];
+  let id = 0;
+  const e = (s) => { L.push(`#${++id}=${s};`); return `#${id}`; };
+  const units = e(`IFCUNITASSIGNMENT((${e('IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.)')},${e('IFCSIUNIT(*,.AREAUNIT.,$,.SQUARE_METRE.)')},${e('IFCSIUNIT(*,.VOLUMEUNIT.,$,.CUBIC_METRE.)')},${e('IFCSIUNIT(*,.PLANEANGLEUNIT.,$,.RADIAN.)')}))`);
+  const origin = e('IFCCARTESIANPOINT((0.,0.,0.))');
+  const wcs = e(`IFCAXIS2PLACEMENT3D(${origin},$,$)`);
+  const ctx = e(`IFCGEOMETRICREPRESENTATIONCONTEXT($,'Model',3,1.E-05,${wcs},$)`);
+  const body = e(`IFCGEOMETRICREPRESENTATIONSUBCONTEXT('Body','Model',*,*,*,*,${ctx},$,.MODEL_VIEW.,$)`);
+  const name = meta.name || 'Structure gauge';
+  const project = e(`IFCPROJECT(${ifcStr(ifcGuid())},$,${ifcStr(name)},${ifcStr('Structure gauge made with Vispecta')},$,$,$,(${ctx}),${units})`);
+  const m = meta.georef?.map;
+  if (m) {
+    const crs = e(`IFCPROJECTEDCRS(${ifcStr(m.crs || 'Map')},$,$,$,$,$,$)`);
+    e(`IFCMAPCONVERSION(${ctx},${crs},${ifcNum(m.eastings * m.mapScale)},${ifcNum(m.northings * m.mapScale)},${ifcNum(m.height * m.mapScale)},${ifcReal(m.a)},${ifcReal(m.b)},${ifcReal(m.scale * m.mapScale)},$,$)`);
+  }
+  const sitePl = e(`IFCLOCALPLACEMENT($,${wcs})`);
+  const site = e(`IFCSITE(${ifcStr(ifcGuid())},$,${ifcStr('Site')},$,$,${sitePl},$,$,.ELEMENT.,$,$,$,$,$)`);
+  e(`IFCRELAGGREGATES(${ifcStr(ifcGuid())},$,$,$,${project},(${site}))`);
+  const elPl = e(`IFCLOCALPLACEMENT(${sitePl},${e(`IFCAXIS2PLACEMENT3D(${e(`IFCCARTESIANPOINT((${ifcNum(ox)},${ifcNum(oy)},${ifcNum(oz)}))`)},$,$)`)})`);
+  const colour = e('IFCCOLOURRGB($,0.902,0.494,0.133)'); // #E67E22, as drawn
+  const style = e(`IFCSURFACESTYLE('Structure gauge',.BOTH.,(${e(`IFCSURFACESTYLESHADING(${colour},0.7)`)}))`);
+  const fmt = meta.formatStation || ((s) => s.toFixed(1));
+  const elements = [];
+  for (let c0 = s0; c0 < s1 - 1e-6; c0 += chunk) {
+    const c1 = Math.min(s1, c0 + chunk);
+    const stations = [];
+    for (let s = c0; s < c1 - 1e-6; s += step) stations.push(s);
+    stations.push(c1);
+    const rings = stations.map(at);
+    // a body per polygon; where the number of corners changes, a new body begins
+    const items = [];
+    const nPoly = rings[0].length;
+    for (let j = 0; j < nPoly; j++) {
+      let start = 0;
+      for (let k = 1; k <= rings.length; k++) {
+        if (k < rings.length && rings[k][j]?.length === rings[start][j].length) continue;
+        const part = rings.slice(start, k).map((r) => r[j]);
+        start = k;
+        if (part.length < 2) continue;
+        const nv = part[0].length, coords = [], tri = [];
+        for (const ring of part) for (const q of ring) coords.push(`(${ifcNum(q[0] - ox)},${ifcNum(q[1] - oy)},${ifcNum(q[2] - oz)})`);
+        for (let r = 0; r + 1 < part.length; r++) {
+          for (let i = 0; i < nv; i++) {
+            const a = r * nv + i + 1, b = r * nv + ((i + 1) % nv) + 1, a2 = a + nv, b2 = b + nv;
+            tri.push(`(${a},${b},${b2})`, `(${a},${b2},${a2})`);
+          }
+        }
+        const cap = capTriangles(part[0]);
+        for (const [x, y, z] of cap) tri.push(`(${x + 1},${z + 1},${y + 1})`);
+        const lastOff = (part.length - 1) * nv;
+        for (const [x, y, z] of capTriangles(part.at(-1))) tri.push(`(${lastOff + x + 1},${lastOff + y + 1},${lastOff + z + 1})`);
+        const fs = e(`IFCTRIANGULATEDFACESET(${e(`IFCCARTESIANPOINTLIST3D((${coords.join(',')}),$)`)},$,$,(${tri.join(',')}),$)`);
+        e(`IFCSTYLEDITEM(${fs},(${style}),$)`);
+        items.push(fs);
+      }
+    }
+    if (!items.length) continue;
+    const shape = e(`IFCPRODUCTDEFINITIONSHAPE($,$,(${e(`IFCSHAPEREPRESENTATION(${body},'Body','Tessellation',(${items.join(',')}))`)}))`);
+    const label = `${meta.profile || 'Gauge'} ${fmt(al.station0 + c0)} – ${fmt(al.station0 + c1)}`;
+    const el = e(`IFCBUILDINGELEMENTPROXY(${ifcStr(ifcGuid())},$,${ifcStr(label)},${ifcStr(meta.description || '')},${ifcStr('Structure gauge')},${elPl},${shape},$,.USERDEFINED.)`);
+    const props = [
+      ['Profile', `IFCLABEL(${ifcStr(meta.profile || '')})`],
+      ['Standard', `IFCLABEL(${ifcStr(meta.standard || '')})`],
+      ['Alignment', `IFCLABEL(${ifcStr(meta.alignment || al.name || '')})`],
+      ['StationStart', `IFCLENGTHMEASURE(${ifcNum(al.station0 + c0)})`],
+      ['StationEnd', `IFCLENGTHMEASURE(${ifcNum(al.station0 + c1)})`],
+      ['SampleDistance', `IFCLENGTHMEASURE(${ifcNum(step)})`],
+    ];
+    const pv = props.map(([k, v]) => e(`IFCPROPERTYSINGLEVALUE(${ifcStr(k)},$,${v},$)`));
+    e(`IFCRELDEFINESBYPROPERTIES(${ifcStr(ifcGuid())},$,$,$,(${el}),${e(`IFCPROPERTYSET(${ifcStr(ifcGuid())},$,'Vispecta_StructureGauge',$,(${pv.join(',')}))`)})`);
+    elements.push(el);
+  }
+  if (!elements.length) throw new Error('the gauge has no geometry');
+  e(`IFCRELCONTAINEDINSPATIALSTRUCTURE(${ifcStr(ifcGuid())},$,$,$,(${elements.join(',')}),${site})`);
+  const now = new Date().toISOString().slice(0, 19);
+  return `ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('ViewDefinition [Reference]'),'2;1');
+FILE_NAME(${ifcStr(`${name}.ifc`)},'${now}',(''),(''),'Vispecta','Vispecta','');
+FILE_SCHEMA(('IFC4X3_ADD2'));
+ENDSEC;
+DATA;
+${L.join('\n')}
+ENDSEC;
+END-ISO-10303-21;
+`;
+}

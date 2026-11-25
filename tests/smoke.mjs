@@ -324,14 +324,14 @@ async function main() {
       const before = { box: cb.checked, viewer: v.showPlaneHelpers };
       const e = v.addPlane('x');
       const hidden = !e.helper.visible;
-      v.setPlaneHighlight(e); const pointed = e.helper.visible; v.setPlaneHighlight(null);
+      v.setPlaneHighlight(e); const pointed = !e.helper.visible; v.setPlaneHighlight(null);
       cb.checked = true; cb.dispatchEvent(new Event('change'));
       const on = e.helper.visible, stored = localStorage.getItem('onlineifc.planeHelpers');
       cb.checked = false; cb.dispatchEvent(new Event('change'));
       v.removePlane(e);
       return { ...before, hidden, pointed, on, stored, after: localStorage.getItem('onlineifc.planeHelpers') };
     });
-    check('section planes not shown as sheets by default; the one pointed at is; the choice is remembered',
+    check('section planes not shown as sheets by default, also not the one of the section window; the choice is remembered',
       !helpers.box && !helpers.viewer && helpers.hidden && helpers.pointed && helpers.on && helpers.stored === '1' && helpers.after === '0', JSON.stringify(helpers));
     // the Python runtime override (localStorage): only https: or this site, and shown in the About dialog
     const about = async () => {
@@ -540,11 +540,50 @@ async function main() {
     const onFace = await page2.evaluate(() => { const s = window.onlineIfc.measure.hover; return s && { kind: s.kind, off: Math.abs(window.__snapPlane.plane.distanceToPoint(s.point)) }; });
     check('measuring snaps to the corners of a cut and onto the cut face', targets.corners.length >= 4 && caught === targets.corners.length && onFace?.off < 1e-6,
       `${caught} of ${targets.corners.length} corners, cut face: ${onFace?.kind} ${onFace ? `${(onFace.off * 1000).toFixed(3)} mm off the plane` : ''}`);
-    await page2.evaluate(() => { const v = window.onlineIfc.viewer; window.onlineIfc.measure.setMode(null); v.removePlane(window.__snapPlane); v.fitAll?.(); });
+    // perpendicular snap: from a corner of the cut, the foot of the perpendicular on another run of it
+    await page2.mouse.click(targets.corners[0].x, targets.corners[0].y);
+    const feet = await page2.evaluate(() => {
+      const v = window.onlineIfc.viewer, V3 = v.camera.position.constructor, R = v.cutlines.snapData().runs;
+      const a = window.onlineIfc.measure.current?.points[0], rect = v.renderer.domElement.getBoundingClientRect(), out = [];
+      if (!a) return out;
+      for (let i = 0; i < R.length; i += 6) {
+        const p = new V3(R[i], R[i + 1], R[i + 2]), q = new V3(R[i + 3], R[i + 4], R[i + 5]), d = q.clone().sub(p), L2 = d.lengthSq();
+        const tt = a.clone().sub(p).dot(d) / L2;
+        if (!(tt > 0.15 && tt < 0.85) || Math.sqrt(L2) < 0.3) continue;
+        const f = p.clone().addScaledVector(d, tt), sc = v.toScreen(f);
+        if (f.distanceTo(a) > 0.2 && sc && sc.x > 40 && sc.y > 40 && sc.x < rect.width - 40 && sc.y < rect.height - 40) out.push({ x: rect.left + sc.x, y: rect.top + sc.y, f: f.toArray() });
+      }
+      return out.slice(0, 4);
+    });
+    let perp = 0;
+    for (const f of feet) {
+      await page2.mouse.move(f.x + 3, f.y + 2);
+      const h = await page2.evaluate(() => { const s = window.onlineIfc.measure.hover; return s && { kind: s.kind, p: s.point.toArray() }; });
+      if (h?.kind === 'perp' && Math.hypot(h.p[0] - f.f[0], h.p[1] - f.f[1], h.p[2] - f.f[2]) < 0.002) perp++;
+    }
+    check('measuring snaps perpendicular from the last point onto an edge', feet.length > 0 && perp === feet.length, `${perp} of ${feet.length} feet`);
+    await page2.evaluate(() => { const v = window.onlineIfc.viewer; window.onlineIfc.measure.cancel(); window.onlineIfc.measure.setMode(null); v.removePlane(window.__snapPlane); v.fitAll?.(); });
 
     // structure gauge along the track (#127): the dialog checks the railway sample and draws the profile
-    await page2.evaluate(() => document.querySelector('[data-action="clearance"]').click());
+    // national rules (settings): without Denmark only own profiles; with it the profiles of BN1-166-1
+    const region = await page2.evaluate(() => {
+      const sel = document.querySelector('#settings-region'), d = document.querySelector('#clearance-dialog');
+      sel.value = 'none'; sel.dispatchEvent(new Event('change'));
+      document.querySelector('[data-action="clearance"]').click();
+      const none = [...document.querySelectorAll('#clr-profile option')].map((o) => o.value);
+      d.close();
+      sel.value = 'dk'; sel.dispatchEvent(new Event('change'));
+      document.querySelector('[data-action="clearance"]').click();
+      const dk = [...document.querySelectorAll('#clr-profile option')].map((o) => o.value);
+      return { none: none.join(','), dk: dk.length, D: dk.includes('D'), stored: localStorage.getItem('vispecta.region') };
+    });
+    check('national rules: the Danish profiles only with Denmark (or all countries) chosen', region.none === 'new' && region.D && region.dk >= 8 && region.stored === 'dk', JSON.stringify(region));
     await page2.waitForSelector('#clearance-dialog[open]');
+    const clrTable = await page2.evaluate(() => ({
+      models: document.querySelectorAll('#clr-models tr[data-uid]').length, text: document.querySelector('#clr-models').textContent.includes('[object'),
+      classes: document.querySelectorAll('#clr-classes input').length, ticked: [...document.querySelectorAll('#clr-classes label')].filter((l) => l.querySelector('input').checked).map((l) => l.querySelector('span').textContent),
+    }));
+    check('structure gauge: a row per model, the classes of the models as a list to tick', clrTable.models >= 8 && !clrTable.text && clrTable.classes > 10 && clrTable.ticked.includes('IfcRail'), JSON.stringify(clrTable));
     await page2.evaluate(() => { const s = document.querySelector('#clr-profile'); s.value = 'D'; s.dispatchEvent(new Event('change')); document.querySelector('[data-action="clr-run"]').click(); });
     await page2.waitForFunction(() => document.querySelector('#clr-results table, #clr-results .clr-ok'), null, { timeout: 120000 });
     const gaugeRes = await page2.evaluate(() => ({
@@ -552,6 +591,33 @@ async function main() {
       drawn: window.onlineIfc.viewer.clearance.group.children.length, text: document.querySelector('#clr-results p')?.textContent,
     }));
     check('structure gauge: the railway sample is checked along the track and the profile drawn', (gaugeRes.rows > 0 || gaugeRes.ok) && gaugeRes.drawn > 0, `${gaugeRes.text} · ${gaugeRes.drawn} objects drawn`);
+    // an own profile, 4 m to each side and 7 m high: the masts of the overhead line reach into it
+    await page2.evaluate(() => {
+      const sel = document.querySelector('#clr-profile'); sel.value = 'new'; sel.dispatchEvent(new Event('change'));
+      document.querySelector('#clr-c-name').value = 'Wide';
+      document.querySelector('#clr-c-points').value = '0 0\n4000 0\n4000 7000\n0 7000';
+      document.querySelector('#clr-c-save').click();
+      document.querySelector('[data-action="clr-run"]').click();
+    });
+    await page2.waitForFunction(() => document.querySelector('#clr-results table, #clr-results .clr-ok') && !document.querySelector('#loading:not([hidden])'), null, { timeout: 120000 });
+    await idle(page2);
+    const wide = await page2.evaluate(() => ({ rows: document.querySelectorAll('#clr-results .clr-row').length, text: document.querySelector('#clr-results p')?.textContent, cls: [...new Set([...document.querySelectorAll('#clr-results .clr-row td:first-child')].map((td) => td.textContent))].join(',') }));
+    check('structure gauge: an own wide profile finds the elements beside the track', wide.rows > 0, `${wide.text} · ${wide.cls}`);
+    await page2.evaluate(() => { const sel = document.querySelector('#clr-profile'); sel.value = 'D'; sel.dispatchEvent(new Event('change')); });
+    // the gauge as an IFC model, opened in the view (and not checked against itself)
+    const nGauge = await page2.evaluate(() => window.onlineIfc.viewer.models.length);
+    await page2.evaluate(() => document.querySelector('[data-action="clr-ifc"]').click());
+    await page2.waitForFunction((n) => window.onlineIfc.viewer.models.length === n + 1, nGauge, { timeout: 120000 });
+    await idle(page2);
+    const gIfc = await page2.evaluate(() => {
+      const m = window.onlineIfc.viewer.models.at(-1);
+      document.querySelector('[data-action="clearance"]').click();
+      const row = document.querySelector(`#clr-models tr[data-uid="${m.uid}"] .clr-on`);
+      const out = { name: m.name, elements: m.elementIds.size, cls: [...m.classes.keys()].join(','), checked: row?.checked };
+      window.onlineIfc.viewer.removeModel(m);
+      return out;
+    });
+    check('structure gauge as an IFC model: one element per 100 m, opened in the view', /^gauge_D_/.test(gIfc.name) && gIfc.elements > 3 && gIfc.cls === 'IfcBuildingElementProxy' && gIfc.checked === false, JSON.stringify(gIfc));
     await page2.evaluate(() => { document.querySelector('[data-action="clr-clear"]').click(); document.querySelector('#clearance-dialog').close(); });
     // two elements under the mouse: for the object distance and the annotations
     await page2.evaluate(() => window.onlineIfc.viewer.fitAll?.());
@@ -585,6 +651,15 @@ async function main() {
     await page2.waitForFunction(() => document.activeElement?.matches('#notes-list textarea'));
     await page2.keyboard.type('Mast 12: check');
     await page2.waitForFunction(() => window.onlineIfc.notes.items[0]?.text === 'Mast 12: check');
+    // move it: drag its point 60 px to the side (onto the model, or at the same depth)
+    const noteAt = await page2.evaluate(() => { const { notes, viewer } = window.onlineIfc, r = viewer.renderer.domElement.getBoundingClientRect(), s = viewer.toScreen(notes.items[0].p); return { x: r.left + s.x, y: r.top + s.y, p: notes.items[0].p.toArray() }; });
+    await page2.mouse.move(noteAt.x, noteAt.y);
+    await page2.mouse.down();
+    await page2.mouse.move(noteAt.x + 30, noteAt.y + 5, { steps: 3 });
+    await page2.mouse.move(noteAt.x + 60, noteAt.y + 10, { steps: 3 });
+    await page2.mouse.up();
+    const moved = await page2.evaluate((b) => { const { notes, viewer } = window.onlineIfc, r = viewer.renderer.domElement.getBoundingClientRect(), s = viewer.toScreen(notes.items[0].p); return { n: notes.items.length, dx: r.left + s.x - b.x, text: notes.items[0].text }; }, noteAt);
+    check('annotations: a note is moved by dragging it (no new note, the camera stays)', moved.n === 1 && Math.abs(moved.dx - 60) < 6 && moved.text === 'Mast 12: check', JSON.stringify(moved));
     const ann = await page2.evaluate(() => {
       const { notes, views, viewer } = window.onlineIfc;
       notes.add({ p: notes.items[0].p.clone(), q: notes.items[0].p.clone().add(new notes.items[0].p.constructor(3, 2, 0)), text: 'here' });
