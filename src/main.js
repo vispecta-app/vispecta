@@ -29,6 +29,8 @@ import { WalkMode } from './walk.js';
 import { ViewsPanel } from './views.js';
 import { QtoTable } from './qto.js';
 import { mergeIfcBlobs } from './merge.js';
+import { splitIfcBlob } from './split.js';
+import { closeNotes, initNotes, notes, notesActions, notesCancel, notesClick, toggleNotes } from './app/notes.js';
 import { ContextMenu } from './contextmenu.js';
 import { renderVersion } from './version.js';
 import { ProjectManager } from './projects.js';
@@ -53,6 +55,7 @@ import { crsChanged, projectCrsChosen, setProjectCrsChosen } from './app/crs.js'
 import { buildTerrain, openIfcFiles, renderVolumes, runVolumes, setContours, setVolResult, showVolumeMap, terrainFromGeoTiff, terrainFromLandXml, volumeCsv } from './app/terrain.js';
 import { CLOUD_FILE, cloudSettings, cloudsChanged, fileHandles, fileId, hasScene, openCloudFiles, restoreCloudSettings, setEdl } from './app/clouds.js';
 import { corridor, findInCorridor, openCorridorDialog, renderCorridorHits, setCorridorHits, showCorridor } from './app/corridor.js';
+import { clearGauge, gaugeState, openClearanceDialog, restoreGauge, runClearance, showGauge } from './app/clearance.js';
 import { openCopyPset } from './app/copypset.js';
 
 
@@ -577,6 +580,7 @@ viewer.addEventListener('pick', ({ hit, originalEvent: e }) => {
     measure.handleClick(e.clientX, e.clientY);
     return;
   }
+  if (notes.mode && !state.pickPlaneMode) { notesClick(e); return; }
   if (state.pickPlaneMode) {
     if (hit?.normal) {
       // Put the plane 2 cm behind the face so the cut becomes visible.
@@ -736,6 +740,9 @@ document.addEventListener('click', (e) => {
     'toggle-edit': () => setEditMode(!state.editMode),
     merge: () => openMergeDialog(),
     'merge-run': () => runMerge(),
+    ...notesActions,
+    split: () => openSplitDialog(),
+    'split-run': () => runSplit(),
     'toggle-python': () => python.toggle(),
     'toggle-measure': () => setMeasureMode(measure.mode ? null : lastMeasureMode),
     'measure-close': () => { setMeasureMode(null); measurePanelClosed = true; renderMeasure(); },
@@ -756,6 +763,10 @@ document.addEventListener('click', (e) => {
     'reset-all': () => resetView({ all: true }),
     'open-samples': () => openSamples(btn.dataset.sample),
     corridor: () => openCorridorDialog(),
+    clearance: () => openClearanceDialog(),
+    'clr-show': () => showGauge(),
+    'clr-run': () => runClearance(),
+    'clr-clear': () => clearGauge(),
     'cor-show': () => showCorridor(),
     'cor-find': () => findInCorridor(),
     'cor-clear': () => { corridor.clear(); setCorridorHits(null); renderCorridorHits(); secViewer?.planesChanged?.(); projects.touch?.(); },
@@ -820,7 +831,7 @@ function selectionBox() {
   return box;
 }
 
-function fitSelection() {
+export function fitSelection() {
   const box = selectionBox();
   if (box && !box.isEmpty()) viewer.fitBox(box);
   else viewer.fitAll();
@@ -907,6 +918,7 @@ document.addEventListener('keydown', (e) => {
     if ($$('.menu-pop').some((p) => !p.hidden)) closeMenus();
     else if (state.pickPlaneMode) setPickPlaneMode(false);
     else if (measure.cancel()) { /* handled by the measure tool */ }
+    else if (notesCancel()) { /* handled by the annotations */ }
     else clearSelection();
   } else if (e.key === 'f' || e.key === 'F') fitSelection();
   else if (e.key === 'H' && e.shiftKey) showAll();
@@ -915,6 +927,7 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'i' || e.key === 'I') isolateSelected();
   else if (e.key === 'e' || e.key === 'E') setEditMode(!state.editMode);
   else if (e.key === 'm' || e.key === 'M') setMeasureMode(measure.mode ? null : lastMeasureMode);
+  else if ((e.key === 'n' || e.key === 'N') && !e.ctrlKey && !e.metaKey) toggleNotes();
   else if ((e.key === 'o' || e.key === 'O') && !e.ctrlKey && !e.metaKey) { if (!walk.active) setOrtho(!viewer.isOrtho); }
   else if ((e.key === 'w' || e.key === 'W') && !e.ctrlKey && !e.metaKey) walk.toggle();
   else if ((e.key === 'x' || e.key === 'X') && !e.ctrlKey && !e.metaKey) setXray(!state.xray);
@@ -1448,6 +1461,7 @@ export function setMeasureMode(mode) {
   if (mode && !hasScene()) return toast(t('msg.loadFirst'));
   if (mode) { lastMeasureMode = mode; measurePanelClosed = false; }
   if (mode && state.pickPlaneMode) setPickPlaneMode(false);
+  if (mode) closeNotes();
   measure.setMode(mode);
 }
 
@@ -1457,7 +1471,7 @@ function renderMeasure() {
   panel.hidden = measurePanelClosed || (!measure.mode && !rows.length);
   for (const b of $$('.toolbar [data-action="toggle-measure"]')) b.classList.toggle('on', !!measure.mode);
   for (const b of $$('#measure-modes [data-measure]')) b.classList.toggle('on', b.dataset.measure === measure.mode);
-  $('#measure-hint').textContent = measure.mode ? t(`measure.hint.${measure.mode}`) : t('measure.hint.off');
+  $('#measure-hint').textContent = measure.mode ? t(measure.mode === 'objects' && measure.waitingForSecond ? 'measure.hint.objects2' : `measure.hint.${measure.mode}`) : t('measure.hint.off');
   $('#measure-foot').hidden = !rows.length;
   $('.lock-opts').hidden = measure.mode !== 'distance';
   const list = $('#measure-list');
@@ -1472,6 +1486,7 @@ function renderMeasure() {
   renderStatus();
 }
 measure.addEventListener('change', renderMeasure);
+initNotes();
 for (const b of $$('#measure-modes [data-measure]')) b.addEventListener('click', () => setMeasureMode(measure.mode === b.dataset.measure ? null : b.dataset.measure));
 $('#measure-snap').addEventListener('change', (e) => { measure.snapOn = e.target.checked; });
 $('#measure-unit').addEventListener('change', (e) => { measure.unit = e.target.value; measure.refresh(); });
@@ -1586,7 +1601,7 @@ const qto = new QtoTable({
 }, $('#qto-dialog'));
 
 // ======================================================================= issues
-const issues = new IssuesPanel({
+export const issues = new IssuesPanel({
   viewer, h, toast, download, state,
   root: $('#issues'),
   setSelection: (map) => {
@@ -1647,6 +1662,8 @@ export const projects = new ProjectManager({
     projectCrs: viewer.projectCrs || null, projectCrsChosen,
     crsDefs: customDefs([viewer.projectCrs, ...viewer.models.map((m) => m.crs), ...viewer.clouds.map((c) => c.crs)].filter(Boolean)),
     corridor: corridor.def ? { path: corridor.def.al.name, drawn: !!corridor.def.al.drawn, offsets: corridor.def.offsets, from: corridor.def.from, to: corridor.def.to } : null, // (#26)
+    annotations: notes.items.length ? notes.toJSON() : undefined, // notes and arrows in the view (#130)
+    gauge: gaugeState() || undefined, // the structure gauge shown along a track (#127)
   }),
   setExtra: (x) => {
     // drawing presets of the project join the ones in this browser (#51)
@@ -1680,6 +1697,8 @@ export const projects = new ProjectManager({
     updateAlignments();
     const cd = x?.corridor, cal = cd && allAlignments().find((a) => a.name === cd.path && !!a.drawn === cd.drawn);
     if (cal) corridor.set({ al: cal, offsets: cd.offsets, from: cd.from, to: cd.to }); else corridor.clear();
+    notes.fromJSON(x?.annotations || []);
+    restoreGauge(x?.gauge || null);
     renderModels();
   },
 });
@@ -1931,6 +1950,66 @@ async function runMerge() {
   }
 }
 
+// ======================================================================== split (#129)
+/** The elements to write per model: the selection, or what is visible. */
+function splitSets(what) {
+  const out = new Map();
+  if (what === 'selected') {
+    for (const [m, set] of state.selection) if (set.size && m.getBytes) out.set(m, new Set(set));
+  } else {
+    for (const m of viewer.models) {
+      if (!m.getBytes || !m.visible) continue;
+      const ids = new Set([...m.elementIds].filter((id) => !m.isHidden(id)));
+      if (ids.size) out.set(m, ids);
+    }
+  }
+  return out;
+}
+
+function openSplitDialog() {
+  if (!viewer.models.some((m) => m.getBytes)) return toast(t('split.noModels'));
+  const count = (map) => [...map.values()].reduce((n, s) => n + s.size, 0);
+  const sel = count(splitSets('selected')), vis = count(splitSets('visible'));
+  $('#split-n-sel').textContent = t('split.selected', { n: fmtNum(sel) });
+  $('#split-n-vis').textContent = t('split.visible', { n: fmtNum(vis) });
+  const radios = $$('input[name="split-what"]');
+  radios[0].disabled = !sel;
+  radios[sel ? 0 : 1].checked = true;
+  $('#split-dialog').showModal();
+}
+
+async function runSplit() {
+  const what = $('input[name="split-what"]:checked')?.value || 'selected';
+  const sets = splitSets(what);
+  if (!sets.size) return toast(t(what === 'selected' ? 'msg.selectFirst' : 'split.nothing'));
+  const suffix = $('#split-suffix').value.trim();
+  const dl = $('#split-download').checked, open = $('#split-open').checked;
+  $('#split-dialog').close();
+  const results = [];
+  try {
+    await withLoading(async (progress) => {
+      let i = 0;
+      for (const [m, ids] of sets) {
+        // as merge: the original file unless properties were edited in the viewer
+        const blob = m.changes?.length || !m.sourceBlob ? new Blob([await m.getBytes()]) : m.sourceBlob;
+        const res = await splitIfcBlob(blob, ids, (f) => progress(t('split.progress', { name: modelTitle(m) }), (i + f) / sets.size));
+        results.push({ name: `${m.name.replace(/\.ifc$/i, '')}${suffix}.ifc`, ...res });
+        i++;
+      }
+    });
+  } catch (e) {
+    console.error(e);
+    return toast(t('split.failed', { error: e.message || e }));
+  }
+  for (const r of results) {
+    if (dl) download(r.name, r.blob, 'application/x-step');
+    if (open) {
+      try { await loadBytes(r.name, r.blob); } catch (e) { console.error(e); toast(t('msg.loadFailed', { name: r.name, error: e.message || e })); }
+    }
+  }
+  toast(t('split.doneMsg', { n: fmtNum(results.reduce((a, r) => a + r.products, 0)), files: results.length }), true);
+}
+
 // ======================================================================= python
 export const python = new PythonPanel({
   getContext: () => ({ models: viewer.models, active: state.active?.model || [...state.selection.keys()][0] || null, selection: state.selection }),
@@ -2168,4 +2247,4 @@ const standalone = window.matchMedia?.('(display-mode: standalone), (display-mod
 const appTitle = () => { if (standalone?.matches || navigator.standalone) document.title = 'Vispecta'; };
 appTitle();
 standalone?.addEventListener?.('change', appTitle);
-window.onlineIfc = { viewer, state, openFiles, python, measure, views, walk, drawnPaths, projects, history, get secViewer() { return secViewer; } };
+window.onlineIfc = { viewer, state, openFiles, python, measure, notes, views, walk, drawnPaths, projects, history, get secViewer() { return secViewer; } };

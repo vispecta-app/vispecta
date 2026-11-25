@@ -548,6 +548,9 @@ body.py-open .planes-panel { max-height: calc(100% - 60px); }
 .m-dot.distance, .m-label.distance, .m-item.distance { --m-color: #2f7de1; }
 .m-dot.chain, .m-label.chain, .m-item.chain { --m-color: #8e44ad; }
 .m-dot.spot, .m-label.spot, .m-item.spot { --m-color: #1fa971; }
+.m-dot.objects, .m-label.objects, .m-item.objects { --m-color: #d35400; }
+.m-dot.centre { width: 6px; height: 6px; border-style: dashed; }
+.m-label.centre { opacity: 0.85; }
 .m-label {
   position: absolute; left: 0; top: 0; white-space: nowrap; font: 600 12px/1 system-ui, sans-serif;
   background: var(--m-color, #2f7de1); color: #fff; padding: 4px 7px; border-radius: 10px; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
@@ -557,6 +560,16 @@ body.py-open .planes-panel { max-height: calc(100% - 60px); }
 .m-label.spot { white-space: pre; text-align: left; line-height: 1.35; }
 .m-label.align { --m-color: #e8590c; font-size: 11px; padding: 2px 6px; }
 .m-label.align.name { font-size: 12px; }
+/* annotations in the 3D view (#130) */
+.notes-panel { right: 12px; top: 160px; width: 280px; max-height: calc(100% - 200px); overflow: hidden; display: flex; flex-direction: column; }
+.notes-panel > :not(#notes-list) { flex: none; }
+#notes-list { overflow: auto; min-height: 0; flex: 1 1 auto; }
+.notes-colors { display: flex; gap: 4px; }
+.notes-color { width: 18px; height: 18px; border-radius: 50%; border: 2px solid transparent; background: var(--c); padding: 0; cursor: pointer; }
+.notes-color.on { border-color: var(--text, #222); box-shadow: 0 0 0 2px var(--bg, #fff) inset; }
+.notes-item { border-top: 1px solid var(--border); padding: 6px 0; --m-color: var(--c); }
+.notes-item-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.notes-item textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 28px; font: inherit; }
 .measure-panel { right: 12px; top: 160px; width: 300px; max-height: calc(100% - 200px); overflow: hidden; display: flex; flex-direction: column; }
 .measure-panel > :not(#measure-list) { flex: none; }
 #measure-list { overflow: auto; min-height: 0; flex: 1 1 auto; }
@@ -780,7 +793,7 @@ dialog .qto-table td:first-child { color: var(--text); }
   .toolbar > button > span, .menu-btn > span:not(.menu-badge) { display: none; }
   .toolbar > .btn.primary > span { display: none; }
   select.lang { max-width: 84px; }
-  .planes-panel, .measure-panel, .cmp-panel { width: calc(100% - 24px); max-height: 45%; }
+  .planes-panel, .measure-panel, .notes-panel, .cmp-panel { width: calc(100% - 24px); max-height: 45%; }
   .secview { width: calc(100% - 24px); min-width: 0; bottom: 36px; }
   .py-body { grid-template-columns: 1fr; grid-template-rows: 1fr 90px; }
   .grid3 { grid-template-columns: 1fr 1fr; }
@@ -976,3 +989,17 @@ body:has(#welcome:not([hidden])) .viewcube { display: none; }
 .btn.sample { white-space: normal; max-width: 100%; }
 .btn.sample .sample-name, .btn.sample small { white-space: normal; overflow-wrap: anywhere; }
 .samples-credit { white-space: normal; overflow-wrap: anywhere; max-width: 100%; }
+/* structure gauge check (#127) */
+.clr-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 20px; align-items: start; }
+@media (max-width: 820px) { .clr-cols { grid-template-columns: 1fr; } }
+.clr-custom { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; margin-bottom: 8px; }
+.clr-custom h3 { font-size: var(--fs); margin: 2px 0 4px; }
+.clr-custom textarea, #clr-exclude { width: 100%; box-sizing: border-box; font-family: var(--mono, monospace); font-size: 12px; }
+.clr-models td:not(:first-child), .clr-models th:not(:first-child) { text-align: center; }
+.clr-scroll { max-height: 260px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; margin-top: 4px; }
+.clr-scroll .clr-table { margin: 0; font-variant-numeric: tabular-nums; }
+.clr-scroll .clr-table th { position: sticky; top: 0; background: var(--panel); box-shadow: 0 1px 0 var(--border); }
+.clr-table td:nth-child(2), .clr-table th:nth-child(2) { text-align: left; }
+.clr-row { cursor: pointer; }
+.clr-row:hover, .clr-row:focus { background: var(--accent-soft); outline: none; }
+.clr-ok { color: var(--ok, #2e7d32); font-weight: 600; }

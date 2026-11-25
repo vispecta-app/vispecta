@@ -138,6 +138,14 @@ export function computeSection(viewer, entry, { marks = [], annot = null } = {})
       out.push({ text: `${o > 0 ? '+' : ''}${o.toFixed(2)}`, at: [o, bounds.minY - pad], dx: 0, dy: 3, size: 2.5, anchor: 'middle', color: OFFSET_LINE_COLOR, layer: 'OFFSET_LINES' });
     }
   }
+  // the structure gauge (#127) in a cross section of its track
+  if (entry.station && Number.isFinite(bounds.minX)) {
+    for (const line of viewer.clearance?.sectionOutline(entry) || []) {
+      const pts = line.map((p) => to2d(p));
+      for (let i = 1; i < pts.length; i++) out.push({ line: [pts[i - 1], pts[i]], color: GAUGE_LINE_COLOR, dash: 'dash', layer: 'STRUCTURE_GAUGE' });
+      for (const p of pts) { bounds.minX = Math.min(bounds.minX, p[0]); bounds.maxX = Math.max(bounds.maxX, p[0]); bounds.minY = Math.min(bounds.minY, p[1]); bounds.maxY = Math.max(bounds.maxY, p[1]); }
+    }
+  }
   // marks in plans (e.g. section marks) widen the drawing
   if (ax.horizontal && Number.isFinite(bounds.minX)) {
     for (const mk of marks) for (const p of mk.line || (mk.arrow ? [mk.arrow] : [mk.at])) {
@@ -563,6 +571,7 @@ function annotationMarks(section, lay) {
 
 export const AXIS_COLOR = '#C8372D';
 export const OFFSET_LINE_COLOR = '#8E44AD'; // offset lines (#26)
+export const GAUGE_LINE_COLOR = '#E67E22'; // the structure gauge (#127)
 
 // ----------------------------------------------------------- longitudinal profile
 const niceStep = (range, maxCount, steps = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000]) =>

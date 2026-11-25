@@ -151,6 +151,7 @@
           <div class="menu-sep"></div>
           <button class="menu-item" data-action="plane-station"><span class="mi-icon"><svg viewBox="0 0 24 24"><path d="M3 18c5-1 8-6 18-12M12 5v14M9 12h6"/></svg></span><span class="mi-text"><b data-i18n="st.menu"></b><small data-i18n="st.menuDesc"></small></span></button>
           <button class="menu-item" data-action="corridor"><span class="mi-icon"><svg viewBox="0 0 24 24"><path d="M4 20C8 14 12 10 20 4" stroke-dasharray="3 2"/><path d="M8 20c3-4 7-8 12-12M4 16C7 11 10 8 16 4"/></svg></span><span class="mi-text"><b data-i18n="cor.menu"></b><small data-i18n="cor.menuDesc"></small></span></button>
+          <button class="menu-item" data-action="clearance"><span class="mi-icon"><svg viewBox="0 0 24 24"><path d="M6 21V9l3-5h6l3 5v12"/><path d="M3 21h18" /><path d="M9 21v-3h6v3" stroke-dasharray="2 2"/></svg></span><span class="mi-text"><b data-i18n="clr.menu"></b><small data-i18n="clr.menuDesc"></small></span></button>
           <button class="menu-item" data-action="profile"><span class="mi-icon"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 3 4-7 5 5M3 21h18"/></svg></span><span class="mi-text"><b data-i18n="prof.menu"></b><small data-i18n="prof.menuDesc"></small></span></button>
           <button class="menu-item" data-action="drive"><span class="mi-icon"><svg viewBox="0 0 24 24"><path d="M6 21l3-18M18 21l-3-18M7.5 12h9M8.5 6h7M6.8 17h10.4"/></svg></span><span class="mi-text"><b data-i18n="drive.menu"></b><small data-i18n="drive.menuDesc"></small></span></button>
           <div class="menu-sep"></div>
@@ -169,6 +170,8 @@
         </button>
         <div class="menu-pop" data-pop="tools" hidden>
           <button class="menu-item" data-action="merge"><span class="mi-icon"><svg viewBox="0 0 24 24"><path d="M6 4v5a4 4 0 0 0 4 4h4a4 4 0 0 1 4 4v3M18 4v5a4 4 0 0 1-4 4"/></svg></span><span class="mi-text"><b data-i18n="mi.merge"></b><small data-i18n="tb.mergeTitle"></small></span></button>
+          <button class="menu-item" data-action="notes"><span class="mi-icon"><svg viewBox="0 0 24 24"><path d="M4 4h16v12H9l-5 4zM8 9h8M8 12h5"/></svg></span><span class="mi-text"><b data-i18n="mi.notes"></b><small data-i18n="notes.menuTitle"></small></span><kbd>N</kbd></button>
+          <button class="menu-item" data-action="split"><span class="mi-icon"><svg viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 13h7v7h-7zM14 4l6 6M20 4l-6 6"/></svg></span><span class="mi-text"><b data-i18n="mi.split"></b><small data-i18n="split.menuTitle"></small></span></button>
           <button class="menu-item" data-action="compare"><span class="mi-icon"><svg viewBox="0 0 24 24"><path d="M8 3v18M16 3v18M3 8h5M16 16h5M3 16h5M16 8h5"/></svg></span><span class="mi-text"><b data-i18n="mi.compare"></b><small data-i18n="tb.compareTitle"></small></span></button>
           <button class="menu-item" data-action="ids"><span class="mi-icon"><svg viewBox="0 0 24 24"><path d="M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/></svg></span><span class="mi-text"><b data-i18n="mi.ids"></b><small data-i18n="tb.idsTitle"></small></span></button>
           <button class="menu-item" data-action="qto"><span class="mi-icon"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM4 10h16M4 15h16M10 5v14"/></svg></span><span class="mi-text"><b data-i18n="mi.qto"></b><small data-i18n="qto.buttonTitle"></small></span><kbd>Q</kbd></button>
@@ -366,6 +369,7 @@
               <button data-measure="distance" data-i18n="measure.distance" data-i18n-title="measure.distanceTitle"></button>
               <button data-measure="chain" data-i18n="measure.chain" data-i18n-title="measure.chainTitle"></button>
               <button data-measure="spot" data-i18n="measure.spot" data-i18n-title="measure.spotTitle"></button>
+              <button data-measure="objects" data-i18n="measure.objects" data-i18n-title="measure.objectsTitle"></button>
             </div>
             <div class="measure-opts">
               <label class="chk"><input type="checkbox" id="measure-snap" checked /> <span data-i18n="measure.snapLabel"></span></label>
@@ -379,6 +383,27 @@
               <button class="link" data-action="measure-clear" data-i18n="measure.clear"></button>
             </div>
             <div id="measure-list"></div>
+          </div>
+          <div class="float notes-panel" id="notes-panel" hidden>
+            <div class="float-head measure-head">
+              <b data-i18n="notes.title"></b>
+              <span class="spacer"></span>
+              <button class="icon-btn" data-action="notes-close" data-i18n-title="common.close">✕</button>
+            </div>
+            <div class="seg" id="notes-modes">
+              <button data-notes="note" data-i18n="notes.note" data-i18n-title="notes.noteTitle"></button>
+              <button data-notes="arrow" data-i18n="notes.arrow" data-i18n-title="notes.arrowTitle"></button>
+            </div>
+            <div class="measure-opts">
+              <div class="notes-colors" id="notes-colors"></div>
+              <label class="chk"><input type="checkbox" id="notes-show" checked /> <span data-i18n="notes.show"></span></label>
+            </div>
+            <div class="measure-hint muted small" id="notes-hint"></div>
+            <div id="notes-list"></div>
+            <div class="measure-foot" id="notes-foot" hidden>
+              <span class="muted small" data-i18n="notes.saved"></span>
+              <button class="link" data-action="notes-clear" data-i18n="notes.clear"></button>
+            </div>
           </div>
           <div class="float cmp-panel" id="cmp-panel" hidden></div>
           <div class="float cmp-panel ids-panel" id="ids-panel" hidden></div>
@@ -440,6 +465,22 @@
       </div>
     </dialog>
 
+
+    <dialog id="split-dialog">
+      <h2 data-i18n="split.title"></h2>
+      <p class="muted" data-i18n="split.text"></p>
+      <div class="field"><span data-i18n="split.what"></span>
+        <label class="chk"><input type="radio" name="split-what" value="selected" checked /> <span id="split-n-sel"></span></label>
+        <label class="chk"><input type="radio" name="split-what" value="visible" /> <span id="split-n-vis"></span></label>
+      </div>
+      <label class="field"><span data-i18n="split.suffix"></span><input id="split-suffix" type="text" value="-split" /></label>
+      <label class="chk"><input type="checkbox" id="split-download" checked /> <span data-i18n="split.download"></span></label>
+      <label class="chk"><input type="checkbox" id="split-open" /> <span data-i18n="split.open"></span></label>
+      <p class="muted small" data-i18n="split.note"></p>
+      <div class="dialog-btns">
+        <button class="btn primary" data-action="split-run" data-i18n="split.run"></button>
+      </div>
+    </dialog>
 
     <dialog id="drawing-dialog" class="xwide">
       <h2 data-i18n="drw.title"></h2>
@@ -596,6 +637,68 @@
         <button class="btn" data-action="cor-clear" data-i18n="cor.clear"></button>
         <button class="btn" data-action="cor-show" data-i18n="cor.show"></button>
         <button class="btn primary" data-action="cor-find" data-i18n="cor.find"></button>
+      </div>
+    </dialog>
+
+    <dialog id="clearance-dialog" class="xwide">
+      <h2 data-i18n="clr.title"></h2>
+      <p class="muted small" data-i18n="clr.intro"></p>
+      <div class="clr-cols">
+        <div>
+          <label class="field"><span data-i18n="clr.track"></span><select id="clr-path"></select></label>
+          <div class="grid2">
+            <label class="field"><span data-i18n="prof.from"></span><input id="clr-from" type="text" inputmode="decimal" /></label>
+            <label class="field"><span data-i18n="prof.to"></span><input id="clr-to" type="text" inputmode="decimal" /></label>
+          </div>
+          <label class="field"><span data-i18n="clr.profile"></span><select id="clr-profile"></select></label>
+          <label class="field" id="clr-sides-row" hidden><span data-i18n="clr.sides"></span><select id="clr-sides">
+            <option value="both" data-i18n="clr.sidesBoth"></option><option value="right" data-i18n="clr.sideRight"></option><option value="left" data-i18n="clr.sideLeft"></option></select></label>
+          <label class="chk" id="clr-p1-row" hidden><input type="checkbox" id="clr-p1" /> <span data-i18n="clr.p1f1"></span></label>
+          <div id="clr-norm-opts">
+            <label class="field"><span data-i18n="clr.over"></span><select id="clr-over">
+              <option value="" data-i18n="clr.overNone"></option>
+              <option value="EA">EA – 7000 / 1700</option><option value="EBa1">EBa1 – 5390 / 2000</option><option value="EBa2">EBa2 – 5700 / 2000</option>
+              <option value="EBa3">EBa3 – 6790 / 2000</option><option value="SB">SB – 5200 / 2000</option><option value="SBrail" data-i18n="clr.overSBrail"></option></select></label>
+            <label class="chk"><input type="checkbox" id="clr-tunnel" /> <span data-i18n="clr.tunnel"></span></label>
+          </div>
+          <label class="field"><span data-i18n="clr.maint"></span><select id="clr-maint">
+            <option value="none" data-i18n="clr.maintNone"></option><option value="ballast" data-i18n="clr.maintBallast"></option><option value="slab" data-i18n="clr.maintSlab"></option></select></label>
+          <p class="muted small" id="clr-cant-file" hidden></p>
+          <div class="grid2" id="clr-cant-manual" hidden>
+            <label class="field"><span data-i18n="clr.cant"></span><input id="clr-cant" type="number" min="0" max="180" step="5" value="0" data-i18n-title="clr.cantTitle" /></label>
+            <label class="field"><span data-i18n="clr.cantSide"></span><select id="clr-cant-side"><option value="right" data-i18n="clr.sideRight"></option><option value="left" data-i18n="clr.sideLeft"></option></select></label>
+          </div>
+        </div>
+        <div>
+          <div id="clr-custom" class="clr-custom" hidden>
+            <h3 data-i18n="clr.own"></h3>
+            <label class="field"><span data-i18n="clr.cName"></span><input id="clr-c-name" type="text" maxlength="80" /></label>
+            <label class="field"><span data-i18n="clr.cPoints"></span><textarea id="clr-c-points" rows="6" spellcheck="false" data-i18n-placeholder="clr.cPointsPh"></textarea></label>
+            <label class="chk"><input type="checkbox" id="clr-c-sym" checked /> <span data-i18n="clr.cSym"></span></label>
+            <div class="grid2">
+              <label class="field"><span data-i18n="clr.cWiden"></span><input id="clr-c-widen" type="number" step="5" value="0" /></label>
+              <label class="field"><span data-i18n="clr.cRaise"></span><input id="clr-c-raise" type="number" step="5" value="0" /></label>
+            </div>
+            <label class="chk"><input type="checkbox" id="clr-c-rules" checked /> <span data-i18n="clr.cRules"></span></label>
+            <div class="card-btns">
+              <button class="btn sm" id="clr-c-save" data-i18n="clr.cSave"></button>
+              <button class="btn sm" id="clr-c-delete" data-i18n="preset.delete"></button>
+              <button class="btn sm" id="clr-c-export" data-i18n="preset.export"></button>
+              <button class="btn sm" id="clr-c-import" data-i18n="preset.import"></button>
+              <input type="file" id="clr-c-file" accept=".json,application/json" hidden />
+            </div>
+          </div>
+          <table class="cor-table clr-models" id="clr-models"></table>
+          <label class="field"><span data-i18n="clr.exclude"></span><textarea id="clr-exclude" rows="2" spellcheck="false" data-i18n-title="clr.excludeTitle"></textarea></label>
+          <button class="btn xs" id="clr-reset-exclude" data-i18n="clr.excludeReset"></button>
+        </div>
+      </div>
+      <div id="clr-results"></div>
+      <p class="muted small" data-i18n="clr.note"></p>
+      <div class="dialog-btns">
+        <button class="btn" data-action="clr-clear" data-i18n="clr.clear"></button>
+        <button class="btn" data-action="clr-show" data-i18n="clr.show"></button>
+        <button class="btn primary" data-action="clr-run" data-i18n="clr.run"></button>
       </div>
     </dialog>
 

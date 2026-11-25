@@ -98,6 +98,7 @@ export class Viewer extends EventTarget {
     this.resize();
 
     this.renderHooks = []; // functions called every frame after rendering (e.g. measurement labels)
+    this.beforeRenderHooks = []; // called before every frame, screenshots too (e.g. annotations keep their size on screen)
     this.dblclickCenters = true;
     // Render on demand: a frame is drawn while the camera moves, for a short while after any input
     // or invalidate() – models and clouds ask for it themselves when their look changes – and
@@ -1002,6 +1003,7 @@ export class Viewer extends EventTarget {
 
   /** Renders the scene once (with the cut faces, #37). Used by the loop and for snapshots. */
   renderFrame({ still = false } = {}) {
+    for (const fn of this.beforeRenderHooks) fn();
     this.cutlines.update({ still });
     // point clouds: fewer points while the camera moves; 200 ms after the last movement one more
     // frame is rendered with all points

@@ -15,7 +15,7 @@ The interface is in **English**, **Danish**, **German**, **Swedish**, **Norwegia
 Vispecta is an open-source project by Rasmus Roien Molbaek (AGPL-3.0 licence). It grows out of the challenges I met in my work as an engineer in railway projects: alignments and stationing, cross sections and longitudinal profiles, combining the models of several disciplines, and quick checks of metadata.
 
 ## Features
-The toolbar groups the functions: **View**, **Section**, **Visibility**, **Alignment** (stationing, cross sections, longitudinal profiles, drive along, draw a line), **Measure** and **Tools** (merge, compare, IDS check, quantity takeoff, Python). On small screens the side panels are drawers over the 3D view.
+The toolbar groups the functions: **View**, **Section**, **Visibility**, **Alignment** (stationing, cross sections, longitudinal profiles, drive along, draw a line), **Measure** and **Tools** (annotate, merge, save part as IFC, compare, IDS check, quantity takeoff, Python). On small screens the side panels are drawers over the 3D view.
 
 **Undo / redo:** Ctrl+Z (Cmd+Z on Mac) or ↶ in the toolbar undoes the last change, Ctrl+Y / Ctrl+Shift+Z or ↷ redoes it (#67). It covers hidden and isolated elements, colours and transparency, models and groups switched on or off, section planes (added, moved, removed, 3D cut on/off), measurements, drawn lines and the corridor – up to 50 steps. The camera is not part of it (saved views cover that), and in a text field Ctrl+Z stays the field's own. Opening or removing a model starts the history again.
 
@@ -110,6 +110,15 @@ Cross sections get letters (A–A, B–B …). In 3D and on plan drawings each o
 ### Offset lines and corridors
 *Alignment → Offset lines and corridor* draws lines at fixed offsets from an alignment or a drawn line (e.g. −5 and +5 m; perpendicular in plan, right positive as in the section window), limited to a station range (#26). They show in 3D, and as dashed vertical lines in station sections, the section window and exported drawings (DXF layer `OFFSET_LINES`). *Find elements* lists the elements inside the band between the outermost offsets or crossing it – by their geometry, not their insertion point – per class, and can colour (inside violet, crossing orange), select or isolate them, or export the list as CSV with station and offset. The corridor is saved in the project.
 
+### Structure gauge (BN1-166-1)
+*Alignment → Structure gauge check* (#127) puts a clearance profile on an alignment – at top of rail, turned with the cant – and lists the elements that reach into it, from station to station. The profiles of the Danish standard BN1-166-1 (03/02/2025) are built in: D, D-GC, SD, R (shunting widening on one or both sides), A (also P1/F1), SA and UT, with the profiles over the upper part (EA, EBa1–3, SB, SB with conductor rail, +50 mm in tunnels over 100 m). The allowances of the norm are added along the track:
+- **Curve widening** e (§12): 3750/R for 250 ≤ R < 300 m, 60000/R − 225 for 150 ≤ R < 250 m, on both sides – in the whole height for D, D-GC, SD and R; for A and SA below 760 mm, and above 3300 mm when R < 180 m (A also for P1/F1). It runs in at the start of the curve (R > 250 m), linearly from 12 to 2 m before it (R ≤ 250 m), and along transition curves.
+- **Vertical curves** (§13): Δh = 50000/Rv for Rv < 10000 m – the low parts are lowered, the parts between 3300 mm and the top raised, run in over 25 m.
+- **Maintenance allowance** for design (§10.4/10.5): ballasted track 100 mm up / 50 mm sideways, slab track 50 / 25 mm.
+- **Cant** from `IfcAlignmentCant`, or typed in when the alignment has none.
+
+Under R = 150 m and Rv = 500 m the norm requires a dispensation; the check says so. **Own profiles:** points b h in mm (the right half for a symmetric profile), an extra width per side and an extra height, and optionally the norm's curve and vertical allowances – saved in the browser and exported / imported as JSON. Models of the overhead line are not checked against the profile over the upper part. The result lists class, name, station, side and how far the element reaches in; a row goes to the element and its station section, and the list can colour, select or isolate the elements, be exported as CSV, or become BCF issues. The profile is drawn in 3D, in station sections and in drawings (DXF layer `STRUCTURE_GAUGE`), and saved in the project. It is a check aid, not an approval.
+
 ### Point clouds
 Surveys and laser scans can be loaded next to the IFC models (#27) – drop the file like an IFC file:
 
@@ -168,9 +177,10 @@ Models, point clouds and terrain do not always come in the same map coordinate s
 - Conversion uses [proj4js](https://github.com/proj4js/proj4js) (MIT), locally.
 
 ### Measure
-**Measure** (toolbar or `M`) opens the measuring panel with three tools:
+**Measure** (toolbar or `M`) opens the measuring panel with four tools:
 - **Distance:** point to point. *Lock X/Y* keeps the second point on the vertical line through the first point, so only the height (Z) is measured. Shows the distance, the horizontal distance, the height difference (ΔZ), ΔX/ΔY and the slope. Dashed lines show the horizontal and vertical components.
 - **Length:** a polyline through several points with the length of each segment and the total. Finish with double-click or Enter; Backspace removes the last point.
+- **Objects** (#128): click two elements – the shortest distance between their geometry (solid line; 0 when they touch or overlap) and the distance between their centres (dashed).
 - **Spot:** coordinates and elevation of a point. Choose which coordinates (X, Y, Z) the label in the 3D view shows. It shows project X/Y/Z (metres, Z up) and the height above the element's storey. If the model is georeferenced with `IfcMapConversion`, it also shows easting/northing/height in the map coordinate system. Otherwise it shows Z plus the site reference elevation (`IfcSite.RefElevation`) when one is set.
 
 Points snap to corners, edge midpoints and edges (shown by the marker shape); snapping can be turned off. Values are shown in m or mm, every measurement can be zoomed to or removed, and *Copy all* copies the values to the clipboard. Points cut away by section planes cannot be picked. With several models, coordinates refer to the first model's coordinate system.
@@ -182,6 +192,12 @@ Turn on **Edit** (in the properties panel, or the `E` key):
 - **Batch editing:** select several elements (for example a whole class) and set a property on all of them. Existing values are overwritten, missing properties are added, and elements without the property set get a new one.
 - Shared property sets and type property sets are marked, so you can see when a change affects more elements.
 - Every model card shows the list of changes. **Download IFC** saves the edited file (`*_edited.ifc`).
+
+### Annotations
+**Tools → Annotate** (`N`, #130) puts notes and arrows in the 3D view: *Note* – click a point and type the text in the panel; *Arrow* – click where it starts (its text sits there) and where it points. Six colours; every annotation can be zoomed to, edited or removed. They are drawn in the 3D view itself, so they are part of screenshots and of the snapshots of BCF issues, and they keep their size on screen. Projects and saved views keep them (a saved view puts its own back); in BCF files the arrows are written as viewpoint lines, and lines from other programs come back as arrows.
+
+### Save part as IFC
+**Tools → Save part as IFC** (#129) writes a new IFC file per model with only the selected or the visible elements – with their parts (assemblies), openings, the spatial structure above them up to the project, and their placements, geometry, property sets, types, materials, classifications, styles and layers. Relations keep only the elements that are written. Entity numbers and GlobalIds are kept, so BCF issues and IDS results still point at the same elements. It works on the file text in a stream (like merging), also for large files; the original file is not changed.
 
 ### Merge models
 **Tools → Merge models** combines two or more loaded models into a single IFC file (the same result as `ifcpatch` *MergeProjects*). The first model keeps its header, project, units and coordinate system; the projects of the others are replaced by it. Sites, buildings, storeys and other spatial elements with the same GlobalId in several models are combined into one, and their repeated relations are dropped. The merge works directly on the STEP text, streamed in chunks, so it is fast and needs little more memory than the files themselves (about 370 MB in 30 s in a test). The result opens in the viewer and can be downloaded. The models must use the same IFC schema. The merged file takes the length unit of the first model: a model whose unit was corrected is therefore not put first, and models in really different units trigger a warning. Tick *Replace the source models* for very large models: the sources are removed before the merged model is loaded, which saves memory.
@@ -229,6 +245,7 @@ Vispecta aims at WCAG 2.2 AA (#62).
 | Reset view (colours, visibility, X-ray, selection, zoom to all) | Shift+R |
 | Edit mode | E |
 | Measure on/off | M |
+| Annotate on/off | N |
 | Orthographic / perspective camera | O |
 | X-ray | X |
 | Walk mode (Esc exits) | W |

@@ -92,6 +92,11 @@ export function captureViewpoint({ viewer, selection, spacesVisible }) {
     // a section with its 3D cut turned off (#39) is kept in saved views, not in BCF files
     vp.clipping.push({ loc: loc.toArray(), dir: d.toArray(), ...(p.cut3d === false ? { cut3d: false } : {}) });
   }
+  // annotations in the view (#130): all of them for saved views; the arrows as BCF lines
+  if (viewer.annotations) {
+    vp.markup = viewer.annotations.toJSON();
+    vp.lines = viewer.annotations.bcfLines();
+  }
   return vp;
 }
 
@@ -146,6 +151,12 @@ export function applyViewpoint(vp, ctx) {
     } else e = viewer.addPlane('custom', { normal: n, point });
     if (cp.cut3d === false) viewer.setPlaneCut(e, false);
   }
+  // annotations (#130): a view saved with them puts them back (also none); lines of a BCF file from
+  // another program become arrows. Older views without them leave the annotations as they are.
+  if (viewer.annotations) {
+    if (Array.isArray(vp.markup)) viewer.annotations.fromJSON(vp.markup);
+    else if (vp.lines?.length) viewer.annotations.fromJSON(vp.lines.map((l) => ({ p: l.start, q: l.end, text: '' })));
+  }
   // selection
   ctx.setSelection(resolve(vp.selection || []));
   ctx.afterVisibility?.();
@@ -188,8 +199,12 @@ function viewpointXml(vp, version) {
     ? `<OrthogonalCamera>${camBody}<ViewToWorldScale>${c.scale}</ViewToWorldScale>${aspect}</OrthogonalCamera>`
     : `<PerspectiveCamera>${camBody}<FieldOfView>${c.fov}</FieldOfView>${aspect}</PerspectiveCamera>`;
   const clipping = vp.clipping.filter((p) => p.cut3d !== false);
+  // lines (arrows, #130): numbers only – a view may come from a workspace file
+  const num3 = (v) => (Array.isArray(v) && v.length >= 3 ? v.slice(0, 3).map(Number) : null);
+  const okLines = (Array.isArray(vp.lines) ? vp.lines : []).map((l) => [num3(l?.start), num3(l?.end)]).filter(([a, b]) => a && b && [...a, ...b].every(Number.isFinite));
+  const lines = okLines.length ? `<Lines>${okLines.map(([a, b]) => `<Line>${xyz('StartPoint', a)}${xyz('EndPoint', b)}</Line>`).join('')}</Lines>` : '';
   const clip = clipping.length ? `<ClippingPlanes>${clipping.map((p) => `<ClippingPlane>${xyz('Location', p.loc)}${xyz('Direction', p.dir)}</ClippingPlane>`).join('')}</ClippingPlanes>` : '';
-  return `${XML_HEAD}<VisualizationInfo Guid="${vp.guid}">${components}${camera}${clip}</VisualizationInfo>`;
+  return `${XML_HEAD}<VisualizationInfo Guid="${vp.guid}">${components}${camera}${lines}${clip}</VisualizationInfo>`;
 }
 
 function markupXml(topic, files, version) {
@@ -264,6 +279,7 @@ function parseViewpoint(xml, guid) {
     coloring: components && kid(components, 'Coloring')
       ? kids(kid(components, 'Coloring'), 'Color').map((c) => ({ color: (c.getAttribute('Color') || 'FF0000').toUpperCase(), guids: comps(c) })) : [],
     clipping: kid(root, 'ClippingPlanes') ? kids(kid(root, 'ClippingPlanes'), 'ClippingPlane').map((p) => ({ loc: vec(kid(p, 'Location')), dir: vec(kid(p, 'Direction')) })) : [],
+    lines: kid(root, 'Lines') ? kids(kid(root, 'Lines'), 'Line').map((l) => ({ start: vec(kid(l, 'StartPoint')), end: vec(kid(l, 'EndPoint')) })).filter((l) => l.start && l.end && [...l.start, ...l.end].every(Number.isFinite)) : [],
     camera: null,
   };
   const pc = kid(root, 'PerspectiveCamera') || kid(root, 'OrthogonalCamera');
