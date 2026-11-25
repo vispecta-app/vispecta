@@ -2,10 +2,11 @@
 // elements that reach into the gauge, and BCF issues for them. The geometry is in ../clearance.js.
 import { t, fmtNum } from '../i18n.js';
 import { formatStation, parseStation } from '../alignment.js';
-import { ClearanceLayer, PROFILES, checkClearance } from '../clearance.js';
+import { ClearanceLayer, PROFILES, checkClearance, gaugeToIfc } from '../clearance.js';
 import { $, download, h, state, toast, viewer, withLoading } from './core.js';
 import { allAlignments, alnLabel, autoSecView, renderPlanes, setStationPlane } from './sections.js';
-import { applySelection, fitSelection, isolateSelected, issues, projects } from '../main.js';
+import { standardsFor } from './region.js';
+import { loadBytes, applySelection, fitSelection, isolateSelected, issues, projects } from '../main.js';
 
 export const gauge = new ClearanceLayer(viewer);
 viewer.clearance = gauge; // drawing.js draws the gauge in station sections
@@ -14,9 +15,12 @@ const CUSTOM_KEY = 'vispecta.gauges';
 const SETTINGS_KEY = 'vispecta.gaugeCheck';
 // classes left out by default: the track itself, the ballast and the ground under it, and what has no body
 export const DEFAULT_EXCLUDE = 'IfcRail, IfcTrackElement, IfcFastener, IfcCourse, IfcEarthworksFill, IfcEarthworksElement, IfcAlignment, IfcReferent, IfcSpace, IfcVirtualElement, IfcAnnotation, IfcOpeningElement';
+// models made from the gauge (below): not checked against it
+const GAUGE_FILE = /^gauge_/i;
 const OCL_NAME = /overhead|catenary|k[øo]rel|kontaktl|fahrleit|ocl|ole\b|cat[eé]naire|bovenleid|catenaria/i;
 
 let hits = null; // the last result
+let excluded = null; // Set of IFC classes (upper case) left out of the check
 let lastDef = null;
 
 // ------------------------------------------------------------- profiles of your own
@@ -34,13 +38,17 @@ export function parsePoints(text) {
 
 function fillProfiles(selected) {
   const sel = $('#clr-profile');
-  const std = Object.keys(PROFILES).map((k) => h('option', { value: k, text: t(`clr.p.${k}`), selected: selected === k }));
+  // the national profiles only with that country's rules chosen in the settings (or all countries)
+  const dk = standardsFor('gauge').some((s) => s.id === 'BN1-166-1');
+  const std = dk ? Object.keys(PROFILES).map((k) => h('option', { value: k, text: t(`clr.p.${k}`), selected: selected === k })) : [];
   const own = customProfiles().map((p) => h('option', { value: `custom:${p.name}`, text: `✎ ${p.name}`, selected: selected === `custom:${p.name}` }));
   sel.replaceChildren(
-    h('optgroup', { label: 'BN1-166-1' }, std),
+    std.length ? h('optgroup', { label: 'BN1-166-1 (DK)' }, std) : null,
     own.length ? h('optgroup', { label: t('clr.own') }, own) : null,
     h('option', { value: 'new', text: t('clr.newProfile') }));
-  if (!sel.value || (selected && sel.value !== selected)) sel.value = selected && [...sel.options].some((o) => o.value === selected) ? selected : 'D';
+  const has = (v) => [...sel.options].some((o) => o.value === v);
+  sel.value = selected && has(selected) ? selected : has('D') ? 'D' : sel.options[0].value;
+  $('#clr-region-hint').hidden = dk;
 }
 
 function showProfileFields() {
@@ -129,9 +137,10 @@ export function openClearanceDialog() {
   fillProfiles(lastDef?.def.id === 'custom' ? `custom:${lastDef.def.custom.name}` : lastDef?.def.id || saved.profile || 'D');
   if (saved.over !== undefined && !lastDef) $('#clr-over').value = saved.over;
   if (saved.maintenance && !lastDef) $('#clr-maint').value = saved.maintenance;
-  if (!$('#clr-exclude').value) $('#clr-exclude').value = saved.exclude || DEFAULT_EXCLUDE;
+  if (!excluded) excluded = classSet(saved.exclude || DEFAULT_EXCLUDE);
   showProfileFields();
   renderModels();
+  renderClasses();
   renderCant();
   renderHits();
   $('#clearance-dialog').showModal();
@@ -147,13 +156,31 @@ function renderModels() {
   const prev = new Map([...box.querySelectorAll('tr[data-uid]')].map((r) => [r.dataset.uid, { on: r.querySelector('.clr-on').checked, ocl: r.querySelector('.clr-ocl').checked }]));
   box.replaceChildren(
     h('tr', {}, h('th', { text: t('clr.model') }), h('th', { text: t('clr.check') }), h('th', { text: t('clr.ocl'), title: t('clr.oclTitle') })),
-    viewer.models.filter((m) => m.visible && m.elementIds.size).map((m) => {
+    ...viewer.models.filter((m) => m.visible && m.elementIds.size).map((m) => {
       const p = prev.get(String(m.uid));
       return h('tr', { 'data-uid': String(m.uid) },
         h('td', { text: m.alias || m.name }),
-        h('td', {}, h('input', { type: 'checkbox', class: 'clr-on', checked: p ? p.on : true, 'aria-label': `${t('clr.check')}: ${m.name}` })),
+        h('td', {}, h('input', { type: 'checkbox', class: 'clr-on', checked: p ? p.on : !GAUGE_FILE.test(m.name), 'aria-label': `${t('clr.check')}: ${m.name}` })),
         h('td', {}, h('input', { type: 'checkbox', class: 'clr-ocl', checked: p ? p.ocl : OCL_NAME.test(m.name), 'aria-label': `${t('clr.ocl')}: ${m.name}` })));
     }));
+}
+
+const classSet = (text) => new Set(String(text).split(/[,;\s]+/).map((x) => x.trim().toUpperCase()).filter(Boolean));
+
+/** The classes of the models to check, with their number of elements: ticked ones are left out. */
+function renderClasses() {
+  const on = new Set([...$('#clr-models').querySelectorAll('tr[data-uid]')].filter((r) => r.querySelector('.clr-on').checked).map((r) => r.dataset.uid));
+  const count = new Map();
+  for (const m of viewer.models) {
+    if (!on.has(String(m.uid))) continue;
+    for (const [cls, ids] of m.classes || []) count.set(cls, (count.get(cls) || 0) + ids.length);
+  }
+  const list = [...count].sort((a, b) => a[0].localeCompare(b[0]));
+  $('#clr-classes').replaceChildren(...(list.length ? list.map(([cls, n]) => {
+    const cb = h('input', { type: 'checkbox', checked: excluded.has(cls.toUpperCase()) });
+    cb.addEventListener('change', () => { if (cb.checked) excluded.add(cls.toUpperCase()); else excluded.delete(cls.toUpperCase()); });
+    return h('label', { class: 'chk' }, cb, h('span', { text: cls }), h('span', { class: 'muted small', text: ` ${fmtNum(n)}` }));
+  }) : [h('p', { class: 'muted small', text: t('clr.noClasses') })]));
 }
 
 function renderCant() {
@@ -197,8 +224,8 @@ function defFromDialog() {
     if (r.querySelector('.clr-on').checked) models.add(m);
     if (r.querySelector('.clr-ocl').checked) ocl.add(m);
   }
-  const exclude = new Set($('#clr-exclude').value.split(/[,;\s]+/).map((x) => x.trim().toUpperCase()).filter(Boolean));
-  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ profile: v === 'new' ? 'D' : v, over: $('#clr-over').value, maintenance: $('#clr-maint').value, exclude: $('#clr-exclude').value })); } catch { /* ignore */ }
+  const exclude = new Set(excluded || classSet(DEFAULT_EXCLUDE));
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ profile: v === 'new' ? 'D' : v, over: $('#clr-over').value, maintenance: $('#clr-maint').value, exclude: [...exclude].join(', ') })); } catch { /* ignore */ }
   return { al, from: from - al.station0, to: to - al.station0, def, manualCant, models, ocl, exclude };
 }
 
@@ -209,6 +236,43 @@ export function showGauge() {
   lastDef = d;
   projects.touch?.();
   return d;
+}
+
+/**
+ * The gauge shown (or set in the dialog) as an IFC model: opened in the view next to the others, or
+ * downloaded – for clash checks in other programs, or to hand on.
+ */
+export async function gaugeAsIfc({ download: dl = false } = {}) {
+  const d = showGauge();
+  if (!d || !gauge.def) return;
+  const prof = profileName(d.def);
+  const safe = (s) => String(s).replace(/[^\p{L}\p{N}._-]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+  const file = `gauge_${safe(prof)}_${safe(d.al.name)}.ifc`;
+  let text;
+  try {
+    text = await withLoading(async (progress) => {
+      progress(t('clr.ifcMaking'), 0.1);
+      await new Promise((r) => setTimeout(r, 30));
+      return gaugeToIfc(gauge, {
+        name: `${t('clr.ifcName')} ${prof}`, profile: prof, standard: d.def.id === 'custom' ? t('clr.own') : 'BN1-166-1',
+        alignment: d.al.name, georef: viewer.referenceModel?.georef || null, formatStation,
+        description: d.def.maintenance && d.def.maintenance !== 'none' ? `+ ${t(`clr.maint${d.def.maintenance === 'slab' ? 'Slab' : 'Ballast'}`)}` : '',
+      });
+    });
+  } catch (e) {
+    console.error(e);
+    return toast(t('clr.ifcFailed', { error: e.message || e }));
+  }
+  const blob = new Blob([text], { type: 'application/x-step' });
+  if (dl) { download(file, blob, 'application/x-step'); return; }
+  $('#clearance-dialog').close();
+  try {
+    await loadBytes(file, blob);
+    toast(t('clr.ifcDone', { name: file }), true);
+  } catch (e) {
+    console.error(e);
+    toast(t('clr.ifcFailed', { error: e.message || e }));
+  }
 }
 
 export async function runClearance() {
@@ -344,7 +408,9 @@ $('#clr-c-delete').addEventListener('click', deleteCustomProfile);
 $('#clr-c-export').addEventListener('click', exportProfiles);
 $('#clr-c-import').addEventListener('click', () => $('#clr-c-file').click());
 $('#clr-c-file').addEventListener('change', (e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) importProfiles(f); });
-$('#clr-reset-exclude').addEventListener('click', () => { $('#clr-exclude').value = DEFAULT_EXCLUDE; });
+$('#clr-reset-exclude').addEventListener('click', () => { excluded = classSet(DEFAULT_EXCLUDE); renderClasses(); });
+$('#clr-none-exclude').addEventListener('click', () => { excluded = new Set(); renderClasses(); });
+$('#clr-models').addEventListener('change', (e) => { if (e.target.matches('.clr-on')) renderClasses(); });
 
 /** For the project / workspace: the gauge shown, and back. */
 export function gaugeState() {

@@ -33,6 +33,84 @@ export class AnnotationLayer extends EventTarget {
     this.pendingDot.visible = false;
     this.group.add(this.pendingDot);
     (viewer.beforeRenderHooks ||= []).push(() => this.#scale());
+    this.#bindDrag();
+  }
+
+  // ------------------------------------------------------------ moving and editing
+  /**
+   * The handle under a screen point while annotating: a note's label or point, an arrow's tail
+   * (with its label) or head. Returns {it, end: 'p' | 'q'} or null.
+   */
+  handleAt(clientX, clientY) {
+    if (!this.visible) return null;
+    const rect = this.viewer.renderer.domElement.getBoundingClientRect();
+    const x = clientX - rect.left, y = clientY - rect.top;
+    let best = null, bestD = 12; // px
+    for (const it of [...this.items].reverse()) {
+      for (const end of it.q ? ['q', 'p'] : ['p']) {
+        const s = this.viewer.toScreen(it[end]);
+        if (!s) continue;
+        const d = Math.hypot(s.x - x, s.y - y);
+        if (d < bestD) { bestD = d; best = { it, end }; }
+      }
+      // on the label (its lower left corner is at p)
+      const lab = this.objs.get(it.id)?.label, s = this.viewer.toScreen(it.p);
+      if (!best && lab && s) {
+        const [w, h] = lab.userData.px;
+        if (x >= s.x && x <= s.x + w && y <= s.y && y >= s.y - h) best = { it, end: 'p' };
+      }
+    }
+    return best;
+  }
+
+  #bindDrag() {
+    const v = this.viewer, el = v.renderer.domElement;
+    let drag = null;
+    v.container.addEventListener('pointerdown', (e) => {
+      if (!this.mode || e.button !== 0 || e.target !== el) return;
+      const hd = this.handleAt(e.clientX, e.clientY);
+      if (!hd) return;
+      // not to the camera controls, and not a click that makes a new note
+      e.stopPropagation();
+      e.preventDefault();
+      const start = hd.it[hd.end].clone();
+      const cam = v.camera.getWorldDirection(new THREE.Vector3());
+      drag = { ...hd, x: e.clientX, y: e.clientY, moved: false, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(cam, start), id: e.pointerId };
+      el.setPointerCapture?.(e.pointerId);
+    }, { capture: true });
+    window.addEventListener('pointermove', (e) => {
+      if (!drag) {
+        if (this.mode && !e.buttons && e.target === el) el.style.cursor = this.handleAt(e.clientX, e.clientY) ? 'move' : '';
+        return;
+      }
+      if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 4) return;
+      drag.moved = true;
+      // onto the model under the mouse, else at the same depth
+      const hit = v.pick(e.clientX, e.clientY);
+      let p = hit?.point;
+      if (!p) {
+        const rect = el.getBoundingClientRect();
+        const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+        const ray = new THREE.Raycaster();
+        ray.setFromCamera(ndc, v.camera);
+        p = ray.ray.intersectPlane(drag.plane, new THREE.Vector3());
+      }
+      if (!p) return;
+      drag.it[drag.end].copy(p);
+      this.#dispose(drag.it.id);
+      this.#build(drag.it);
+    });
+    const end = (e) => {
+      if (!drag) return;
+      const d = drag;
+      drag = null;
+      el.releasePointerCapture?.(e.pointerId);
+      if (d.moved) this.dispatchEvent(Object.assign(new Event('moved'), { item: d.it }));
+      else this.dispatchEvent(Object.assign(new Event('edit'), { item: d.it })); // a click on it: its text
+      this.#emit();
+    };
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
   }
 
   #emit() { this.dispatchEvent(new Event('change')); this.viewer.invalidate?.(); }

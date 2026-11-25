@@ -30,6 +30,7 @@ import { ViewsPanel } from './views.js';
 import { QtoTable } from './qto.js';
 import { mergeIfcBlobs } from './merge.js';
 import { splitIfcBlob } from './split.js';
+import { getRegion, setRegion } from './app/region.js';
 import { closeNotes, initNotes, notes, notesActions, notesCancel, notesClick, toggleNotes } from './app/notes.js';
 import { ContextMenu } from './contextmenu.js';
 import { renderVersion } from './version.js';
@@ -55,7 +56,7 @@ import { crsChanged, projectCrsChosen, setProjectCrsChosen } from './app/crs.js'
 import { buildTerrain, openIfcFiles, renderVolumes, runVolumes, setContours, setVolResult, showVolumeMap, terrainFromGeoTiff, terrainFromLandXml, volumeCsv } from './app/terrain.js';
 import { CLOUD_FILE, cloudSettings, cloudsChanged, fileHandles, fileId, hasScene, openCloudFiles, restoreCloudSettings, setEdl } from './app/clouds.js';
 import { corridor, findInCorridor, openCorridorDialog, renderCorridorHits, setCorridorHits, showCorridor } from './app/corridor.js';
-import { clearGauge, gaugeState, openClearanceDialog, restoreGauge, runClearance, showGauge } from './app/clearance.js';
+import { clearGauge, gaugeAsIfc, gaugeState, openClearanceDialog, restoreGauge, runClearance, showGauge } from './app/clearance.js';
 import { openCopyPset } from './app/copypset.js';
 
 
@@ -396,7 +397,7 @@ export function checkUnits(model) {
 }
 
 /** Loads IFC bytes (e.g. produced by Python) into the viewer, optionally replacing a model. */
-async function loadBytes(name, data, { replace = null } = {}) {
+export async function loadBytes(name, data, { replace = null } = {}) {
   const blob = data instanceof Blob ? data : new Blob([data]);
   let key = null;
   if (projects.enabled) { try { key = await projects.keyOf(blob); } catch { key = null; } }
@@ -765,6 +766,8 @@ document.addEventListener('click', (e) => {
     corridor: () => openCorridorDialog(),
     clearance: () => openClearanceDialog(),
     'clr-show': () => showGauge(),
+    'clr-ifc': () => gaugeAsIfc(),
+    'clr-ifc-dl': () => gaugeAsIfc({ download: true }),
     'clr-run': () => runClearance(),
     'clr-clear': () => clearGauge(),
     'cor-show': () => showCorridor(),
@@ -1548,6 +1551,7 @@ for (const cb of $$('[data-spot-show]')) {
 const BUDGET_KEY = 'vispecta.pointBudget';
 function openSettings(section = null) {
   $('#settings-lang').value = getLang();
+  $('#settings-region').value = getRegion();
   let theme = null;
   try { theme = localStorage.getItem(THEME_KEY); } catch { /* ignore */ }
   $('#settings-theme').value = theme === 'dark' || theme === 'light' ? theme : 'auto';
@@ -1575,6 +1579,7 @@ $('#settings-theme').addEventListener('change', (e) => {
   applyTheme();
 });
 $('#settings-viewcube').addEventListener('change', (e) => setViewCube(e.target.checked));
+$('#settings-region').addEventListener('change', (e) => setRegion(e.target.value)); // national rules: read when a dialog opens
 $('#settings-edl').addEventListener('change', (e) => { setEdl(e.target.checked); renderModels(); });
 $('#settings-budget').addEventListener('change', (e) => {
   try { localStorage.setItem(BUDGET_KEY, e.target.value === 'auto' ? '' : e.target.value); } catch { /* ignore */ }

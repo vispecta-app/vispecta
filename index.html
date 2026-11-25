@@ -161,6 +161,9 @@
 
       <div class="sep"></div>
 
+      <button data-action="notes" data-i18n-title="notes.menuTitle">
+        <svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4M13 20h7"/></svg><span data-i18n="tb.annotate"></span>
+      </button>
       <button data-action="toggle-measure" data-i18n-title="tb.measureTitle">
         <svg viewBox="0 0 24 24"><path d="M3 17 17 3l4 4L7 21zM7 13l2 2M10 10l2 2M13 7l2 2"/></svg><span data-i18n="tb.measure"></span>
       </button>
@@ -170,7 +173,6 @@
         </button>
         <div class="menu-pop" data-pop="tools" hidden>
           <button class="menu-item" data-action="merge"><span class="mi-icon"><svg viewBox="0 0 24 24"><path d="M6 4v5a4 4 0 0 0 4 4h4a4 4 0 0 1 4 4v3M18 4v5a4 4 0 0 1-4 4"/></svg></span><span class="mi-text"><b data-i18n="mi.merge"></b><small data-i18n="tb.mergeTitle"></small></span></button>
-          <button class="menu-item" data-action="notes"><span class="mi-icon"><svg viewBox="0 0 24 24"><path d="M4 4h16v12H9l-5 4zM8 9h8M8 12h5"/></svg></span><span class="mi-text"><b data-i18n="mi.notes"></b><small data-i18n="notes.menuTitle"></small></span><kbd>N</kbd></button>
           <button class="menu-item" data-action="split"><span class="mi-icon"><svg viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 13h7v7h-7zM14 4l6 6M20 4l-6 6"/></svg></span><span class="mi-text"><b data-i18n="mi.split"></b><small data-i18n="split.menuTitle"></small></span></button>
           <button class="menu-item" data-action="compare"><span class="mi-icon"><svg viewBox="0 0 24 24"><path d="M8 3v18M16 3v18M3 8h5M16 16h5M3 16h5M16 8h5"/></svg></span><span class="mi-text"><b data-i18n="mi.compare"></b><small data-i18n="tb.compareTitle"></small></span></button>
           <button class="menu-item" data-action="ids"><span class="mi-icon"><svg viewBox="0 0 24 24"><path d="M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/></svg></span><span class="mi-text"><b data-i18n="mi.ids"></b><small data-i18n="tb.idsTitle"></small></span></button>
@@ -651,6 +653,7 @@
             <label class="field"><span data-i18n="prof.to"></span><input id="clr-to" type="text" inputmode="decimal" /></label>
           </div>
           <label class="field"><span data-i18n="clr.profile"></span><select id="clr-profile"></select></label>
+          <p class="muted small" id="clr-region-hint" data-i18n="clr.regionHint" hidden></p>
           <label class="field" id="clr-sides-row" hidden><span data-i18n="clr.sides"></span><select id="clr-sides">
             <option value="both" data-i18n="clr.sidesBoth"></option><option value="right" data-i18n="clr.sideRight"></option><option value="left" data-i18n="clr.sideLeft"></option></select></label>
           <label class="chk" id="clr-p1-row" hidden><input type="checkbox" id="clr-p1" /> <span data-i18n="clr.p1f1"></span></label>
@@ -688,15 +691,22 @@
               <input type="file" id="clr-c-file" accept=".json,application/json" hidden />
             </div>
           </div>
+          <p class="muted small" data-i18n="clr.modelsHint"></p>
           <table class="cor-table clr-models" id="clr-models"></table>
-          <label class="field"><span data-i18n="clr.exclude"></span><textarea id="clr-exclude" rows="2" spellcheck="false" data-i18n-title="clr.excludeTitle"></textarea></label>
-          <button class="btn xs" id="clr-reset-exclude" data-i18n="clr.excludeReset"></button>
+          <div class="field"><span data-i18n="clr.exclude"></span><span class="muted small" data-i18n="clr.excludeTitle"></span>
+            <div id="clr-classes" class="clr-classes"></div></div>
+          <div class="card-btns">
+            <button class="btn xs" id="clr-reset-exclude" data-i18n="clr.excludeReset"></button>
+            <button class="btn xs" id="clr-none-exclude" data-i18n="clr.excludeNone"></button>
+          </div>
         </div>
       </div>
       <div id="clr-results"></div>
       <p class="muted small" data-i18n="clr.note"></p>
       <div class="dialog-btns">
         <button class="btn" data-action="clr-clear" data-i18n="clr.clear"></button>
+        <button class="btn" data-action="clr-ifc-dl" data-i18n="clr.ifcDownload" data-i18n-title="clr.ifcTitle"></button>
+        <button class="btn" data-action="clr-ifc" data-i18n="clr.ifc" data-i18n-title="clr.ifcTitle"></button>
         <button class="btn" data-action="clr-show" data-i18n="clr.show"></button>
         <button class="btn primary" data-action="clr-run" data-i18n="clr.run"></button>
       </div>
@@ -837,6 +847,12 @@
             <label class="chk"><input type="checkbox" data-spot-show="z" /> Z</label>
           </div>
         </div>
+      </section>
+      <section class="set-section" data-settings-section="region">
+        <h3 data-i18n="set.region"></h3>
+        <label class="field"><span data-i18n="set.regionRules"></span>
+          <select id="settings-region"><option value="dk" data-i18n="set.regionDk"></option><option value="all" data-i18n="set.regionAll"></option><option value="none" data-i18n="set.regionNone"></option></select></label>
+        <p class="muted small" data-i18n="set.regionNote"></p>
       </section>
       <section class="set-section" data-settings-section="view">
         <h3 data-i18n="set.view"></h3>

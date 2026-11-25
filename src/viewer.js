@@ -959,8 +959,8 @@ export class Viewer extends EventTarget {
     h.material.opacity = hi ? 0.16 : 0.08;
     h.children[0].material.color.setHex(hi ? 0x0e8c84 : 0x3aa0ff);
     h.children[0].material.opacity = hi ? 1 : 0.6;
-    // the plane pointed at in the list is shown also with the planes off: which one it is
-    h.visible = (this.showPlaneHelpers || hi) && entry.enabled && entry.cut3d !== false && !entry.boxPart;
+    // only with the planes on (settings); the one of the section window is coloured (its cut outline shows where it is)
+    h.visible = this.showPlaneHelpers && entry.enabled && entry.cut3d !== false && !entry.boxPart;
     const box = this.sceneBox();
     const size = box.isEmpty() ? 10 : box.getSize(new THREE.Vector3()).length() * 0.8;
     const center = box.isEmpty() ? new THREE.Vector3() : box.getCenter(new THREE.Vector3());
