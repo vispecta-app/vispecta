@@ -3,26 +3,79 @@
 // are part of screenshots and of the snapshots of BCF issues. Size on screen stays the same however
 // far away they are (scaled before every frame).
 //
-// item: {id, p: Vector3 (viewer coordinates), q: Vector3 | null (arrow head), text, color '#rrggbb'}
+// Markup shapes (#133): revision clouds with a text box, rectangles, ellipses and freehand lines,
+// dragged out on the screen. They lie in a plane square to the view at the depth of the model where
+// the drag began, so they mark what was seen from there (a saved view brings that camera back).
+//
+// item: {id, p: Vector3 (viewer coordinates; the text's anchor), q: Vector3 | null (arrow head),
+//        kind: 'note' | 'arrow' | 'cloud' | 'rect' | 'ellipse' | 'pen', pts: [Vector3] (shapes),
+//        text, color '#rrggbb', width (px)}
 // Saved (projects, views, BCF) in IFC coordinates: toJSON() / fromJSON().
 import * as THREE from 'three';
+import { Line2 } from 'three/addons/lines/Line2.js';
+import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 
 const ORDER = 1e7 + 10; // over the model and the section lines
 const FONT_PX = 13;
 const PAD = 5;
 const HEAD_PX = 14; // length of the arrow head
 const DOT_PX = 7;
+const MAX_PTS = 4000; // points of one shape (a long freehand line is thinned)
 let seq = 1;
 
 export const ANNOT_COLORS = ['#e74c3c', '#f39c12', '#27ae60', '#2980b9', '#8e44ad', '#2c3e50'];
+export const ANNOT_WIDTHS = [2, 4, 7]; // px: thin, medium, thick
+export const SHAPES = ['cloud', 'rect', 'ellipse', 'pen'];
+export const kindOf = (it) => it.kind || (it.q ? 'arrow' : 'note');
+
+/**
+ * The outline of a shape in 2D (u right, v up), from the corners of the dragged box: a revision
+ * cloud (arcs bulging outwards along the edges), a rectangle or an ellipse.
+ */
+export function shapeOutline(kind, u0, v0, u1, v1) {
+  const a = Math.min(u0, u1), b = Math.max(u0, u1), c = Math.min(v0, v1), d = Math.max(v0, v1);
+  const w = b - a, h = d - c;
+  if (kind === 'rect') return [[a, c], [b, c], [b, d], [a, d], [a, c]];
+  if (kind === 'ellipse') {
+    const out = [];
+    for (let i = 0; i <= 72; i++) { const t = (i / 72) * Math.PI * 2; out.push([(a + b) / 2 + (w / 2) * Math.cos(t), (c + d) / 2 + (h / 2) * Math.sin(t)]); }
+    return out;
+  }
+  // cloud: arcs of about a quarter of the short side (at least two per side, at most 24)
+  const target = Math.max(Math.min(w, h) / 4, Math.max(w, h) / 48, 1e-9);
+  const corners = [[a, c], [b, c], [b, d], [a, d]];
+  const cu = (a + b) / 2, cv = (c + d) / 2;
+  const out = [];
+  for (let k = 0; k < 4; k++) {
+    const [x0, y0] = corners[k], [x1, y1] = corners[(k + 1) % 4];
+    const len = Math.hypot(x1 - x0, y1 - y0), n = Math.min(24, Math.max(2, Math.round(len / target)));
+    for (let j = 0; j < n; j++) {
+      const ax = x0 + ((x1 - x0) * j) / n, ay = y0 + ((y1 - y0) * j) / n;
+      const bx = x0 + ((x1 - x0) * (j + 1)) / n, by = y0 + ((y1 - y0) * (j + 1)) / n;
+      const mx = (ax + bx) / 2, my = (ay + by) / 2, r = Math.hypot(bx - ax, by - ay) / 2;
+      const dx = (bx - ax) / (2 * r || 1), dy = (by - ay) / (2 * r || 1);
+      let ox = -dy, oy = dx; // outwards: away from the middle of the box
+      if (ox * (mx - cu) + oy * (my - cv) < 0) { ox = -ox; oy = -oy; }
+      for (let i = 0; i < 8; i++) {
+        const t = (i / 8) * Math.PI;
+        out.push([mx - dx * r * Math.cos(t) + ox * r * Math.sin(t), my - dy * r * Math.cos(t) + oy * r * Math.sin(t)]);
+      }
+    }
+  }
+  out.push(out[0]);
+  return out;
+}
 
 export class AnnotationLayer extends EventTarget {
   constructor(viewer) {
     super();
     this.viewer = viewer;
     this.items = [];
-    this.mode = null; // 'note' | 'arrow' | null
+    this.mode = null; // 'note' | 'arrow' | one of SHAPES | null
     this.color = ANNOT_COLORS[0];
+    this.width = ANNOT_WIDTHS[1];
+    this.mats = new Set(); // line materials: their resolution follows the canvas
     this.pending = null; // arrow: the first point
     this.visible = true;
     this.group = new THREE.Group();
@@ -32,6 +85,7 @@ export class AnnotationLayer extends EventTarget {
     this.pendingDot = this.#dot('#888888');
     this.pendingDot.visible = false;
     this.group.add(this.pendingDot);
+    this.preview = null; // the shape being dragged out
     (viewer.beforeRenderHooks ||= []).push(() => this.#scale());
     this.#bindDrag();
   }
@@ -59,6 +113,21 @@ export class AnnotationLayer extends EventTarget {
         const [w, h] = lab.userData.px;
         if (x >= s.x && x <= s.x + w && y <= s.y && y >= s.y - h) best = { it, end: 'p' };
       }
+      // a shape: on its outline (moves the whole shape)
+      if (!best && it.pts?.length) {
+        let prev = null;
+        const step = Math.max(1, Math.floor(it.pts.length / 400));
+        for (let i = 0; i < it.pts.length && !best; i += step) {
+          const q = this.viewer.toScreen(it.pts[i]);
+          if (q && prev) {
+            const ex = q.x - prev.x, ey = q.y - prev.y, L2 = ex * ex + ey * ey || 1;
+            const tt = Math.max(0, Math.min(1, ((x - prev.x) * ex + (y - prev.y) * ey) / L2));
+            if (Math.hypot(prev.x + ex * tt - x, prev.y + ey * tt - y) < Math.max(6, it.width || 0)) best = { it, end: 'all' };
+          }
+          prev = q;
+        }
+      }
+      if (best) return best;
     }
     return best;
   }
@@ -66,17 +135,34 @@ export class AnnotationLayer extends EventTarget {
   #bindDrag() {
     const v = this.viewer, el = v.renderer.domElement;
     let drag = null;
+    const onPlane = (e, plane) => {
+      const rect = el.getBoundingClientRect();
+      const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+      const ray = new THREE.Raycaster();
+      ray.setFromCamera(ndc, v.camera);
+      return ray.ray.intersectPlane(plane, new THREE.Vector3());
+    };
     v.container.addEventListener('pointerdown', (e) => {
       if (!this.mode || e.button !== 0 || e.target !== el) return;
       const hd = this.handleAt(e.clientX, e.clientY);
-      if (!hd) return;
+      const cam = v.camera.getWorldDirection(new THREE.Vector3());
+      if (!hd && !SHAPES.includes(this.mode)) return;
       // not to the camera controls, and not a click that makes a new note
       e.stopPropagation();
       e.preventDefault();
-      const start = hd.it[hd.end].clone();
-      const cam = v.camera.getWorldDirection(new THREE.Vector3());
-      drag = { ...hd, x: e.clientX, y: e.clientY, moved: false, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(cam, start), id: e.pointerId };
       el.setPointerCapture?.(e.pointerId);
+      if (!hd) {
+        // a new shape: in the plane square to the view through the model under the mouse
+        const at = v.pick(e.clientX, e.clientY)?.point || v.controls?.target?.clone() || new THREE.Vector3();
+        const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(cam, at);
+        const m = v.camera.matrixWorld;
+        const U = new THREE.Vector3().setFromMatrixColumn(m, 0).normalize(), V = new THREE.Vector3().setFromMatrixColumn(m, 1).normalize();
+        drag = { create: this.mode, x: e.clientX, y: e.clientY, moved: false, plane, origin: onPlane(e, plane) || at, U, V, pen: [], last: null };
+        return;
+      }
+      const start = hd.end === 'all' ? null : hd.it[hd.end].clone();
+      const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(cam, start || hd.it.p);
+      drag = { ...hd, x: e.clientX, y: e.clientY, moved: false, plane, grab: onPlane(e, plane), p0: hd.it.p.clone(), pts0: hd.it.pts?.map((q) => q.clone()) || null };
     }, { capture: true });
     window.addEventListener('pointermove', (e) => {
       if (!drag) {
@@ -85,6 +171,18 @@ export class AnnotationLayer extends EventTarget {
       }
       if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 4) return;
       drag.moved = true;
+      if (drag.create) { this.#dragShape(drag, onPlane(e, drag.plane), e); return; }
+      // a shape, or the text of one: moved as a whole, in its plane
+      if (drag.pts0 || drag.end === 'all') {
+        const q = onPlane(e, drag.plane);
+        if (!q || !drag.grab) return;
+        const dlt = q.sub(drag.grab);
+        drag.it.p.copy(drag.p0).add(dlt);
+        if (drag.pts0) drag.it.pts = drag.pts0.map((x) => x.clone().add(dlt));
+        this.#dispose(drag.it.id);
+        this.#build(drag.it);
+        return;
+      }
       // onto the model under the mouse, else at the same depth
       const hit = v.pick(e.clientX, e.clientY);
       let p = hit?.point;
@@ -105,6 +203,7 @@ export class AnnotationLayer extends EventTarget {
       const d = drag;
       drag = null;
       el.releasePointerCapture?.(e.pointerId);
+      if (d.create) { this.#finishShape(d); return; }
       if (d.moved) this.dispatchEvent(Object.assign(new Event('moved'), { item: d.it }));
       else this.dispatchEvent(Object.assign(new Event('edit'), { item: d.it })); // a click on it: its text
       this.#emit();
@@ -114,6 +213,50 @@ export class AnnotationLayer extends EventTarget {
   }
 
   #emit() { this.dispatchEvent(new Event('change')); this.viewer.invalidate?.(); }
+
+  /** The points of a shape being dragged out, from the start to the point q (in the drag's plane). */
+  #shapePoints(d, q) {
+    if (d.create === 'pen') return d.pen;
+    const o = d.origin, w = q.clone().sub(o);
+    const u1 = w.dot(d.U), v1 = w.dot(d.V);
+    return shapeOutline(d.create, 0, 0, u1, v1).map(([u, vv]) => o.clone().addScaledVector(d.U, u).addScaledVector(d.V, vv));
+  }
+
+  #dragShape(d, q, e) {
+    if (!q) return;
+    d.q = q;
+    if (d.create === 'pen') {
+      // a point when the mouse has moved 3 px
+      if (!d.last || Math.hypot(e.clientX - d.last[0], e.clientY - d.last[1]) >= 3) {
+        if (!d.pen.length) d.pen.push(d.origin.clone());
+        d.pen.push(q.clone());
+        d.last = [e.clientX, e.clientY];
+      }
+    }
+    const pts = this.#shapePoints(d, q);
+    if (pts.length < 2) return;
+    if (!this.preview) {
+      this.preview = this.#fatLine(pts, this.color, this.width);
+      this.preview.material.opacity = 0.7;
+      this.group.add(this.preview);
+    } else this.preview.geometry.setPositions(pts.flatMap((x) => [x.x, x.y, x.z]));
+    this.viewer.invalidate?.();
+  }
+
+  #finishShape(d) {
+    if (this.preview) { this.group.remove(this.preview); this.preview.geometry.dispose(); this.mats.delete(this.preview.material); this.preview.material.dispose(); this.preview = null; }
+    if (!d.moved || !d.q) { this.viewer.invalidate?.(); return; }
+    let pts = this.#shapePoints(d, d.q);
+    // too small to mean anything (under 6 px across)
+    const sa = this.viewer.toScreen(d.origin), sb = this.viewer.toScreen(d.q);
+    if (pts.length < 2 || (d.create !== 'pen' && sa && sb && Math.abs(sa.x - sb.x) < 6 && Math.abs(sa.y - sb.y) < 6)) { this.viewer.invalidate?.(); return; }
+    if (pts.length > MAX_PTS) { const k = Math.ceil(pts.length / MAX_PTS); pts = pts.filter((_, i) => i % k === 0 || i === pts.length - 1); }
+    // the text sits at the top left corner of the shape (in the view it was drawn in)
+    let anchor = pts[0], best = -Infinity;
+    for (const x of pts) { const sc = x.dot(d.V) - x.dot(d.U) * 0.5; if (sc > best) { best = sc; anchor = x; } }
+    const it = this.add({ p: anchor, kind: d.create, pts, text: '' });
+    this.dispatchEvent(Object.assign(new Event('created'), { item: it }));
+  }
 
   setMode(mode) {
     this.mode = mode;
@@ -153,8 +296,8 @@ export class AnnotationLayer extends EventTarget {
     return false;
   }
 
-  add({ p, q = null, text = '', color = this.color }) {
-    const it = { id: seq++, p: p.clone(), q: q ? q.clone() : null, text, color };
+  add({ p, q = null, kind = null, pts = null, text = '', color = this.color, width = this.width }) {
+    const it = { id: seq++, p: p.clone(), q: q ? q.clone() : null, kind: kind || (q ? 'arrow' : 'note'), pts: pts ? pts.map((x) => x.clone()) : null, text, color, width };
     this.items.push(it);
     this.#build(it);
     this.#emit();
@@ -194,7 +337,7 @@ export class AnnotationLayer extends EventTarget {
   box(id) {
     const it = this.items.find((x) => x.id === id);
     if (!it) return null;
-    const b = new THREE.Box3().setFromPoints(it.q ? [it.p, it.q] : [it.p]);
+    const b = new THREE.Box3().setFromPoints([it.p, ...(it.q ? [it.q] : []), ...(it.pts || [])]);
     return b.expandByScalar(Math.max(1, b.getSize(new THREE.Vector3()).length() * 0.3));
   }
 
@@ -202,7 +345,10 @@ export class AnnotationLayer extends EventTarget {
   toJSON() {
     const v = this.viewer;
     const ifc = (p) => v.toIfc(p.clone()).toArray().map((x) => Math.round(x * 1e4) / 1e4);
-    return this.items.map((it) => ({ p: ifc(it.p), ...(it.q ? { q: ifc(it.q) } : {}), text: it.text, color: it.color }));
+    return this.items.map((it) => ({
+      p: ifc(it.p), ...(it.q ? { q: ifc(it.q) } : {}), ...(it.pts ? { kind: it.kind, pts: it.pts.map(ifc) } : {}),
+      text: it.text, color: it.color, ...(it.width && it.width !== ANNOT_WIDTHS[1] ? { width: it.width } : {}),
+    }));
   }
 
   fromJSON(list) {
@@ -212,17 +358,29 @@ export class AnnotationLayer extends EventTarget {
       if (!Array.isArray(x?.p) || x.p.length < 3 || !x.p.every(Number.isFinite)) continue;
       const q = Array.isArray(x.q) && x.q.length >= 3 && x.q.every(Number.isFinite) ? this.viewer.fromIfc(...x.q) : null;
       const color = /^#[0-9a-f]{6}$/i.test(x.color) ? x.color : ANNOT_COLORS[0];
-      const it = { id: seq++, p: this.viewer.fromIfc(...x.p), q, text: String(x.text ?? '').slice(0, 2000), color };
+      // shapes (from a project or view file): only well-formed points, and not too many
+      const okPt = (a) => Array.isArray(a) && a.length >= 3 && a.slice(0, 3).every(Number.isFinite);
+      const pts = SHAPES.includes(x.kind) && Array.isArray(x.pts) && x.pts.length >= 2 && x.pts.length <= MAX_PTS && x.pts.every(okPt)
+        ? x.pts.map((a) => this.viewer.fromIfc(a[0], a[1], a[2])) : null;
+      const width = ANNOT_WIDTHS.includes(x.width) ? x.width : ANNOT_WIDTHS[1];
+      const it = { id: seq++, p: this.viewer.fromIfc(...x.p), q, kind: pts ? x.kind : (q ? 'arrow' : 'note'), pts, text: String(x.text ?? '').slice(0, 2000), color, width };
       this.items.push(it);
       this.#build(it);
     }
     this.#emit();
   }
 
-  /** Arrows as BCF lines (IFC coordinates). */
+  /** Arrows and the outlines of shapes as BCF lines (IFC coordinates; at most 2000 segments). */
   bcfLines() {
-    const v = this.viewer;
-    return this.items.filter((it) => it.q).map((it) => ({ start: v.toIfc(it.p.clone()).toArray(), end: v.toIfc(it.q.clone()).toArray() }));
+    const v = this.viewer, I = (p) => v.toIfc(p.clone()).toArray();
+    const out = this.items.filter((it) => it.q).map((it) => ({ start: I(it.p), end: I(it.q) }));
+    for (const it of this.items) {
+      if (!it.pts) continue;
+      const k = Math.max(1, Math.ceil(it.pts.length / 200)); // a shape in at most ~200 segments
+      const pts = it.pts.filter((_, i) => i % k === 0 || i === it.pts.length - 1);
+      for (let i = 0; i + 1 < pts.length && out.length < 2000; i++) out.push({ start: I(pts[i]), end: I(pts[i + 1]) });
+    }
+    return out;
   }
 
   // --------------------------------------------------------------- drawing
@@ -254,7 +412,7 @@ export class AnnotationLayer extends EventTarget {
     const tail = 8; // the pointer under the box
     c.width = (w + 2) * dpr; c.height = (h + tail + 2) * dpr;
     g.scale(dpr, dpr);
-    g.font = font;
+    g.font = `600 ${FONT_PX}px system-ui, -apple-system, "Segoe UI", sans-serif`; // CSS px: the context is scaled by dpr
     // box with a pointer at its lower left corner (the anchor)
     g.fillStyle = 'rgba(255,255,255,0.94)';
     g.strokeStyle = color;
@@ -281,14 +439,28 @@ export class AnnotationLayer extends EventTarget {
     return s;
   }
 
+  #fatLine(pts, color, width) {
+    const g = new LineGeometry();
+    g.setPositions(pts.flatMap((x) => [x.x, x.y, x.z]));
+    const mat = new LineMaterial({ color: new THREE.Color(color), linewidth: width || ANNOT_WIDTHS[1], worldUnits: false, depthTest: false, depthWrite: false, transparent: true });
+    const r = this.viewer.renderer.domElement;
+    mat.resolution.set(r.width, r.height);
+    this.mats.add(mat);
+    const l = new Line2(g, mat);
+    l.renderOrder = ORDER;
+    l.frustumCulled = false;
+    l.raycast = () => {};
+    return l;
+  }
+
   #build(it) {
     const o = {};
     const col = new THREE.Color(it.color);
-    if (it.q) {
-      const mat = new THREE.LineBasicMaterial({ color: col, depthTest: false, depthWrite: false, transparent: true });
-      o.line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([it.p, it.q]), mat);
-      o.line.renderOrder = ORDER;
-      o.line.frustumCulled = false;
+    if (it.pts) {
+      o.shape = this.#fatLine(it.pts, it.color, it.width);
+      this.group.add(o.shape);
+    } else if (it.q) {
+      o.line = this.#fatLine([it.p, it.q], it.color, Math.max(2, (it.width || ANNOT_WIDTHS[1]) - 1));
       const cone = new THREE.ConeGeometry(0.35, 1, 12).translate(0, -0.5, 0); // tip at the origin
       o.head = new THREE.Mesh(cone, new THREE.MeshBasicMaterial({ color: col, depthTest: false, depthWrite: false, transparent: true }));
       o.head.renderOrder = ORDER + 1;
@@ -297,12 +469,13 @@ export class AnnotationLayer extends EventTarget {
       o.head.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), it.q.clone().sub(it.p).normalize());
       o.head.userData.px = [HEAD_PX, HEAD_PX];
       this.group.add(o.line, o.head);
-    } else {
+    } else if (!it.pts) {
       o.dot = this.#dot(it.color);
       o.dot.position.copy(it.p);
       this.group.add(o.dot);
     }
-    if (it.text.trim() || !it.q) {
+    // the text box: always for notes and clouds (a cloud is a remark), else when there is a text
+    if (it.text.trim() || (!it.q && !it.pts) || it.kind === 'cloud') {
       o.label = this.#label(it.text.trim() || '…', it.color);
       o.label.position.copy(it.p);
       this.group.add(o.label);
@@ -319,6 +492,7 @@ export class AnnotationLayer extends EventTarget {
       this.group.remove(x);
       x.geometry?.dispose();
       x.material?.map?.dispose();
+      this.mats.delete(x.material);
       x.material?.dispose();
     }
     this.objs.delete(id);
@@ -334,7 +508,9 @@ export class AnnotationLayer extends EventTarget {
   }
 
   #scale() {
-    if (!this.group.visible || (!this.items.length && !this.pendingDot.visible)) return;
+    if (!this.group.visible || (!this.items.length && !this.pendingDot.visible && !this.preview)) return;
+    const r = this.viewer.renderer.domElement;
+    for (const m of this.mats) m.resolution.set(r.width, r.height);
     for (const s of this.group.children) {
       const px = s.userData.px;
       if (!px) continue;

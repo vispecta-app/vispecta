@@ -660,6 +660,33 @@ async function main() {
     await page2.mouse.up();
     const moved = await page2.evaluate((b) => { const { notes, viewer } = window.onlineIfc, r = viewer.renderer.domElement.getBoundingClientRect(), s = viewer.toScreen(notes.items[0].p); return { n: notes.items.length, dx: r.left + s.x - b.x, text: notes.items[0].text }; }, noteAt);
     check('annotations: a note is moved by dragging it (no new note, the camera stays)', moved.n === 1 && Math.abs(moved.dx - 60) < 6 && moved.text === 'Mast 12: check', JSON.stringify(moved));
+    // markup shapes (#133): a revision cloud dragged out (its text box gets the text), a freehand line
+    await page2.click('#notes-modes [data-notes="cloud"]');
+    const cx = noteAt.x - 120, cy = noteAt.y - 60;
+    await page2.mouse.move(cx, cy);
+    await page2.mouse.down();
+    await page2.mouse.move(cx + 60, cy + 30, { steps: 4 });
+    await page2.mouse.move(cx + 110, cy + 70, { steps: 4 });
+    await page2.mouse.up();
+    await page2.waitForFunction(() => document.activeElement?.matches('#notes-list textarea'));
+    await page2.keyboard.type('Ret her');
+    await page2.waitForFunction(() => window.onlineIfc.notes.items.some((x) => x.kind === 'cloud' && x.text === 'Ret her'));
+    await page2.click('#notes-modes [data-notes="pen"]');
+    await page2.mouse.move(cx, cy + 120);
+    await page2.mouse.down();
+    for (let i = 1; i <= 10; i++) await page2.mouse.move(cx + i * 12, cy + 120 + Math.sin(i) * 15);
+    await page2.mouse.up();
+    const shapes = await page2.evaluate(() => {
+      const { notes, viewer } = window.onlineIfc;
+      const cloud = notes.items.find((x) => x.kind === 'cloud'), pen = notes.items.find((x) => x.kind === 'pen');
+      const json = notes.toJSON();
+      const r = viewer.renderer.domElement.getBoundingClientRect(), a = viewer.toScreen(cloud.pts[0]);
+      return { n: notes.items.length, cloud: cloud?.pts.length, pen: pen?.pts.length, kinds: json.map((x) => x.kind || '-').join(','), lines: notes.bcfLines().length, onScreen: !!a && a.x > 0 && a.x < r.width,
+};
+    });
+    check('annotations: a revision cloud with its text and a freehand line, saved with their shape (and as BCF lines)',
+      shapes.n === 3 && shapes.cloud > 60 && shapes.pen >= 5 && shapes.kinds === '-,cloud,pen' && shapes.lines > 60 && shapes.onScreen, JSON.stringify(shapes));
+    await page2.evaluate(() => { const { notes } = window.onlineIfc; for (const it of notes.items.filter((x) => x.pts)) notes.remove(it.id); notes.setMode('note'); });
     const ann = await page2.evaluate(() => {
       const { notes, views, viewer } = window.onlineIfc;
       notes.add({ p: notes.items[0].p.clone(), q: notes.items[0].p.clone().add(new notes.items[0].p.constructor(3, 2, 0)), text: 'here' });

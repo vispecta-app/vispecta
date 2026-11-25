@@ -722,6 +722,22 @@ const en = {
   'models.aliasTitle': 'Give the model an alias (or double click the name) – the file name stays visible',
   'models.details': 'Show / hide the details',
   // structure gauge (#127), distance between objects (#128), split (#129), annotations (#130)
+  'notes.cloud': "Cloud",
+  'notes.cloudTitle': "Revision cloud with a text box – drag over what it is about",
+  'notes.rect': "Rectangle",
+  'notes.rectTitle': "Rectangle – drag it out",
+  'notes.ellipse': "Ellipse",
+  'notes.ellipseTitle': "Ellipse or circle – drag it out",
+  'notes.pen': "Freehand",
+  'notes.penTitle': "Freehand line – draw with the mouse",
+  'notes.width': "Line width",
+  'notes.thin': "Thin",
+  'notes.medium': "Medium",
+  'notes.thick': "Thick",
+  'notes.hint.cloud': "Drag a cloud over what it is about, then type the remark. Rotate with the right mouse button.",
+  'notes.hint.rect': "Drag a rectangle. Rotate with the right mouse button.",
+  'notes.hint.ellipse': "Drag an ellipse. Rotate with the right mouse button.",
+  'notes.hint.pen': "Draw with the left mouse button held down. Rotate with the right mouse button.",
   'tb.annotate': "Annotate",
   'clr.regionHint': "The national profiles are shown when national rules are chosen in the settings (⚙ → National rules). Your own profiles are always here.",
   'clr.modelsHint': "Models to check. Mark the overhead line models: they are not checked against the profile over the upper part.",
@@ -935,13 +951,14 @@ export function decimalSign() {
   return (1.5).toLocaleString(LOCALES[lang]).includes(',') ? ',' : '.';
 }
 
-/** Translates static HTML marked with data-i18n, data-i18n-title, data-i18n-placeholder and data-i18n-html. */
+/** Translates static HTML marked with data-i18n, data-i18n-title, data-i18n-placeholder, data-i18n-aria-label and data-i18n-html. */
 export function applyStaticTranslations(root = document) {
   document.documentElement.lang = lang;
   for (const el of root.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
   for (const el of root.querySelectorAll('[data-i18n-html]')) el.innerHTML = t(el.dataset.i18nHtml);
   for (const el of root.querySelectorAll('[data-i18n-title]')) el.title = t(el.dataset.i18nTitle);
   for (const el of root.querySelectorAll('[data-i18n-placeholder]')) el.placeholder = t(el.dataset.i18nPlaceholder);
+  for (const el of root.querySelectorAll('[data-i18n-aria-label]')) el.setAttribute('aria-label', t(el.dataset.i18nAriaLabel)); // icon buttons
 }
 
 export const LANGUAGES = Object.keys(LOCALES);
