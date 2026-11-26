@@ -1618,6 +1618,9 @@ export const issues = new IssuesPanel({
   },
   setSpacesVisible: (v) => { state.spacesVisible = v; updateSpacesUi(); },
   afterVisibility: () => { refreshVisibilityUi(); renderPlanes(); },
+  // the issue report (#134): where an issue is, on the nearest alignment
+  locate: (p) => (alignmentLayer.alignments?.length ? alignmentLayer.locate(p) : null),
+  formatStation,
 });
 
 const views = new ViewsPanel({
@@ -2252,4 +2255,4 @@ const standalone = window.matchMedia?.('(display-mode: standalone), (display-mod
 const appTitle = () => { if (standalone?.matches || navigator.standalone) document.title = 'Vispecta'; };
 appTitle();
 standalone?.addEventListener?.('change', appTitle);
-window.onlineIfc = { viewer, state, openFiles, python, measure, notes, views, walk, drawnPaths, projects, history, get secViewer() { return secViewer; } };
+window.onlineIfc = { viewer, state, openFiles, python, measure, notes, issues, views, walk, drawnPaths, projects, history, get secViewer() { return secViewer; } };

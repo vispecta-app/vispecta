@@ -660,6 +660,33 @@ async function main() {
     await page2.mouse.up();
     const moved = await page2.evaluate((b) => { const { notes, viewer } = window.onlineIfc, r = viewer.renderer.domElement.getBoundingClientRect(), s = viewer.toScreen(notes.items[0].p); return { n: notes.items.length, dx: r.left + s.x - b.x, text: notes.items[0].text }; }, noteAt);
     check('annotations: a note is moved by dragging it (no new note, the camera stays)', moved.n === 1 && Math.abs(moved.dx - 60) < 6 && moved.text === 'Mast 12: check', JSON.stringify(moved));
+    // markup shapes (#133): a revision cloud dragged out (its text box gets the text), a freehand line
+    await page2.click('#notes-modes [data-notes="cloud"]');
+    const cx = noteAt.x - 120, cy = noteAt.y - 60;
+    await page2.mouse.move(cx, cy);
+    await page2.mouse.down();
+    await page2.mouse.move(cx + 60, cy + 30, { steps: 4 });
+    await page2.mouse.move(cx + 110, cy + 70, { steps: 4 });
+    await page2.mouse.up();
+    await page2.waitForFunction(() => document.activeElement?.matches('#notes-list textarea'));
+    await page2.keyboard.type('Ret her');
+    await page2.waitForFunction(() => window.onlineIfc.notes.items.some((x) => x.kind === 'cloud' && x.text === 'Ret her'));
+    await page2.click('#notes-modes [data-notes="pen"]');
+    await page2.mouse.move(cx, cy + 120);
+    await page2.mouse.down();
+    for (let i = 1; i <= 10; i++) await page2.mouse.move(cx + i * 12, cy + 120 + Math.sin(i) * 15);
+    await page2.mouse.up();
+    const shapes = await page2.evaluate(() => {
+      const { notes, viewer } = window.onlineIfc;
+      const cloud = notes.items.find((x) => x.kind === 'cloud'), pen = notes.items.find((x) => x.kind === 'pen');
+      const json = notes.toJSON();
+      const r = viewer.renderer.domElement.getBoundingClientRect(), a = viewer.toScreen(cloud.pts[0]);
+      return { n: notes.items.length, cloud: cloud?.pts.length, pen: pen?.pts.length, kinds: json.map((x) => x.kind || '-').join(','), lines: notes.bcfLines().length, onScreen: !!a && a.x > 0 && a.x < r.width,
+};
+    });
+    check('annotations: a revision cloud with its text and a freehand line, saved with their shape (and as BCF lines)',
+      shapes.n === 3 && shapes.cloud > 60 && shapes.pen >= 5 && shapes.kinds === '-,cloud,pen' && shapes.lines > 60 && shapes.onScreen, JSON.stringify(shapes));
+    await page2.evaluate(() => { const { notes } = window.onlineIfc; for (const it of notes.items.filter((x) => x.pts)) notes.remove(it.id); notes.setMode('note'); });
     const ann = await page2.evaluate(() => {
       const { notes, views, viewer } = window.onlineIfc;
       notes.add({ p: notes.items[0].p.clone(), q: notes.items[0].p.clone().add(new notes.items[0].p.constructor(3, 2, 0)), text: 'here' });
@@ -676,6 +703,51 @@ async function main() {
     check('annotations: a note and an arrow in the view, kept in a saved view (arrow as a BCF line)',
       ann.sprites >= 3 && ann.cleared === 0 && JSON.stringify(ann.back) === '[["Mast 12: check",false],["here",true]]' && ann.near && ann.lines === 1, JSON.stringify(ann));
     await page2.evaluate(() => window.onlineIfc.notes.clear());
+    // BCF round trip of annotations (#134) and the issue report
+    await page2.evaluate(() => {
+      const { notes, viewer, issues, state } = window.onlineIfc;
+      const m = viewer.models.find((x) => x.name === '06-Overhead-line.ifc');
+      const id = [...m.elementIds][0];
+      state.selection.clear(); state.selection.set(m, new Set([id]));
+      const c = m.getBox([id]).getCenter(viewer.camera.position.clone()), V3 = c.constructor;
+      notes.add({ p: c, text: 'Mast 12: check' });
+      const pts = [0, 1, 2, 3, 4].map((i) => c.clone().add(new V3(Math.cos(i * 1.5), 2 + Math.sin(i * 1.5), 0)));
+      notes.add({ p: pts[0], kind: 'cloud', pts: [...pts, pts[0]], text: 'Ret her' });
+      issues.topics.length = 0;
+      issues.create({ title: 'Mast <img src=x onerror=alert(1)> | 12', description: 'Linje 1\nLinje 2', type: 'Issue', priority: 'High', assignedTo: 'RM' });
+    });
+    const [bcfDl] = await Promise.all([page2.waitForEvent('download'), page2.evaluate(() => window.onlineIfc.issues.export())]);
+    const bcfBytes = fs.readFileSync(await bcfDl.path());
+    const { unzipSync, zipSync: zip2, strFromU8 } = await import('fflate');
+    const bz = unzipSync(new Uint8Array(bcfBytes));
+    const names = Object.keys(bz);
+    const markupFile = names.find((n) => n.endsWith('markup.bcf')), jsonFile = names.find((n) => n.endsWith('.vispecta.json')), bcfv = names.find((n) => n.endsWith('.bcfv'));
+    const mkXml = strFromU8(bz[markupFile]);
+    const rt = { json: !!jsonFile, lines: (strFromU8(bz[bcfv]).match(/<Line>/g) || []).length, comment: /1\. Note: Mast 12: check/.test(mkXml) && /2\. Cloud: Ret her/.test(mkXml) };
+    // back in: the annotations as they were; and a BCF without our file (another program): lines joined
+    const back = async (bytes, name) => {
+      await page2.evaluate(() => { const { notes, issues } = window.onlineIfc; notes.clear(); issues.topics.length = 0; });
+      await page2.setInputFiles('#file-input', { name, mimeType: 'application/zip', buffer: Buffer.from(bytes) });
+      await page2.waitForFunction(() => window.onlineIfc.issues.topics.length === 1);
+      return page2.evaluate(() => {
+        const { notes, issues } = window.onlineIfc, tp = issues.topics[0];
+        issues.show(tp);
+        return { kinds: notes.items.map((x) => `${x.kind}:${x.text}`).join(','), comments: tp.comments.length };
+      });
+    };
+    rt.same = await back(bcfBytes, 'round.bcfzip');
+    const other = {}; for (const n of names) if (!n.endsWith('.vispecta.json')) other[n] = bz[n];
+    rt.other = await back(zip2(other), 'other.bcfzip');
+    check('BCF: annotations come back as they were; texts in a comment; lines of other programs joined, not one arrow each',
+      rt.json && rt.lines === 5 && rt.comment && rt.same.kinds === 'note:Mast 12: check,cloud:Ret her' && rt.same.comments === 0 && rt.other.kinds === 'pen:' && rt.other.comments === 1, JSON.stringify(rt));
+    // the issue report: Markdown and HTML (escaped) with the snapshot and where the issue is
+    await page2.evaluate(() => document.querySelector('.tab[data-tab="issues"]')?.click());
+    const [repDl] = await Promise.all([page2.waitForEvent('download'), page2.evaluate(() => window.onlineIfc.issues.report())]);
+    const rz = unzipSync(new Uint8Array(fs.readFileSync(await repDl.path())));
+    const rmd = strFromU8(rz['report.md']), rhtml = strFromU8(rz['report.html']);
+    const rep = { files: Object.keys(rz).sort().join(','), station: /station \d/.test(rmd), notes: /Cloud: Ret her/.test(rmd), escaped: !/<img src=x/.test(rhtml) && /&lt;img src=x/.test(rhtml), md: /\\\| 12/.test(rmd), img: /data:image\/png;base64,/.test(rhtml) };
+    check('issue report: Markdown and HTML with snapshot, station and the annotations (HTML escaped)', rep.files === 'images/01-1.png,report.html,report.md' && rep.station && rep.notes && rep.escaped && rep.md && rep.img, JSON.stringify(rep));
+    await page2.evaluate(() => { const { notes, issues, state } = window.onlineIfc; notes.clear(); issues.topics.length = 0; issues.render(); state.selection.clear(); });
     // split (#129): five elements of the overhead line as a new IFC file, opened in the view
     const nBeforeSplit = await page2.evaluate(() => {
       const { viewer, state } = window.onlineIfc;

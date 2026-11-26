@@ -569,6 +569,10 @@ body.py-open .planes-panel { max-height: calc(100% - 60px); }
 .notes-color { width: 18px; height: 18px; border-radius: 50%; border: 2px solid transparent; background: var(--c); padding: 0; cursor: pointer; }
 .notes-color.on { border-color: var(--text, #222); box-shadow: 0 0 0 2px var(--bg, #fff) inset; }
 .notes-item { border-top: 1px solid var(--border); padding: 6px 0; --m-color: var(--c); }
+.notes-width { font-size: 12px; padding: 1px 4px; width: auto; flex: none; }
+.notes-panel .measure-opts { flex-wrap: wrap; row-gap: 4px; }
+#notes-modes button { padding: 4px 6px; }
+#notes-modes svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
 .notes-swatch { border: 0; padding: 0; cursor: pointer; width: 14px; height: 14px; }
 .notes-item-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
 .notes-item textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 28px; font: inherit; }

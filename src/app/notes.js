@@ -2,7 +2,7 @@
 // The drawing is in ../annotations.js.
 import * as THREE from 'three';
 import { t } from '../i18n.js';
-import { ANNOT_COLORS, AnnotationLayer } from '../annotations.js';
+import { ANNOT_COLORS, AnnotationLayer, SHAPES, kindOf } from '../annotations.js';
 import { $, $$, h, toast, viewer } from './core.js';
 import { projects, setMeasureMode } from '../main.js';
 
@@ -41,7 +41,7 @@ function render() {
   panel.hidden = !open;
   for (const b of $$('[data-action="notes"]')) b.classList.toggle('on', !!notes.mode);
   for (const b of $$('#notes-modes [data-notes]')) b.classList.toggle('on', b.dataset.notes === notes.mode);
-  $('#notes-hint').textContent = t(notes.mode === 'arrow' ? (notes.pending ? 'notes.hint.arrow2' : 'notes.hint.arrow') : notes.mode === 'note' ? 'notes.hint.note' : 'notes.hint.off')
+  $('#notes-hint').textContent = t(notes.mode === 'arrow' ? (notes.pending ? 'notes.hint.arrow2' : 'notes.hint.arrow') : notes.mode === 'note' ? 'notes.hint.note' : SHAPES.includes(notes.mode) ? `notes.hint.${notes.mode}` : 'notes.hint.off')
     + (notes.items.length && notes.mode ? ` ${t('notes.hint.move')}` : '');
   $('#notes-colors').replaceChildren(...ANNOT_COLORS.map((c) => h('button', {
     class: `notes-color${c === notes.color ? ' on' : ''}`, style: `--c:${c}`, title: c, type: 'button',
@@ -64,7 +64,7 @@ function render() {
       return h('div', { class: 'notes-item', style: `--c:${it.color}` },
         h('div', { class: 'notes-item-head' },
           h('button', { class: 'm-swatch notes-swatch', type: 'button', title: t('notes.colour'), onclick: () => { notes.update(it.id, { color: ANNOT_COLORS[(ANNOT_COLORS.indexOf(it.color) + 1) % ANNOT_COLORS.length] }); projects.touch?.(); } }),
-          h('a', { class: 'm-title', text: `${it.q ? t('notes.arrow') : t('notes.note')} ${i + 1}`, title: t('measure.zoomTo'), onclick: () => zoomTo(it.id) }),
+          h('a', { class: 'm-title', text: `${t(`notes.${kindOf(it)}`)} ${i + 1}`, title: t('measure.zoomTo'), onclick: () => zoomTo(it.id) }),
           h('span', { class: 'spacer' }),
           h('button', { class: 'icon-btn', title: t('notes.delete'), text: '✕', onclick: () => { notes.remove(it.id); projects.touch?.(); } })),
         ta);
@@ -90,6 +90,8 @@ export function initNotes() {
   notes.addEventListener('change', render);
   notes.addEventListener('moved', () => projects.touch?.());
   notes.addEventListener('edit', ({ item }) => { focusId = item.id; render(); });
+  notes.addEventListener('created', ({ item }) => { focusId = item.id; render(); projects.touch?.(); }); // a shape: its text box
+  $('#notes-width').addEventListener('change', (e) => { notes.width = +e.target.value || 4; });
   for (const b of $$('#notes-modes [data-notes]')) b.addEventListener('click', () => notes.setMode(b.dataset.notes));
   $('#notes-show').addEventListener('change', (e) => notes.setVisible(e.target.checked));
   render();

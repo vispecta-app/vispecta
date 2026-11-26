@@ -155,7 +155,7 @@ export function applyViewpoint(vp, ctx) {
   // another program become arrows. Older views without them leave the annotations as they are.
   if (viewer.annotations) {
     if (Array.isArray(vp.markup)) viewer.annotations.fromJSON(vp.markup);
-    else if (vp.lines?.length) viewer.annotations.fromJSON(vp.lines.map((l) => ({ p: l.start, q: l.end, text: '' })));
+    else if (vp.lines?.length) viewer.annotations.fromJSON(linesToMarkup(vp.lines));
   }
   // selection
   ctx.setSelection(resolve(vp.selection || []));
@@ -207,6 +207,52 @@ function viewpointXml(vp, version) {
   return `${XML_HEAD}<VisualizationInfo Guid="${vp.guid}">${components}${camera}${lines}${clip}</VisualizationInfo>`;
 }
 
+// ------------------------------------------------------------ annotations in BCF (#134)
+// BCF has no notes or clouds with text: the snapshot shows them, the viewpoint's Lines carry their
+// outlines, and Vispecta adds two things other programs pass over – a file with the annotations as
+// they are (viewpoint-<guid>.vispecta.json, read back by Vispecta) and a comment with their texts.
+const MARKUP_FILE_MAX = 5 * 1024 * 1024;
+
+/** The GUID of the comment with the texts of a viewpoint's annotations: the same at every export. */
+export function markupCommentGuid(vpGuid) {
+  let h1 = 0x811c9dc5, h2 = 0x01000193;
+  for (const c of `vispecta-markup:${vpGuid}`) { h1 = Math.imul(h1 ^ c.charCodeAt(0), 16777619) >>> 0; h2 = Math.imul(h2 + c.charCodeAt(0), 2246822519) >>> 0; }
+  const x = (h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0') + (h1 ^ h2).toString(16).padStart(8, '0')).padEnd(32, '0');
+  return `${x.slice(0, 8)}-${x.slice(8, 12)}-4${x.slice(13, 16)}-a${x.slice(17, 20)}-${x.slice(20, 32)}`;
+}
+
+/**
+ * Lines of a BCF viewpoint from another program as annotations: lines that join end to start make one
+ * freehand line; a line on its own becomes an arrow.
+ */
+export function linesToMarkup(lines) {
+  const same = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < 1e-6;
+  const out = [];
+  let chain = null;
+  const flush = () => {
+    if (!chain) return;
+    if (chain.length === 2) out.push({ p: chain[0], q: chain[1], text: '' });
+    else out.push({ p: chain[0], kind: 'pen', pts: chain.slice(0, 4000), text: '' });
+    chain = null;
+  };
+  for (const l of lines) {
+    if (chain && same(chain.at(-1), l.start)) chain.push(l.end);
+    else { flush(); chain = [l.start, l.end]; }
+  }
+  flush();
+  return out;
+}
+
+/** The comment with the texts of the annotations of a viewpoint (null: none has a text). */
+function markupComment(vp, topic, kindName) {
+  const items = (vp.markup || []).map((m, i) => ({ i: i + 1, kind: m.kind || (m.q ? 'arrow' : 'note'), text: String(m.text || '').trim() })).filter((m) => m.text);
+  if (!items.length) return null;
+  return {
+    guid: markupCommentGuid(vp.guid), date: topic.modified || topic.created || new Date().toISOString(), author: topic.modifiedAuthor || topic.author || 'Vispecta',
+    text: items.map((m) => `${m.i}. ${kindName(m.kind)}: ${m.text}`).join('\n'), viewpoint: vp.guid,
+  };
+}
+
 function markupXml(topic, files, version) {
   const f = files.map((x) => `<File IfcProject="${esc(x.project)}" ${version === '3.0' ? 'IsExternal' : 'isExternal'}="true">${el('Filename', x.name)}${el('Date', x.date)}</File>`).join('');
   const header = version === '3.0' ? `<Header><Files>${f}</Files></Header>` : `<Header>${f}</Header>`;
@@ -228,8 +274,11 @@ function markupXml(topic, files, version) {
   return `${XML_HEAD}<Markup>${header}<Topic ${attrs}>${topicBody}</Topic>${topic.comments.map(comment).join('')}${topic.viewpoints.map(vpRef).join('')}</Markup>`;
 }
 
-/** Builds a .bcfzip (Uint8Array). files: [{name, project (IfcProject GlobalId), date}] */
-export function exportBcf(topics, files, version = '2.1', projectName = 'Vispecta') {
+/**
+ * Builds a .bcfzip (Uint8Array). files: [{name, project (IfcProject GlobalId), date}]
+ * opts.kindName(kind): the word for an annotation in the comment with their texts.
+ */
+export function exportBcf(topics, files, version = '2.1', projectName = 'Vispecta', { kindName = (k) => k } = {}) {
   const zip = {};
   zip['bcf.version'] = strToU8(`${XML_HEAD}<Version VersionId="${version}"${version === '2.1' ? ' xsi:noNamespaceSchemaLocation="version.xsd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"' : ''}>${version === '2.1' ? '<DetailedVersion>2.1</DetailedVersion>' : ''}</Version>`);
   const projectId = uuid();
@@ -246,9 +295,14 @@ export function exportBcf(topics, files, version = '2.1', projectName = 'Vispect
   }
   for (const topic of topics) {
     const dir = `${topic.guid}/`;
-    zip[`${dir}markup.bcf`] = strToU8(markupXml(topic, files, version));
+    // the comments with the texts of the annotations: made again from the annotations at every export
+    const made = new Set(topic.viewpoints.map((v) => markupCommentGuid(v.guid)));
+    const extra = topic.viewpoints.map((v) => markupComment(v, topic, kindName)).filter(Boolean);
+    const comments = [...topic.comments.filter((c) => !made.has(c.guid)), ...extra];
+    zip[`${dir}markup.bcf`] = strToU8(markupXml({ ...topic, comments }, files, version));
     for (const v of topic.viewpoints) {
       zip[`${dir}viewpoint-${v.guid}.bcfv`] = strToU8(viewpointXml(v, version));
+      if (Array.isArray(v.markup) && v.markup.length) zip[`${dir}viewpoint-${v.guid}.vispecta.json`] = strToU8(JSON.stringify({ format: 'vispecta-markup', version: 1, markup: v.markup }));
       if (v.snapshot) zip[`${dir}snapshot-${v.guid}.png`] = [v.snapshot, { level: 0 }];
     }
   }
@@ -296,7 +350,7 @@ function parseViewpoint(xml, guid) {
 // Unpacking a .bcfzip: only the files BCF uses, and within limits, so a crafted archive (a "zip
 // bomb": a small file that unpacks to gigabytes) cannot freeze or crash the page. The size each
 // entry declares bounds what is unpacked (fflate writes into a buffer of that size).
-const BCF_FILE = /(^|\/)(bcf\.version|[^/]+\.(bcf|bcfv|bcfp|png|jpe?g))$/i;
+const BCF_FILE = /(^|\/)(bcf\.version|[^/]+\.(bcf|bcfv|bcfp|png|jpe?g)|viewpoint-[^/]+\.vispecta\.json)$/i;
 const BCF_MAX_FILE = 50 * 1024 * 1024, BCF_MAX_TOTAL = 500 * 1024 * 1024, BCF_MAX_FILES = 20000;
 
 /** The entries of a .bcfzip that importBcf reads (exported for the tests). */
@@ -305,6 +359,7 @@ export function unzipBcf(bytes) {
   return unzipSync(bytes, {
     filter: (f) => {
       if (!BCF_FILE.test(f.name)) return false;
+      if (/\.vispecta\.json$/i.test(f.name) && f.originalSize > MARKUP_FILE_MAX) return false; // Vispecta's own annotations: small, else left out
       if (f.originalSize > BCF_MAX_FILE) throw new Error(`${f.name}: too large (${Math.round(f.originalSize / 1048576)} MB)`);
       total += f.originalSize;
       if (total > BCF_MAX_TOTAL || ++count > BCF_MAX_FILES) throw new Error('the BCF file unpacks to too much data');
@@ -351,6 +406,14 @@ export function importBcf(bytes) {
       const vp = parseViewpoint(xml, v.getAttribute('Guid'));
       vp.guid = v.getAttribute('Guid') || vp.guid;
       if (snap && files[dir + snap]) vp.snapshot = files[dir + snap];
+      // Vispecta's annotations of this viewpoint (#134): as they were; fromJSON checks every value
+      const mk = read(`${dir}viewpoint-${vp.guid}.vispecta.json`);
+      if (mk) {
+        try {
+          const j = JSON.parse(mk);
+          if (j?.format === 'vispecta-markup' && Array.isArray(j.markup)) vp.markup = j.markup.slice(0, 1000);
+        } catch { /* not ours, or broken: the lines are used */ }
+      }
       topic.viewpoints.push(vp);
     }
     // BCF 2.0/2.1 without a Viewpoints element: default file names
@@ -359,6 +422,9 @@ export function importBcf(bytes) {
       if (files[`${dir}snapshot.png`]) vp.snapshot = files[`${dir}snapshot.png`];
       topic.viewpoints.push(vp);
     }
+    // the comments with the annotations' texts: made again at the next export
+    const made = new Set(topic.viewpoints.filter((v) => Array.isArray(v.markup)).map((v) => markupCommentGuid(v.guid)));
+    topic.comments = topic.comments.filter((c) => !made.has(c.guid));
     topics.push(topic);
   }
   topics.sort((a, b) => String(a.created).localeCompare(String(b.created)));
