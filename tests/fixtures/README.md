@@ -7,6 +7,7 @@
 | `alignment-utm33.ifc` | `01-Alignment.ifc` of the railway sample with its map conversion in ETRS89 / UTM 33N, and its local coordinates moved by 583 m | `make_utm33.py` (pyproj) |
 | `survey-utm33.las` | Every 8th point of `10-Survey.laz`, converted into UTM 33N, with a WKT record | `make_utm33.py` (pyproj, laspy) |
 | `spherical.e57` | One scan in spherical coordinates, the range as a 20-bit scaled integer, about 10 % of the points marked invalid | `make_e57_sph.py` (libE57Format through pye57) |
+| `example_2000.dwg` | A DWG 2000 drawing with layers, blocks, arcs, polylines, texts and dimensions (LibreDWG's test data, GPL-3.0-or-later) | [LibreDWG](https://github.com/LibreDWG/libredwg/tree/master/test/test-data) |
 
 ```
 python -m venv .venv && .venv/bin/pip install copclib pye57 laspy lazrs numpy pyproj

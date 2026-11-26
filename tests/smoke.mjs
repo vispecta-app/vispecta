@@ -703,7 +703,7 @@ async function main() {
     check('annotations: a note and an arrow in the view, kept in a saved view (arrow as a BCF line)',
       ann.sprites >= 3 && ann.cleared === 0 && JSON.stringify(ann.back) === '[["Mast 12: check",false],["here",true]]' && ann.near && ann.lines === 1, JSON.stringify(ann));
     await page2.evaluate(() => window.onlineIfc.notes.clear());
-    // BCF round trip of annotations (#134) and the issue report
+    // BCF round trip of annotations (#133) and the issue report
     await page2.evaluate(() => {
       const { notes, viewer, issues, state } = window.onlineIfc;
       const m = viewer.models.find((x) => x.name === '06-Overhead-line.ifc');
@@ -771,6 +771,118 @@ async function main() {
     });
     check('split: the selected elements saved as a new IFC file that opens again', split?.ids && split.n >= 5 && split.n < split.of, JSON.stringify(split));
     await page2.evaluate(() => { const { viewer } = window.onlineIfc; viewer.removeModel(viewer.models.find((x) => x.name === '06-Overhead-line-split.ifc')); window.onlineIfc.state.selection.clear(); });
+    // ---------------------------------------------------------------- DWG / DXF drawings (#135)
+    const dxfMap = await page2.evaluate(() => {
+      const v = window.onlineIfc.viewer, m = v.models.find((x) => x.name === '01-Alignment.ifc'), al = m.alignments[0];
+      const M = v.ifcToMapOf(m), V3 = v.camera.position.constructor;
+      const g = (c, x) => `${c}\n${x}\n`;
+      let d = g(0, 'SECTION') + g(2, 'HEADER') + g(9, '$INSUNITS') + g(70, 6) + g(0, 'ENDSEC') + g(0, 'SECTION') + g(2, 'TABLES') + g(0, 'TABLE') + g(2, 'LAYER') + g(70, 2);
+      d += g(0, 'LAYER') + g(2, 'AXIS') + g(70, 0) + g(62, 1) + g(6, 'CONTINUOUS') + g(0, 'LAYER') + g(2, 'TEXT') + g(70, 0) + g(62, 5) + g(6, 'CONTINUOUS') + g(0, 'ENDTAB') + g(0, 'ENDSEC') + g(0, 'SECTION') + g(2, 'ENTITIES');
+      const pts = al.poly.map((q) => new V3(q[0], q[1], 0).applyMatrix4(M));
+      for (let i = 0; i + 1 < pts.length; i++) d += g(0, 'LINE') + g(8, 'AXIS') + g(10, pts[i].x) + g(20, pts[i].y) + g(30, 0) + g(11, pts[i + 1].x) + g(21, pts[i + 1].y) + g(31, 0);
+      d += g(0, 'TEXT') + g(8, 'TEXT') + g(10, pts[3].x) + g(20, pts[3].y) + g(30, 0) + g(40, 5) + g(1, 'Spor 1');
+      return { dxf: d + g(0, 'ENDSEC') + g(0, 'EOF'), first: al.poly[0] };
+    });
+    await page2.setInputFiles('#file-input', [{ name: 'axis.dxf', mimeType: 'application/dxf', buffer: Buffer.from(dxfMap.dxf) }, { name: 'example_2000.dwg', mimeType: 'application/acad', buffer: fs.readFileSync(path.join(ROOT, 'tests/fixtures/example_2000.dwg')) }]);
+    await page2.waitForFunction(() => window.onlineIfc.viewer.drawings?.length === 2, null, { timeout: 120000 });
+    await idle(page2);
+    const cad = await page2.evaluate((first) => {
+      const v = window.onlineIfc.viewer, [dx, dw] = v.drawings;
+      // the first line of the axis drawing lies on the alignment's first point (in IFC coordinates)
+      const pos = dx.layers[0].obj.geometry.getAttribute('position');
+      const p0 = v.toIfc(new (v.camera.position.constructor)(pos.getX(0), pos.getY(0), pos.getZ(0)).applyMatrix4(dx.group.matrixWorld));
+      const off = Math.hypot(p0.x - first[0], p0.y - first[1]);
+      dw.setLayer(1, false);
+      const card = !!document.querySelector('.cad-card');
+      return { place: dx.placement, off, layers: dw.layers.map((l) => l.name).join(','), lines: dw.data.segments, texts: dw.textsShown, layerOff: !dw.layers[1].obj.visible, card };
+    }, dxfMap.first);
+    check('DWG and DXF drawings: layers, lines and texts; a DXF in map coordinates lies on the alignment', cad.place === 'map' && cad.off < 0.01 && cad.layers.includes('Tavolo 3') && cad.lines > 1000 && cad.texts >= 10 && cad.layerOff && cad.card, JSON.stringify(cad));
+    await page2.evaluate(() => { const v = window.onlineIfc.viewer; while (v.drawings.length) { const d = v.drawings.pop(); d.dispose(); } });
+    // ---------------------------------------------------------------- quick quality check (#138): the bridge loaded twice
+    await page2.setInputFiles('#file-input', { name: 'bridge-again.ifc', mimeType: 'application/x-step', buffer: fs.readFileSync(path.join(DIST, 'samples/double-track-railway/05-Bridge.ifc')) });
+    await page2.waitForFunction(() => window.onlineIfc.viewer.models.some((m) => m.name === 'bridge-again.ifc'), null, { timeout: 60000 });
+    await idle(page2);
+    await page2.evaluate(() => document.querySelector('[data-action="qc"]').click());
+    await page2.waitForSelector('#qc-results .qc-check');
+    const qc = await page2.evaluate(() => {
+      const heads = Object.fromEntries([...document.querySelectorAll('.qc-head')].map((x) => [x.querySelector('.qc-name').textContent, x.querySelector('.qc-count').textContent]));
+      document.querySelector('#qc-dialog').close();
+      const v = window.onlineIfc.viewer; v.removeModel(v.models.find((m) => m.name === 'bridge-again.ifc'));
+      return heads;
+    });
+    check('quick quality check: the same elements in two files are found, the sample is clean otherwise', qc['The same GlobalId in two models'] === '62' && qc['GlobalId twice in a model'] === 'none' && qc['Elements without a GlobalId'] === 'none', JSON.stringify(qc));
+    // ---------------------------------------------------------------- track parameters and report (#137)
+    await page2.evaluate(() => { window.onlineIfc.viewer.fitAll?.(); document.querySelector('[data-action="toggle-trackparams"]').click(); });
+    await page2.waitForTimeout(1500);
+    const trkLabels = await page2.evaluate(() => ({ all: document.querySelectorAll('.trk-label').length, shown: document.querySelectorAll('.trk-label:not([hidden])').length }));
+    await page2.evaluate(() => document.querySelector('[data-action="toggle-trackparams"]').click());
+    await page2.evaluate(() => document.querySelector('[data-action="trackreport"]').click());
+    const trkHeads = await page2.evaluate(() => [...document.querySelectorAll('#trk-preview h3')].map((x) => x.textContent).join(' | '));
+    const [xl] = await Promise.all([page2.waitForEvent('download'), page2.evaluate(() => document.querySelector('[data-action="trk-xlsx"]').click())]);
+    const xz = unzipSync(new Uint8Array(fs.readFileSync(await xl.path())));
+    const [cv] = await Promise.all([page2.waitForEvent('download'), page2.evaluate(() => document.querySelector('[data-action="trk-csv"]').click())]);
+    const csvText = fs.readFileSync(await cv.path(), 'utf8');
+    const [pd] = await Promise.all([page2.waitForEvent('download'), page2.evaluate(() => document.querySelector('[data-action="trk-pdf"]').click())]);
+    const pdfText = fs.readFileSync(await pd.path(), 'latin1');
+    await page2.evaluate(() => document.querySelector('#trackreport-dialog').close());
+    const sheets = Object.keys(xz).filter((n) => /worksheets\/sheet\d+\.xml$/.test(n)).length;
+    const wb = strFromU8(xz['xl/workbook.xml']), sh1 = strFromU8(xz['xl/worksheets/sheet1.xml']);
+    const trk = { labels: trkLabels, heads: trkHeads, sheets, wb: /Horizontal/.test(wb) && /Stations/.test(wb), radius: /<v>2000<\/v>/.test(sh1), csv: /Horizontal/.test(csvText) && csvText.includes(';'), pdf: pdfText.startsWith('%PDF') && /\/Count [1-9]/.test(pdfText) };
+    check('track parameters in 3D, and the track report as Excel, CSV and PDF', trk.labels.shown > 0 && /Horizontal \(\d+\)/.test(trk.heads) && /Cant \(\d+\)/.test(trk.heads) && sheets === 4 && trk.wb && trk.radius && trk.csv && trk.pdf, JSON.stringify(trk));
+    // ---------------------------------------------------------------- sight check (#136): a mast seen; a buried drain hidden by the ground
+    const sight = async (model, cls) => {
+      await page2.evaluate(([mn, c]) => {
+        const { viewer, state } = window.onlineIfc;
+        const m = viewer.models.find((x) => x.name === mn);
+        const ids = m.classes.get(c); state.selection.clear(); state.selection.set(m, new Set([ids[Math.floor(ids.length / 2)]])); // one in the middle of the line
+        document.querySelector('[data-action="sight"]').click();
+        document.querySelector('#sight-use').click();
+        document.querySelector('#sight-range').value = '300';
+        document.querySelector('[data-action="sight-run"]').click();
+      }, [model, cls]);
+      await page2.waitForSelector('#sight-results .sight-strip', { timeout: 60000 });
+      const r = await page2.evaluate(() => ({ text: document.querySelector('#sight-results p').textContent, rects: document.querySelectorAll('.sight-strip rect').length, h: document.querySelector('.sight-strip svg').getBoundingClientRect().height, blockers: document.querySelectorAll('#sight-results .clr-row').length, lines: !!window.onlineIfc.viewer.scene.getObjectByName('sight lines')?.children.length }));
+      await page2.evaluate(() => { document.querySelector('[data-action="sight-clear"]').click(); document.querySelector('#sight-dialog').close(); });
+      return r;
+    };
+    const mast = await sight('06-Overhead-line.ifc', 'IfcColumn');
+    const classesDrain = await page2.evaluate(() => [...window.onlineIfc.viewer.models.find((x) => x.name === '04-Drainage.ifc').classes.keys()]);
+    const drain = await sight('04-Drainage.ifc', classesDrain.includes('IfcPipeSegment') ? 'IfcPipeSegment' : classesDrain[0]);
+    check('sight check: a mast is seen on the approach, a buried drain is hidden by the ground', mast.rects > 5 && mast.h > 40 && mast.lines && /Seen without a break from [1-9]/.test(mast.text) && drain.blockers > 0 && /Not seen/.test(drain.text), JSON.stringify({ mast, drain, classesDrain }));
+    // ---------------------------------------------------------------- measure: angle, area, element (#139)
+    const meas = await page2.evaluate(async () => {
+      const { measure, viewer } = window.onlineIfc;
+      const rect = viewer.renderer.domElement.getBoundingClientRect();
+      // points on the screen where elements of the models are: the middles of elements in view, apart
+      const pts = [];
+      for (const m of viewer.models) {
+        for (const id of m.elementIds) {
+          if (pts.length >= 4) break;
+          const sc = viewer.toScreen(m.getBox([id]).getCenter(viewer.camera.position.clone()));
+          if (!sc || sc.x < 30 || sc.y < 30 || sc.x > rect.width - 30 || sc.y > rect.height - 30) continue;
+          const x = rect.left + sc.x, y = rect.top + sc.y;
+          if (pts.some((q) => Math.hypot(q[0] - x, q[1] - y) < 40) || !viewer.pick(x, y)) continue;
+          pts.push([x, y]);
+        }
+      }
+      measure.snapOn = false;
+      measure.setMode('angle');
+      measure.clear();
+      const log = [];
+      for (const p of pts.slice(0, 3)) { measure.handleClick(...p); log.push(measure.current?.points.length ?? 'done'); }
+      const angle = measure.items.at(-1);
+      measure.setMode('area');
+      for (const p of pts) measure.handleClick(...p);
+      measure.cancel();
+      const area = measure.items.at(-1);
+      measure.setMode('element');
+      measure.handleClick(...pts[0]);
+      const el = measure.items.at(-1);
+      const rows = measure.rows().map((r) => `${r.title}: ${r.value}`);
+      measure.setMode(null); measure.clear(); measure.snapOn = true;
+      return { types: [angle?.type, area?.type, el?.type].join(','), rows, vol: el?.volume, size: el?.size, log, pts };
+    });
+    check('measure: angle, area and an element’s volume and size', meas.types === 'angle,area,element' && meas.rows.some((r) => /^Angle 1: [\d.,]+°/.test(r)) && meas.rows.some((r) => /^Area 2: [\d.,]+ m²/.test(r)) && meas.vol > 0 && meas.size.every((x) => x > 0), JSON.stringify(meas));
     // contours on the terrain (#92)
     await page2.click('.tab[data-tab="models"]');
     await page2.evaluate(() => {

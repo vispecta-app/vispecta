@@ -207,7 +207,7 @@ function viewpointXml(vp, version) {
   return `${XML_HEAD}<VisualizationInfo Guid="${vp.guid}">${components}${camera}${lines}${clip}</VisualizationInfo>`;
 }
 
-// ------------------------------------------------------------ annotations in BCF (#134)
+// ------------------------------------------------------------ annotations in BCF (#133)
 // BCF has no notes or clouds with text: the snapshot shows them, the viewpoint's Lines carry their
 // outlines, and Vispecta adds two things other programs pass over – a file with the annotations as
 // they are (viewpoint-<guid>.vispecta.json, read back by Vispecta) and a comment with their texts.
@@ -406,7 +406,7 @@ export function importBcf(bytes) {
       const vp = parseViewpoint(xml, v.getAttribute('Guid'));
       vp.guid = v.getAttribute('Guid') || vp.guid;
       if (snap && files[dir + snap]) vp.snapshot = files[dir + snap];
-      // Vispecta's annotations of this viewpoint (#134): as they were; fromJSON checks every value
+      // Vispecta's annotations of this viewpoint (#133): as they were; fromJSON checks every value
       const mk = read(`${dir}viewpoint-${vp.guid}.vispecta.json`);
       if (mk) {
         try {

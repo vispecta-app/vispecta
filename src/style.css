@@ -550,6 +550,11 @@ body.py-open .planes-panel { max-height: calc(100% - 60px); }
 .m-dot.chain, .m-label.chain, .m-item.chain { --m-color: #8e44ad; }
 .m-dot.spot, .m-label.spot, .m-item.spot { --m-color: #1fa971; }
 .m-dot.objects, .m-label.objects, .m-item.objects { --m-color: #d35400; }
+.m-dot.angle, .m-label.angle, .m-item.angle { --m-color: #16a085; }
+.m-dot.area, .m-label.area, .m-item.area { --m-color: #c0392b; }
+.m-dot.element, .m-label.element, .m-item.element { --m-color: #6c5ce7; }
+#measure-modes { flex-wrap: wrap; }
+#measure-modes button { flex: 1 0 25%; border-bottom: 1px solid var(--border); }
 .m-dot.centre { width: 6px; height: 6px; border-style: dashed; }
 .m-label.centre { opacity: 0.85; }
 .m-label {
@@ -1011,3 +1016,22 @@ body:has(#welcome:not([hidden])) .viewcube { display: none; }
 .clr-row { cursor: pointer; }
 .clr-row:hover, .clr-row:focus { background: var(--accent-soft); outline: none; }
 .clr-ok { color: var(--ok, #2e7d32); font-weight: 600; }
+
+/* sight check (#136) */
+.sight-strip { margin: 4px 0; color: var(--muted); }
+.sight-strip svg { display: block; width: 100%; height: 52px; }
+.sight-bad { color: #c0392b; font-weight: 600; }
+.sight-good { font-weight: 600; }
+.track-params .trk-label { position: absolute; left: 0; top: 0; font: 600 11px/1 var(--mono, monospace); padding: 3px 5px; border-radius: 4px; white-space: nowrap; background: rgba(255,255,255,0.92); border: 1px solid #0e8c84; color: #0b4f4a; }
+.track-params .trk-label.row1 { border-color: #8e44ad; color: #5b2c6f; }
+.track-params .trk-label.row2 { border-color: #c0392b; color: #7b241c; }
+.trk-table td, .trk-table th { white-space: nowrap; }
+
+/* quick quality check (#138) */
+.qc-list { display: flex; flex-direction: column; gap: 4px; max-height: 60vh; overflow: auto; }
+.qc-head { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); padding: 6px 8px; cursor: pointer; }
+.qc-head .qc-name { flex: 1; }
+.qc-head .qc-count { font-variant-numeric: tabular-nums; color: var(--muted); }
+.qc-head.error .qc-icon { color: #c0392b; } .qc-head.warning .qc-icon { color: #d68910; } .qc-head.info .qc-icon { color: #2980b9; } .qc-head.ok .qc-icon { color: #27ae60; }
+.qc-body { padding: 4px 10px 8px; }
+.qc-items { margin: 4px 0 0; padding-left: 18px; max-height: 220px; overflow: auto; font-size: 12px; }
