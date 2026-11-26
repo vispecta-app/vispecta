@@ -703,6 +703,51 @@ async function main() {
     check('annotations: a note and an arrow in the view, kept in a saved view (arrow as a BCF line)',
       ann.sprites >= 3 && ann.cleared === 0 && JSON.stringify(ann.back) === '[["Mast 12: check",false],["here",true]]' && ann.near && ann.lines === 1, JSON.stringify(ann));
     await page2.evaluate(() => window.onlineIfc.notes.clear());
+    // BCF round trip of annotations (#134) and the issue report
+    await page2.evaluate(() => {
+      const { notes, viewer, issues, state } = window.onlineIfc;
+      const m = viewer.models.find((x) => x.name === '06-Overhead-line.ifc');
+      const id = [...m.elementIds][0];
+      state.selection.clear(); state.selection.set(m, new Set([id]));
+      const c = m.getBox([id]).getCenter(viewer.camera.position.clone()), V3 = c.constructor;
+      notes.add({ p: c, text: 'Mast 12: check' });
+      const pts = [0, 1, 2, 3, 4].map((i) => c.clone().add(new V3(Math.cos(i * 1.5), 2 + Math.sin(i * 1.5), 0)));
+      notes.add({ p: pts[0], kind: 'cloud', pts: [...pts, pts[0]], text: 'Ret her' });
+      issues.topics.length = 0;
+      issues.create({ title: 'Mast <img src=x onerror=alert(1)> | 12', description: 'Linje 1\nLinje 2', type: 'Issue', priority: 'High', assignedTo: 'RM' });
+    });
+    const [bcfDl] = await Promise.all([page2.waitForEvent('download'), page2.evaluate(() => window.onlineIfc.issues.export())]);
+    const bcfBytes = fs.readFileSync(await bcfDl.path());
+    const { unzipSync, zipSync: zip2, strFromU8 } = await import('fflate');
+    const bz = unzipSync(new Uint8Array(bcfBytes));
+    const names = Object.keys(bz);
+    const markupFile = names.find((n) => n.endsWith('markup.bcf')), jsonFile = names.find((n) => n.endsWith('.vispecta.json')), bcfv = names.find((n) => n.endsWith('.bcfv'));
+    const mkXml = strFromU8(bz[markupFile]);
+    const rt = { json: !!jsonFile, lines: (strFromU8(bz[bcfv]).match(/<Line>/g) || []).length, comment: /1\. Note: Mast 12: check/.test(mkXml) && /2\. Cloud: Ret her/.test(mkXml) };
+    // back in: the annotations as they were; and a BCF without our file (another program): lines joined
+    const back = async (bytes, name) => {
+      await page2.evaluate(() => { const { notes, issues } = window.onlineIfc; notes.clear(); issues.topics.length = 0; });
+      await page2.setInputFiles('#file-input', { name, mimeType: 'application/zip', buffer: Buffer.from(bytes) });
+      await page2.waitForFunction(() => window.onlineIfc.issues.topics.length === 1);
+      return page2.evaluate(() => {
+        const { notes, issues } = window.onlineIfc, tp = issues.topics[0];
+        issues.show(tp);
+        return { kinds: notes.items.map((x) => `${x.kind}:${x.text}`).join(','), comments: tp.comments.length };
+      });
+    };
+    rt.same = await back(bcfBytes, 'round.bcfzip');
+    const other = {}; for (const n of names) if (!n.endsWith('.vispecta.json')) other[n] = bz[n];
+    rt.other = await back(zip2(other), 'other.bcfzip');
+    check('BCF: annotations come back as they were; texts in a comment; lines of other programs joined, not one arrow each',
+      rt.json && rt.lines === 5 && rt.comment && rt.same.kinds === 'note:Mast 12: check,cloud:Ret her' && rt.same.comments === 0 && rt.other.kinds === 'pen:' && rt.other.comments === 1, JSON.stringify(rt));
+    // the issue report: Markdown and HTML (escaped) with the snapshot and where the issue is
+    await page2.evaluate(() => document.querySelector('.tab[data-tab="issues"]')?.click());
+    const [repDl] = await Promise.all([page2.waitForEvent('download'), page2.evaluate(() => window.onlineIfc.issues.report())]);
+    const rz = unzipSync(new Uint8Array(fs.readFileSync(await repDl.path())));
+    const rmd = strFromU8(rz['report.md']), rhtml = strFromU8(rz['report.html']);
+    const rep = { files: Object.keys(rz).sort().join(','), station: /station \d/.test(rmd), notes: /Cloud: Ret her/.test(rmd), escaped: !/<img src=x/.test(rhtml) && /&lt;img src=x/.test(rhtml), md: /\\\| 12/.test(rmd), img: /data:image\/png;base64,/.test(rhtml) };
+    check('issue report: Markdown and HTML with snapshot, station and the annotations (HTML escaped)', rep.files === 'images/01-1.png,report.html,report.md' && rep.station && rep.notes && rep.escaped && rep.md && rep.img, JSON.stringify(rep));
+    await page2.evaluate(() => { const { notes, issues, state } = window.onlineIfc; notes.clear(); issues.topics.length = 0; issues.render(); state.selection.clear(); });
     // split (#129): five elements of the overhead line as a new IFC file, opened in the view
     const nBeforeSplit = await page2.evaluate(() => {
       const { viewer, state } = window.onlineIfc;

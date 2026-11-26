@@ -1,5 +1,6 @@
 // Issues tab: BCF topics with viewpoints and comments, created from the current view.
 import { t, fmtNum } from './i18n.js';
+import { buildReport } from './report.js';
 import { TOPIC_TYPES, TOPIC_STATUSES, PRIORITIES, uuid, captureViewpoint, applyViewpoint, exportBcf, importBcf, dataUrlBytes } from './bcf.js';
 import { fmtValue } from './ifc.js';
 
@@ -103,10 +104,25 @@ export class IssuesPanel {
       name: m.name,
       project: fmtValue(m.api.GetLine(m.modelID, m.tree.expressID, false)?.GlobalId) || '',
     }));
-    const zip = exportBcf(this.topics, files, this.version, this.ctx.viewer.models[0]?.name || 'Vispecta');
+    const zip = exportBcf(this.topics, files, this.version, this.ctx.viewer.models[0]?.name || 'Vispecta', { kindName: (k) => t(`notes.${k}`) });
     const stamp = new Date().toISOString().slice(0, 10);
     this.ctx.download(`issues-${stamp}.bcfzip`, zip, 'application/octet-stream');
     this.dirty = false;
+  }
+
+  /** The issues shown (the filter) as a report: report.md and report.html with the snapshots, in a zip (#134). */
+  report() {
+    const list = this.topics.filter((tp) => this.filter === 'all' || (this.filter === 'closed') === ['Closed', 'Resolved'].includes(tp.status));
+    if (!list.length) return this.ctx.toast(t('rep.noIssues'));
+    const m = this.ctx.viewer.models[0];
+    const res = buildReport(list, {
+      viewer: this.ctx.viewer, t, fmtNum, formatStation: this.ctx.formatStation || ((s) => s.toFixed(3)), locate: this.ctx.locate,
+      title: `${t('rep.title')}${m ? ` – ${m.alias || m.name}` : ''}`, author: this.author,
+    });
+    const stamp = new Date().toISOString().slice(0, 10);
+    this.ctx.download(`issues-report-${stamp}.zip`, res.zip, 'application/zip');
+    this.ctx.toast(t('rep.done', { n: list.length }), true);
+    return res;
   }
 
   // ------------------------------------------------------------------- render
@@ -132,6 +148,7 @@ export class IssuesPanel {
           h('button', { class: 'btn primary sm', text: `＋ ${t('bcf.new')}`, onclick: () => { if (!this.ctx.viewer.models.length) return this.ctx.toast(t('msg.loadFirst')); this.showNew = !this.showNew; this.render(); } }),
           h('button', { class: 'btn sm', text: t('bcf.import'), onclick: () => fileInput.click() }),
           h('span', { class: 'color-action' }, ver, h('button', { class: 'btn sm', text: t('bcf.export'), onclick: () => this.export() })),
+          h('button', { class: 'btn sm', text: t('rep.button'), title: t('rep.buttonTitle'), onclick: () => this.report() }),
           fileInput)),
     ];
     if (this.showNew) parts.push(this.#newForm());
