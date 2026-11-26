@@ -1314,7 +1314,7 @@ export default {
   'notes.hint.rect': "Tracez un rectangle. Rotation avec le bouton droit.",
   'notes.hint.ellipse': "Tracez une ellipse. Rotation avec le bouton droit.",
   'notes.hint.pen': "Dessinez bouton gauche enfoncé. Rotation avec le bouton droit.",
-  // issue report (#134)
+  // issue report (#133)
   'rep.button': "Rapport",
   'rep.buttonTitle': "Les sujets affichés sous forme de rapport : Markdown et HTML (à imprimer en PDF) avec les captures, dans un zip – pour les personnes ; le BCF est pour les logiciels",
   'rep.title': "Rapport des sujets",

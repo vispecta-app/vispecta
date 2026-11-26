@@ -110,7 +110,7 @@ export class IssuesPanel {
     this.dirty = false;
   }
 
-  /** The issues shown (the filter) as a report: report.md and report.html with the snapshots, in a zip (#134). */
+  /** The issues shown (the filter) as a report: report.md and report.html with the snapshots, in a zip (#133). */
   report() {
     const list = this.topics.filter((tp) => this.filter === 'all' || (this.filter === 'closed') === ['Closed', 'Resolved'].includes(tp.status));
     if (!list.length) return this.ctx.toast(t('rep.noIssues'));

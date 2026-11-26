@@ -1,4 +1,4 @@
-// Issue report (#134): the issues (BCF topics) as a document for people – a meeting, a letter, the
+// Issue report (#133): the issues (BCF topics) as a document for people – a meeting, a letter, the
 // file. A zip with report.md (Markdown, with the snapshots in images/) and report.html (the same,
 // self-contained, to read in a browser or print as PDF). It is not read back: BCF is for that.
 //

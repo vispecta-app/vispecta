@@ -703,7 +703,7 @@ async function main() {
     check('annotations: a note and an arrow in the view, kept in a saved view (arrow as a BCF line)',
       ann.sprites >= 3 && ann.cleared === 0 && JSON.stringify(ann.back) === '[["Mast 12: check",false],["here",true]]' && ann.near && ann.lines === 1, JSON.stringify(ann));
     await page2.evaluate(() => window.onlineIfc.notes.clear());
-    // BCF round trip of annotations (#134) and the issue report
+    // BCF round trip of annotations (#133) and the issue report
     await page2.evaluate(() => {
       const { notes, viewer, issues, state } = window.onlineIfc;
       const m = viewer.models.find((x) => x.name === '06-Overhead-line.ifc');

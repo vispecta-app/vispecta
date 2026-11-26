@@ -1314,7 +1314,7 @@ export default {
   'notes.hint.rect': "Dra en rektangel. Rotera med höger musknapp.",
   'notes.hint.ellipse': "Dra en ellips. Rotera med höger musknapp.",
   'notes.hint.pen': "Rita med vänster musknapp nedtryckt. Rotera med höger musknapp.",
-  // issue report (#134)
+  // issue report (#133)
   'rep.button': "Rapport",
   'rep.buttonTitle': "De visade ärendena som rapport: Markdown och HTML (skriv ut som PDF) med skärmbilder, i en zip – för människor; BCF är för program",
   'rep.title': "Ärenderapport",

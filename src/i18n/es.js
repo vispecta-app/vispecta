@@ -1314,7 +1314,7 @@ export default {
   'notes.hint.rect': "Arrastre un rectángulo. Girar con el botón derecho.",
   'notes.hint.ellipse': "Arrastre una elipse. Girar con el botón derecho.",
   'notes.hint.pen': "Dibuje con el botón izquierdo pulsado. Girar con el botón derecho.",
-  // issue report (#134)
+  // issue report (#133)
   'rep.button': "Informe",
   'rep.buttonTitle': "Las incidencias mostradas como informe: Markdown y HTML (imprimible como PDF) con las capturas, en un zip, para personas; el BCF es para programas",
   'rep.title': "Informe de incidencias",

@@ -864,7 +864,7 @@ const en = {
   'qc.unitHelp': "The model’s length unit is not the metre (correct only when that is intended).",
   'sight.noApproach': "There is no track before the target in this direction of travel (it is at the start or end of the alignment): choose the other direction.",
   'sight.notSeen': "Not seen even at the nearest point checked ({d} before the target, at {station})",
-  // issue report (#134)
+  // issue report (#133)
   'rep.button': "Report",
   'rep.buttonTitle': "The issues shown as a report: Markdown and HTML (print as PDF) with the snapshots, in a zip – for people; BCF is for programs",
   'rep.title': "Issue report",

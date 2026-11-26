@@ -861,7 +861,7 @@ export default {
   'notes.hint.rect': "Rechteck aufziehen. Drehen mit der rechten Maustaste.",
   'notes.hint.ellipse': "Ellipse aufziehen. Drehen mit der rechten Maustaste.",
   'notes.hint.pen': "Mit gedrückter linker Maustaste zeichnen. Drehen mit der rechten Maustaste.",
-  // issue report (#134)
+  // issue report (#133)
   'rep.button': "Bericht",
   'rep.buttonTitle': "Die angezeigten Themen als Bericht: Markdown und HTML (als PDF drucken) mit den Bildern, in einer ZIP-Datei – für Menschen; BCF ist für Programme",
   'rep.title': "Themenbericht",

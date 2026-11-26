@@ -1314,7 +1314,7 @@ export default {
   'notes.hint.rect': "Sleep een rechthoek. Draaien met de rechtermuisknop.",
   'notes.hint.ellipse': "Sleep een ellips. Draaien met de rechtermuisknop.",
   'notes.hint.pen': "Teken met de linkermuisknop ingedrukt. Draaien met de rechtermuisknop.",
-  // issue report (#134)
+  // issue report (#133)
   'rep.button': "Rapport",
   'rep.buttonTitle': "De getoonde issues als rapport: Markdown en HTML (af te drukken als PDF) met de afbeeldingen, in een zip – voor mensen; BCF is voor programma’s",
   'rep.title': "Issuerapport",

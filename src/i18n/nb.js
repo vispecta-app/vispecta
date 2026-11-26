@@ -1314,7 +1314,7 @@ export default {
   'notes.hint.rect': "Dra et rektangel. Roter med høyre museknapp.",
   'notes.hint.ellipse': "Dra en ellipse. Roter med høyre museknapp.",
   'notes.hint.pen': "Tegn med venstre museknapp holdt nede. Roter med høyre museknapp.",
-  // issue report (#134)
+  // issue report (#133)
   'rep.button': "Rapport",
   'rep.buttonTitle': "De viste sakene som rapport: Markdown og HTML (skriv ut som PDF) med skjermbilder, i en zip – for mennesker; BCF er for programmer",
   'rep.title': "Saksrapport",

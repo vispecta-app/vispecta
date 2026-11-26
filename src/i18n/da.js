@@ -861,7 +861,7 @@ export default {
   'notes.hint.rect': "Træk et rektangel. Drej med højre musetast.",
   'notes.hint.ellipse': "Træk en ellipse. Drej med højre musetast.",
   'notes.hint.pen': "Tegn med venstre musetast holdt nede. Drej med højre musetast.",
-  // issue report (#134)
+  // issue report (#133)
   'rep.button': "Rapport",
   'rep.buttonTitle': "De viste sager som rapport: Markdown og HTML (udskriv som PDF) med skærmbilleder, i en zip – til mennesker; BCF er til programmer",
   'rep.title': "Sagsrapport",

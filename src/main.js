@@ -1638,7 +1638,7 @@ export const issues = new IssuesPanel({
   },
   setSpacesVisible: (v) => { state.spacesVisible = v; updateSpacesUi(); },
   afterVisibility: () => { refreshVisibilityUi(); renderPlanes(); },
-  // the issue report (#134): where an issue is, on the nearest alignment
+  // the issue report (#133): where an issue is, on the nearest alignment
   locate: (p) => (alignmentLayer.alignments?.length ? alignmentLayer.locate(p) : null),
   formatStation,
 });
