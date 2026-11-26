@@ -14,7 +14,7 @@ const SNAP_PERP_PX = 10; // perpendicular from the last point onto an edge
 // the cut is what is measured
 const CUT_BONUS_PX = 4;
 const SNAP_PROBES = [[8, 0], [-8, 0], [0, 8], [0, -8]];
-const COLORS = { distance: 0x2f7de1, chain: 0x8e44ad, spot: 0x1fa971, objects: 0xd35400 };
+const COLORS = { distance: 0x2f7de1, chain: 0x8e44ad, spot: 0x1fa971, objects: 0xd35400, angle: 0x16a085, area: 0xc0392b, element: 0x6c5ce7 };
 
 let seq = 1;
 
@@ -23,7 +23,7 @@ export class MeasureTool extends EventTarget {
     super();
     this.viewer = viewer;
     this.container = container;
-    this.mode = null; // 'distance' | 'chain' | 'spot' | 'objects' | null
+    this.mode = null; // 'distance' | 'chain' | 'spot' | 'objects' | 'angle' | 'area' | 'element' | null
     this.firstObject = null; // objects mode (#128): the element clicked first {model, id, point}
     this.snapOn = true;
     this.unit = 'm'; // 'm' | 'mm'
@@ -84,7 +84,7 @@ export class MeasureTool extends EventTarget {
     });
     el.addEventListener('pointerleave', () => this.#clearHover());
     el.addEventListener('dblclick', (e) => {
-      if (this.mode === 'chain' && this.current) {
+      if ((this.mode === 'chain' || this.mode === 'area') && this.current) {
         e.preventDefault();
         this.#finishCurrent();
       }
@@ -104,6 +104,7 @@ export class MeasureTool extends EventTarget {
   /** Called by the UI for a click in the viewport while measuring. */
   handleClick(clientX, clientY) {
     if (this.mode === 'objects') { this.#objectClick(clientX, clientY); return; }
+    if (this.mode === 'element') { this.#elementClick(clientX, clientY); return; }
     const s = this.#snap(clientX, clientY);
     if (!s) return;
     const p = this.#locked(s.point);
@@ -118,7 +119,7 @@ export class MeasureTool extends EventTarget {
     const pts = this.current.points;
     if (pts.length && pts[pts.length - 1].distanceTo(p) < 1e-9) return; // double click on the same point
     pts.push(p);
-    if (this.mode === 'distance' && pts.length === 2) {
+    if ((this.mode === 'distance' && pts.length === 2) || (this.mode === 'angle' && pts.length === 3)) {
       const m = this.current;
       this.current = null;
       this.#redraw(m);
@@ -148,6 +149,15 @@ export class MeasureTool extends EventTarget {
     this.#add({ type: 'objects', points: [r.a, r.b], centres: [r.ca, r.cb], names: [name(f), name(hit)], dist: r.dist, cdist: r.ca.distanceTo(r.cb) });
   }
 
+  // ------------------------------------------------------------ an element: volume, area, size
+  #elementClick(clientX, clientY) {
+    const hit = this.viewer.pick(clientX, clientY);
+    if (!hit) return;
+    const q = elementQuantities(this.viewer, hit.model, hit.id);
+    if (!q) return;
+    this.#add({ type: 'element', points: [hit.point.clone()], name: `${hit.model.typeName(hit.id)} – ${hit.model.label(hit.id)}`, ...q });
+  }
+
   #clearFirstObject() {
     if (this.firstObject?.dot) this.firstObject.dot.el.remove();
     this.firstObject = null;
@@ -160,7 +170,7 @@ export class MeasureTool extends EventTarget {
   cancel() {
     if (this.firstObject) { this.#clearFirstObject(); this.#emit(); return true; }
     if (this.current) {
-      if (this.current.type === 'chain' && this.current.points.length >= 2) this.#finishCurrent();
+      if ((this.current.type === 'chain' && this.current.points.length >= 2) || (this.current.type === 'area' && this.current.points.length >= 3)) this.#finishCurrent();
       else this.#discard(this.current);
       this.#emit();
       return true;
@@ -173,7 +183,7 @@ export class MeasureTool extends EventTarget {
     const m = this.current;
     this.current = null;
     if (!m) return;
-    if (m.points.length < 2) this.#discard(m);
+    if (m.points.length < (m.type === 'area' || m.type === 'angle' ? 3 : 2)) this.#discard(m);
     else this.#redraw(m);
     this.rubber.visible = false;
     this.#emit();
@@ -498,6 +508,29 @@ export class MeasureTool extends EventTarget {
       const el2 = this.#label('objects centre');
       el2.textContent = `⌖ ${this.fmtLen(m.cdist)}`;
       o.labels.push({ el: el2, at: m.centres[0].clone().add(m.centres[1]).multiplyScalar(0.5) });
+    } else if (m.type === 'element') {
+      const el = this.#label('element');
+      el.textContent = `${this.fmtNum3(m.volume)} m³${m.closed ? '' : ' ≈'}`;
+      o.labels.push({ el, at: pts[0], offset: -18 });
+    } else if (m.type === 'angle' && pts.length >= 2) {
+      const main = this.#line(pts, color);
+      this.group.add(main);
+      o.lines.push(main);
+      if (pts.length === 3) {
+        const el = this.#label('angle');
+        el.textContent = `${this.fmtNum3(angleOf(pts), 2)}°`;
+        o.labels.push({ el, at: pts[1], offset: -18 });
+      }
+    } else if (m.type === 'area' && pts.length >= 2) {
+      const closed = this.current !== m && pts.length >= 3;
+      const main = this.#line(closed ? [...pts, pts[0]] : pts, color);
+      this.group.add(main);
+      o.lines.push(main);
+      if (closed) {
+        const el = this.#label('area');
+        el.textContent = `${this.fmtNum3(polygonArea(pts), 2)} m²`;
+        o.labels.push({ el, at: pts.reduce((a, p) => a.add(p), new THREE.Vector3()).multiplyScalar(1 / pts.length) });
+      }
     } else if (pts.length >= 2) {
       const main = this.#line(pts, color);
       this.group.add(main);
@@ -661,6 +694,39 @@ export class MeasureTool extends EventTarget {
           ],
         };
       }
+      if (m.type === 'element') {
+        return {
+          m, n, title: `${t('measure.element2')} ${n}`, value: `${this.fmtNum3(m.volume)} m³${m.closed ? '' : ' ≈'}`,
+          lines: [
+            [t('measure.volume'), `${this.fmtNum3(m.volume)} m³${m.closed ? '' : ` (${t('measure.notClosed')})`}`],
+            [t('measure.surface'), `${this.fmtNum3(m.area, 2)} m²`],
+            [t('measure.size'), m.size.map((x) => this.fmtLen(x)).join(' × ')],
+            [t('measure.element'), m.name],
+          ],
+        };
+      }
+      if (m.type === 'angle') {
+        const inProgress = this.current === m;
+        const lines = [];
+        if (m.points.length === 3) {
+          const ifc = m.points.map((p) => this.viewer.toIfc(p));
+          const plan = ifc.map((p) => new THREE.Vector3(p.x, p.y, 0));
+          lines.push([t('measure.anglePlan'), `${this.fmtNum3(angleOf(plan), 2)}°`], ['BA / BC', `${this.fmtLen(m.points[1].distanceTo(m.points[0]))} / ${this.fmtLen(m.points[1].distanceTo(m.points[2]))}`]);
+        }
+        return { m, n, title: `${t('measure.angle')} ${n}${inProgress ? ` (${t('measure.inProgress')})` : ''}`, value: m.points.length === 3 ? `${this.fmtNum3(angleOf(m.points), 2)}°` : '–', lines };
+      }
+      if (m.type === 'area') {
+        const inProgress = this.current === m;
+        const ok = m.points.length >= 3;
+        const ifc = m.points.map((p) => this.viewer.toIfc(p));
+        const plan = ifc.map((p) => new THREE.Vector3(p.x, p.y, 0));
+        let per = 0;
+        for (let i = 0; i < m.points.length; i++) per += m.points[i].distanceTo(m.points[(i + 1) % m.points.length]);
+        return {
+          m, n, title: `${t('measure.area')} ${n}${inProgress ? ` (${t('measure.inProgress')})` : ''}`, value: ok ? `${this.fmtNum3(polygonArea(m.points), 2)} m²` : '–',
+          lines: ok ? [[t('measure.areaPlan'), `${this.fmtNum3(polygonArea(plan), 2)} m²`], [t('measure.perimeter'), this.fmtLen(per)], [t('measure.points'), fmtNum(m.points.length)]] : [],
+        };
+      }
       const len = this.length(m);
       const lines = [];
       if (m.points.length >= 2) {
@@ -668,7 +734,10 @@ export class MeasureTool extends EventTarget {
         if (m.type === 'distance') {
           lines.push([t('measure.horizontal'), this.fmtLen(c.horizontal)], [t('measure.dz'), this.fmtLen(c.dz, true)],
             ['ΔX / ΔY', `${this.fmtLen(c.dx, true)} / ${this.fmtLen(c.dy, true)}`]);
-          if (c.slope !== null && Math.abs(c.dz) > 1e-4) lines.push([t('measure.slope'), `${c.slope.toFixed(2)} %`]);
+          if (c.slope !== null && Math.abs(c.dz) > 1e-4) {
+            const n1 = Math.abs(c.horizontal / c.dz);
+            lines.push([t('measure.slope'), `${c.slope.toFixed(2)} % · ${(c.slope * 10).toFixed(1)} ‰ · 1:${n1 >= 100 ? Math.round(n1) : n1.toFixed(2)} · ${(Math.atan(c.slope / 100) * 180 / Math.PI).toFixed(2)}°`]);
+          }
           if (this.alignments?.alignments.length) {
             const pa = this.viewer.toIfc(m.points[0]), pb = this.viewer.toIfc(m.points[m.points.length - 1]);
             const A = this.alignments.locate(pa), B = this.alignments.locate(pb);
@@ -692,6 +761,9 @@ export class MeasureTool extends EventTarget {
     });
   }
 
+  /** A number with up to d decimals in the language's format. */
+  fmtNum3(x, d = 3) { return Number.isFinite(x) ? fmtNum(Math.round(x * 10 ** d) / 10 ** d) : '–'; }
+
   /** Text for the clipboard (tab separated). */
   toText() {
     const out = [];
@@ -710,6 +782,50 @@ export class MeasureTool extends EventTarget {
     box.expandByScalar(Math.max(1, box.getSize(new THREE.Vector3()).length() * 0.3));
     this.viewer.fitBox(box);
   }
+}
+
+/** The angle ABC in degrees (three points). */
+export function angleOf([a, b, c]) {
+  const u = a.clone().sub(b), v = c.clone().sub(b);
+  const d = u.length() * v.length();
+  return d > 1e-12 ? (Math.acos(Math.min(1, Math.max(-1, u.dot(v) / d))) * 180) / Math.PI : 0;
+}
+
+/** Area of a polygon in 3D (Newell): of its best plane. */
+export function polygonArea(pts) {
+  const n = new THREE.Vector3();
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    n.x += (a.y - b.y) * (a.z + b.z); n.y += (a.z - b.z) * (a.x + b.x); n.z += (a.x - b.x) * (a.y + b.y);
+  }
+  return n.length() / 2;
+}
+
+/**
+ * Volume (m³, of the closed surface: signed tetrahedra), surface area (m²) and size (IFC X, Y, Z) of
+ * an element from its triangles; closed: every edge is shared by two triangles (else the volume is an
+ * estimate). Null without geometry.
+ */
+export function elementQuantities(viewer, model, id) {
+  const P = elementTriangles(model, id);
+  if (P.length < 9) return null;
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), o = new THREE.Vector3(P[0], P[1], P[2]);
+  let vol = 0, area = 0;
+  const edges = new Map();
+  const key = (i) => `${Math.round(P[i] * 1e4)},${Math.round(P[i + 1] * 1e4)},${Math.round(P[i + 2] * 1e4)}`;
+  const box = new THREE.Box3();
+  for (let i = 0; i < P.length; i += 9) {
+    a.set(P[i], P[i + 1], P[i + 2]).sub(o); b.set(P[i + 3], P[i + 4], P[i + 5]).sub(o); c.set(P[i + 6], P[i + 7], P[i + 8]).sub(o);
+    vol += a.dot(b.clone().cross(c)) / 6;
+    area += b.clone().sub(a).cross(c.clone().sub(a)).length() / 2;
+    const k = [key(i), key(i + 3), key(i + 6)];
+    for (let e = 0; e < 3; e++) { const ab = [k[e], k[(e + 1) % 3]].sort().join('|'); edges.set(ab, (edges.get(ab) || 0) + 1); }
+    for (let j = 0; j < 9; j += 3) box.expandByPoint(viewer.toIfc(new THREE.Vector3(P[i + j], P[i + j + 1], P[i + j + 2])));
+  }
+  let closed = true;
+  for (const n of edges.values()) if (n % 2) { closed = false; break; }
+  const s = box.getSize(new THREE.Vector3());
+  return { volume: Math.abs(vol), area, closed, size: [s.x, s.y, s.z] };
 }
 
 /** The triangles of an element, in world coordinates (non-indexed). */

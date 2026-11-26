@@ -6,6 +6,7 @@ import { alignmentRow, drawnLineRow, drawnPaths } from './lines.js';
 import { afterModelsChanged, causeText, projects, refreshVisibilityUi, renderStatus } from '../main.js';
 import { CONTOUR_INTERVALS, openVolumeDialog, setContours, terrainLandXml } from './terrain.js';
 import { cloudCard } from './clouds.js';
+import { cadCard, drawings } from './cad.js';
 import { crsChanged, crsRow, projectCrsBar } from './crs.js';
 
 // ======================================================================= models
@@ -66,7 +67,7 @@ export function inlineEdit(span, value, placeholder, save) {
 export function renderModels() {
   const list = $('#model-list');
   list.replaceChildren();
-  $('#models-empty').hidden = viewer.models.length + viewer.clouds.length + drawnPaths.length > 0;
+  $('#models-empty').hidden = viewer.models.length + viewer.clouds.length + drawnPaths.length + drawings.length > 0;
   $('#model-actions').hidden = viewer.models.length === 0;
   if (viewer.models.length || viewer.clouds.length) list.append(projectCrsBar());
   // groups whose models are all gone stay until removed; models of a removed group are loose
@@ -85,6 +86,12 @@ export function renderModels() {
     list.append(h('section', { class: 'mgroup clouds' },
       h('div', { class: 'mg-head' }, h('span', { class: 'mg-name muted', text: t('pc.title') }), h('span', { class: 'mg-count', text: String(viewer.clouds.length) })),
       h('div', { class: 'mg-body' }, viewer.clouds.map(cloudCard))));
+  }
+  // DWG / DXF drawings (#135)
+  if (drawings.length) {
+    list.append(h('section', { class: 'mgroup drawings' },
+      h('div', { class: 'mg-head' }, h('span', { class: 'mg-name muted', text: t('cad.title') }), h('span', { class: 'mg-count', text: String(drawings.length) })),
+      h('div', { class: 'mg-body' }, drawings.map(cadCard))));
   }
 }
 

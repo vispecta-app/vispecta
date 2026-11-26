@@ -1318,7 +1318,7 @@ function pdfPage(section, lay, info, opts) {
   return { content, W: (lay.W * k).toFixed(2), Hpt, img: opts.background?.jpeg || null };
 }
 
-function pdfBytes(objs, title) {
+export function pdfBytes(objs, title) {
   const parts = [];
   let len = 0;
   const push = (x) => { const b = typeof x === 'string' ? latin1(x) : x; parts.push(b); len += b.length; };
@@ -1343,7 +1343,7 @@ function pdfBytes(objs, title) {
 }
 
 const WIN = { '€': 128, '‚': 130, 'ƒ': 131, '„': 132, '…': 133, '†': 134, '‡': 135, 'ˆ': 136, '‰': 137, 'Š': 138, '‹': 139, 'Œ': 140, 'Ž': 142, '‘': 145, '’': 146, '“': 147, '”': 148, '•': 149, '–': 150, '—': 151, '˜': 152, '™': 153, 'š': 154, '›': 155, 'œ': 156, 'ž': 158, 'Ÿ': 159 };
-function pdfStr(s) {
+export function pdfStr(s) {
   let out = '';
   for (const ch of String(s ?? '')) {
     let code = WIN[ch] ?? ch.charCodeAt(0);

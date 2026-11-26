@@ -64,7 +64,7 @@ export default defineConfig({
       },
     },
   },
-  optimizeDeps: { exclude: ['web-ifc'] },
+  optimizeDeps: { exclude: ['web-ifc', '@mlightcad/libredwg-web'] },
   worker: { format: 'es' },
   define: {
     __BUILD_INFO__: JSON.stringify(buildInfo()),

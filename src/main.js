@@ -31,6 +31,10 @@ import { QtoTable } from './qto.js';
 import { mergeIfcBlobs } from './merge.js';
 import { splitIfcBlob } from './split.js';
 import { getRegion, setRegion } from './app/region.js';
+import { CAD_FILE, drawings, drawingsAfterModels, openCadFiles } from './app/cad.js';
+import { clearSight, openSightDialog, runSight } from './app/sight.js';
+import { openQcDialog, qcCsv, runQc } from './app/qc.js';
+import { exportTrack, openTrackReport, renderTrackParams, toggleTrackParams, trackParamsShown } from './app/track.js';
 import { closeNotes, initNotes, notes, notesActions, notesCancel, notesClick, toggleNotes } from './app/notes.js';
 import { ContextMenu } from './contextmenu.js';
 import { renderVersion } from './version.js';
@@ -153,11 +157,13 @@ async function openFiles(files) {
   const idss = all.filter((f) => /\.ids$/i.test(f.name) || (/\.xml$/i.test(f.name) && $('#ids-dialog').open));
   const clouds = all.filter((f) => CLOUD_FILE.test(f.name)); // point clouds (#27)
   const tiffs = all.filter((f) => /\.tiff?$/i.test(f.name)); // height models (DHM GeoTIFF, #92)
-  const rest = all.filter((f) => ![list, workspaces, bcfs, idss, clouds, landxmls, tiffs].some((g) => g.includes(f)));
+  const cads = all.filter((f) => CAD_FILE.test(f.name)); // DWG / DXF drawings (#135)
+  const rest = all.filter((f) => ![list, workspaces, bcfs, idss, clouds, landxmls, tiffs, cads].some((g) => g.includes(f)));
   if (rest.length) toast(t('msg.unknownFiles', { names: rest.map((f) => f.name).join(', ') }));
-  if (!list.length && !workspaces.length && !bcfs.length && !idss.length && !clouds.length && !landxmls.length && !tiffs.length) return;
+  if (!list.length && !workspaces.length && !bcfs.length && !idss.length && !clouds.length && !landxmls.length && !tiffs.length && !cads.length) return;
   if (list.length) await openIfcFiles(list);
   if (clouds.length) await openCloudFiles(clouds);
+  if (cads.length) await openCadFiles(cads);
   for (const f of landxmls) await terrainFromLandXml(f);
   for (const f of tiffs) await terrainFromGeoTiff(f);
   for (const w of workspaces) await views.openWorkspace(w);
@@ -428,6 +434,8 @@ export function updateAlignments() {
   if (lineTool.active && lineTool.pts.length >= 2) all.push(makePath('…', lineTool.pts));
   alignmentLayer.set(all);
   $('#alignments-check').textContent = alignmentLayer.visible ? '☑' : '☐';
+  $('#trackparams-check').textContent = trackParamsShown() ? '☑' : '☐';
+  renderTrackParams(); // the track parameters follow the alignments (#137)
 }
 
 export function afterModelsChanged() {
@@ -435,7 +443,8 @@ export function afterModelsChanged() {
   // undo (#67): a model was opened or removed – the history starts from the state as it is now
   setTimeout(() => history.commit(), 0);
   dropStaleChecks();
-  $('#welcome').hidden = viewer.models.length + viewer.clouds.length > 0;
+  drawingsAfterModels();
+  $('#welcome').hidden = viewer.models.length + viewer.clouds.length + drawings.length > 0;
   if (!viewer.models.length && !viewer.clouds.length) renderRecentProjects();
   renderProjectBar();
   if (state.storey && !viewer.models.includes(state.storey.model)) state.storey = null;
@@ -766,6 +775,17 @@ document.addEventListener('click', (e) => {
     corridor: () => openCorridorDialog(),
     clearance: () => openClearanceDialog(),
     'clr-show': () => showGauge(),
+    sight: () => openSightDialog(),
+    qc: () => openQcDialog(),
+    'qc-run': () => runQc(),
+    'qc-csv': () => qcCsv(),
+    'toggle-trackparams': () => toggleTrackParams(),
+    trackreport: () => openTrackReport(),
+    'trk-csv': () => exportTrack('csv'),
+    'trk-xlsx': () => exportTrack('xlsx'),
+    'trk-pdf': () => exportTrack('pdf'),
+    'sight-run': () => runSight(),
+    'sight-clear': () => clearSight(),
     'clr-ifc': () => gaugeAsIfc(),
     'clr-ifc-dl': () => gaugeAsIfc({ download: true }),
     'clr-run': () => runClearance(),

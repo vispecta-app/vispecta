@@ -15,7 +15,7 @@ The interface is in **English**, **Danish**, **German**, **Swedish**, **Norwegia
 Vispecta is an open-source project by Rasmus Roien Molbaek (AGPL-3.0 licence). It grows out of the challenges I met in my work as an engineer in railway projects: alignments and stationing, cross sections and longitudinal profiles, combining the models of several disciplines, and quick checks of metadata.
 
 ## Features
-The toolbar groups the functions: **View**, **Section**, **Visibility**, **Alignment** (stationing, cross sections, longitudinal profiles, drive along, draw a line), **Annotate**, **Measure** and **Tools** (merge, save part as IFC, compare, IDS check, quantity takeoff, Python). On small screens the side panels are drawers over the 3D view.
+The toolbar groups the functions: **View**, **Section**, **Visibility**, **Alignment** (stationing, cross sections, longitudinal profiles, drive along, draw a line), **Annotate**, **Measure** and **Tools** (quick quality check, merge, save part as IFC, compare, IDS check, quantity takeoff, Python). On small screens the side panels are drawers over the 3D view.
 
 **Undo / redo:** Ctrl+Z (Cmd+Z on Mac) or ↶ in the toolbar undoes the last change, Ctrl+Y / Ctrl+Shift+Z or ↷ redoes it (#67). It covers hidden and isolated elements, colours and transparency, models and groups switched on or off, section planes (added, moved, removed, 3D cut on/off), measurements, drawn lines and the corridor – up to 50 steps. The camera is not part of it (saved views cover that), and in a text field Ctrl+Z stays the field's own. Opening or removing a model starts the history again.
 
@@ -73,6 +73,9 @@ The **Filters** tab indexes the attributes, storey, type, material, property set
 ### Compare versions
 **Compare** matches the elements of two loaded versions by GlobalId and shows what was **added** (green), **removed** (red) and **changed** (orange: attributes, property values, volume/area or position), with unchanged elements in transparent grey. The panel lists every change; click an element to zoom to it. The report can be exported as CSV.
 
+### Quick quality check
+*Tools → Quick quality check* (#138) checks what often goes wrong in deliveries and that an IDS file does not ask about: GlobalIds (missing, malformed, twice in a model, the same element in two files), elements twice (same class and geometry in the same place), elements outside the spatial structure, without a name, with almost no geometry or far from the rest of their model (a wrong placement), structure entries without geometry, proxies, models that are not georeferenced and length units other than the metre. Each check lists its elements (select, zoom), and can become a BCF issue; all as CSV.
+
 ### IDS check
 **IDS** checks models against an `.ids` file (buildingSMART Information Delivery Specification) with IfcOpenShell's **ifctester**, running in the browser. Results are listed per specification with the requirements and the failing elements and their reasons. Failing elements can be selected, results coloured pass/fail, and everything exported as CSV. ifctester is installed the first time (a few seconds).
 
@@ -124,6 +127,12 @@ Under R = 150 m and Rv = 500 m the norm requires a dispensation; the check says 
 
 **National rules** (⚙ → National rules): the profiles of BN1-166-1 are offered with *Denmark* (the default when the app or the browser is Danish) or *All countries*; with *None* only your own profiles.
 
+### Sight of signals and signs
+*Alignment → Sight check (signal)* (#136): select a signal or sign, choose the track and the direction of travel. From the driver's eye (height above top of rail and offset across, editable), every few metres on the approach, rays go to five points of the target; where something of the models is in the way, the target is hidden there. The result is the distance from which the target is seen without a break (against a required sighting distance), a strip of where it is seen (green), partly seen (orange) or hidden (red), the elements that hide it with the distances and stations where they do, sight lines in 3D, CSV and a BCF issue with the camera at the driver's eye where the target is lost. Hidden elements do not block (hide vegetation to see what cutting it back would give); some classes never do. The train, the light's beam and the curvature of the earth are not modelled.
+
+### Track parameters and report
+*Alignment → Track parameters* (#137) labels the alignments in 3D where the horizontal elements (straight, arc with its radius, transition), the vertical ones (gradient, rounding radius) and the cant change. *Alignment → Track report* lists the horizontal and vertical elements and the cant of an alignment, and stations every few metres with map coordinates (E, N, when the models are georeferenced), height, radius with its direction, gradient and cant – as **Excel** (.xlsx, a sheet per table), **CSV** (the language's decimal sign) and **PDF** (A4 landscape).
+
 ### Point clouds
 Surveys and laser scans can be loaded next to the IFC models (#27) – drop the file like an IFC file:
 
@@ -139,6 +148,9 @@ Surveys and laser scans can be loaded next to the IFC models (#27) – drop the 
 - **Measuring** snaps to points.
 - **Depth shading (EDL)** on the card: eye-dome lighting darkens points by depth compared with their neighbours, so edges and shapes show in dense clouds that have no colours (#52). The setting is remembered in this browser.
 - **In projects** (#52): a cloud up to 300 MB is stored in the browser with the project, like the IFC files. A larger one is kept as a reference: a file dropped in Chrome or Edge is opened again from where it is (the browser asks for permission), otherwise the project asks you to open the file again. The settings are saved too (name, colours, size, classes, section slab). A **workspace** file holds the clouds' names and settings, and they are applied when the files are opened.
+
+### DWG and DXF drawings
+DWG (R14 to 2018 and later) and DXF files are opened like IFC files (#135) and shown as a 2D base: the model space as lines per layer, with the layers' colours, and the texts. Arcs, circles, ellipses, polyline bulges, splines (through their fit points) and blocks (also of dimensions) are drawn; hatches, images and 3D solids are not. The drawing is placed in the models' coordinates – read as map coordinates (through the models' IfcMapConversion) or as the models' own, whichever lands nearer the models. A flat drawing lies at a height of its own (under the models unless set) and can be drawn on top of them. The card in the model browser switches layers on and off, sets the unit (from the file's INSUNITS) and the height. DWG is read with [LibreDWG](https://www.gnu.org/software/libredwg/) (GPL-3.0) compiled to WebAssembly in a worker; its 8 MB (2 MB compressed) are only fetched when a drawing is opened. DGN (MicroStation V8) is not read: save it as DWG in MicroStation.
 
 ### Terrain (TIN)
 *Terrain (TIN)…* on a point cloud's card builds a terrain surface (#45):
@@ -182,10 +194,13 @@ Models, point clouds and terrain do not always come in the same map coordinate s
 - Conversion uses [proj4js](https://github.com/proj4js/proj4js) (MIT), locally.
 
 ### Measure
-**Measure** (toolbar or `M`) opens the measuring panel with four tools:
+**Measure** (toolbar or `M`) opens the measuring panel with seven tools:
 - **Distance:** point to point. *Lock X/Y* keeps the second point on the vertical line through the first point, so only the height (Z) is measured. Shows the distance, the horizontal distance, the height difference (ΔZ), ΔX/ΔY and the slope. Dashed lines show the horizontal and vertical components.
 - **Length:** a polyline through several points with the length of each segment and the total. Finish with double-click or Enter; Backspace removes the last point.
 - **Objects** (#128): click two elements – the shortest distance between their geometry (solid line; 0 when they touch or overlap) and the distance between their centres (dashed).
+- **Angle** (#139): click a point, the corner and a point – the angle in 3D and in plan.
+- **Area** (#139): click the corners, finish with a double click or Enter – the area of the polygon, in plan, and its perimeter.
+- **Element** (#139): click an element – its volume (from its closed surface; marked ≈ when the surface is not closed), surface area and size in X, Y and Z.
 - **Spot:** coordinates and elevation of a point. Choose which coordinates (X, Y, Z) the label in the 3D view shows. It shows project X/Y/Z (metres, Z up) and the height above the element's storey. If the model is georeferenced with `IfcMapConversion`, it also shows easting/northing/height in the map coordinate system. Otherwise it shows Z plus the site reference elevation (`IfcSite.RefElevation`) when one is set.
 
 Points snap to corners, edge midpoints, edges and – from the last point of a distance or length – perpendicular onto an edge (the foot of the perpendicular, marked ∟) (shown by the marker shape); snapping can be turned off. Values are shown in m or mm, every measurement can be zoomed to or removed, and *Copy all* copies the values to the clipboard. Points cut away by section planes cannot be picked. With several models, coordinates refer to the first model's coordinate system.
@@ -394,3 +409,5 @@ The sample models in `public/samples/simple-scene` are the IFC 4.3 "Simple-Scene
 The fictitious railway in `public/samples/double-track-railway` is made by Vispecta and licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
 The Chesapeake Bay Bridge-Tunnel model in `public/samples/chesapeake` is from [buildingSMART's community sample files](https://github.com/buildingsmart-community/Community-Sample-Test-Files), © 2026 buildingSMART Community Projects, licensed under the MIT licence; its geometry is based on OpenStreetMap data (© OpenStreetMap contributors, ODbL). It is a synthetic test model, not endorsed by the Chesapeake Bay Bridge and Tunnel District.
+
+DWG and DXF files are read with [LibreDWG](https://www.gnu.org/software/libredwg/) (© Free Software Foundation, GPL-3.0-or-later), through [@mlightcad/libredwg-web](https://github.com/mlightcad/libredwg-web) (GPL-3.0); the GPL-3.0 can be combined with the AGPL-3.0 (section 13). The test drawing `tests/fixtures/example_2000.dwg` is from LibreDWG's test data.

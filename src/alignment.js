@@ -181,7 +181,7 @@ export async function readAlignments(model) {
       const total = hs.reduce((a, x) => a + x.L * scale, 0);
       if (hs.length && Math.abs(total - cum[cum.length - 1]) < Math.max(0.5, 0.005 * total)) {
         let s0 = 0;
-        horizontal = hs.map((x) => { const o = { s0, L: x.L * scale, type: x.type, r0: Math.abs(x.r0 || 0) * scale, r1: Math.abs(x.r1 || 0) * scale }; s0 += o.L; return o; });
+        horizontal = hs.map((x) => { const o = { s0, L: x.L * scale, type: x.type, r0: Math.abs(x.r0 || 0) * scale, r1: Math.abs(x.r1 || 0) * scale, sr0: (x.r0 || 0) * scale, sr1: (x.r1 || 0) * scale }; s0 += o.L; return o; }); // sr: signed (+ left, as IFC)
       }
     }
     // vertical profile
