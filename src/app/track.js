@@ -25,7 +25,7 @@ function labelsOf(al) {
     out.push({ pos: viewer.fromIfc(p.x, p.y, z), row, text, title: `${al.name} · ${formatStation(al.station0 + s)}\n${title}` });
   };
   for (const hz of al.horizontal || []) {
-    const type = /LINE/i.test(hz.type) ? t('trk.h.LINE') : /CIRCULAR/i.test(hz.type) ? `R ${num(hz.r0, 0)}` : `${t('trk.h.CLOTHOID')} ${hz.r0 ? num(hz.r0, 0) : '∞'}→${hz.r1 ? num(hz.r1, 0) : '∞'}`;
+    const type = /LINE/i.test(hz.type) ? t('trk.h.LINE') : /CIRCULAR/i.test(hz.type) ? `R ${num(hz.r0, 0)}` : `${t('trk.h.CLOTHOID')} L ${num(hz.L, 0)}` // a transition by its length;
     at(hz.s0, 0, type, `${t('trk.horizontal')}: ${type}, L ${num(hz.L, 1)} m`);
   }
   for (const v of al.vertical || []) {

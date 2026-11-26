@@ -45,7 +45,9 @@ export function trackTables(al, ctx) {
       header: ['#', t('trk.type'), t('trk.from'), t('trk.to'), `${t('trk.length')} (m)`, `R ${t('trk.start')} (m)`, `R ${t('trk.end')} (m)`, t('trk.turn'), 'A (m)'],
       rows: al.horizontal.filter((h) => h.L > 1e-9).map((h, i) => {
         const clothoid = /CLOTHOID/i.test(h.type) && ((!h.r0) !== (!h.r1)) ? Math.sqrt((h.r0 || h.r1) * h.L) : null;
-        return [i + 1, typeName('h', h.type), st(h.s0), st(h.s0 + h.L), r(h.L, 3), h.r0 ? r(h.r0, 3) : null, h.r1 ? r(h.r1, 3) : null, side(h.sr0 || h.sr1 || 0), clothoid ? r(clothoid, 3) : null];
+        // a transition is given by its length (and A), not by the radii at its ends
+        const arc = !/LINE/i.test(h.type) && !/CLOTHOID|CUBIC|HELMERT|BLOSS|SINE|COSINE|VIENNESE/i.test(h.type);
+        return [i + 1, typeName('h', h.type), st(h.s0), st(h.s0 + h.L), r(h.L, 3), arc && h.r0 ? r(h.r0, 3) : null, arc && h.r1 ? r(h.r1, 3) : null, side(h.sr0 || h.sr1 || 0), clothoid ? r(clothoid, 3) : null];
       }),
     });
   }

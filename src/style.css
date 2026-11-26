@@ -553,8 +553,10 @@ body.py-open .planes-panel { max-height: calc(100% - 60px); }
 .m-dot.angle, .m-label.angle, .m-item.angle { --m-color: #16a085; }
 .m-dot.area, .m-label.area, .m-item.area { --m-color: #c0392b; }
 .m-dot.element, .m-label.element, .m-item.element { --m-color: #6c5ce7; }
-#measure-modes { flex-wrap: wrap; }
-#measure-modes button { flex: 1 0 25%; border-bottom: 1px solid var(--border); }
+/* seven tools in two even rows: four (lines and areas) over three (points and elements) */
+#measure-modes { display: grid; grid-template-columns: repeat(12, 1fr); gap: 1px; background: var(--border); }
+#measure-modes button { grid-column: span 3; border: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#measure-modes button:nth-child(n+5) { grid-column: span 4; }
 .m-dot.centre { width: 6px; height: 6px; border-style: dashed; }
 .m-label.centre { opacity: 0.85; }
 .m-label {
