@@ -75,6 +75,8 @@ export function renderModels() {
   for (const g of state.modelGroups) list.append(groupSection(g, viewer.models.filter((m) => m.groupId === g.id)));
   if (state.modelGroups.length) list.append(groupSection(null, loose));
   else for (const m of loose) list.append(modelCard(m));
+  // while a model is dragged: drop it here to make a new group with it (also when there is none yet)
+  if (viewer.models.length) list.append(newGroupZone());
   // drawn lines (#74)
   if (drawnPaths.length) {
     list.append(h('section', { class: 'mgroup lines' },
@@ -132,9 +134,72 @@ function groupSection(g, models) {
   sec.addEventListener('drop', (e) => {
     e.preventDefault();
     sec.classList.remove('drop');
-    if (dragModel) { const m = dragModel; dragModel = null; if (g) g.open = true; setModelGroup(m, g); }
+    if (dragModel) { const m = dragModel; endModelDrag(); if (g) g.open = true; setModelGroup(m, g); }
   });
   return sec;
+}
+
+/** The drop zone that makes a new group with the model dropped on it; shown while a model is dragged. */
+function newGroupZone() {
+  const z = h('div', { class: 'mg-new-drop', 'data-newgroup': '1', text: t('mg.dropNew') });
+  z.addEventListener('dragover', (e) => { if (!dragModel) return; e.preventDefault(); e.stopPropagation(); z.classList.add('drop'); });
+  z.addEventListener('dragleave', () => z.classList.remove('drop'));
+  z.addEventListener('drop', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    z.classList.remove('drop');
+    if (dragModel) { const m = dragModel; endModelDrag(); newModelGroup([m]); }
+  });
+  return z;
+}
+
+function startModelDrag(m, card) {
+  dragModel = m;
+  card.classList.add('dragging');
+  document.body.classList.add('model-dragging');
+}
+function endModelDrag() {
+  dragModel = null;
+  document.body.classList.remove('model-dragging');
+  $$('.model-card.dragging').forEach((x) => x.classList.remove('dragging'));
+  $$('.mgroup.drop, .mg-new-drop.drop').forEach((x) => x.classList.remove('drop'));
+}
+
+/**
+ * Touch (and pen): the browser's drag and drop is for the mouse only, so the grip is followed by
+ * pointer events – the group under the finger lights up, and it gets the model when the finger lifts.
+ */
+function touchDrag(grip, m, card) {
+  grip.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse') return; // the mouse uses the card's own drag and drop
+    e.preventDefault();
+    try { grip.setPointerCapture(e.pointerId); } catch { /* a synthetic pointer */ }
+    startModelDrag(m, card);
+    let over = null;
+    const ghost = h('div', { class: 'mg-ghost', text: m.alias || m.name });
+    document.body.append(ghost);
+    const move = (ev) => {
+      ghost.style.transform = `translate(${ev.clientX + 12}px, ${ev.clientY + 8}px)`;
+      const el = document.elementFromPoint(ev.clientX, ev.clientY);
+      const target = el?.closest?.('.mg-new-drop, .mgroup:not(.lines):not(.clouds):not(.drawings)') || null;
+      if (target !== over) { over?.classList.remove('drop'); over = target; over?.classList.add('drop'); }
+    };
+    const up = () => {
+      grip.removeEventListener('pointermove', move);
+      ghost.remove();
+      const target = over;
+      endModelDrag();
+      if (!target) return;
+      if (target.dataset.newgroup) { newModelGroup([m]); return; }
+      const g = state.modelGroups.find((x) => x.id === target.dataset.group) || null;
+      if (g) g.open = true;
+      setModelGroup(m, g);
+    };
+    grip.addEventListener('pointermove', move);
+    grip.addEventListener('pointerup', up, { once: true });
+    grip.addEventListener('pointercancel', () => { grip.removeEventListener('pointermove', move); ghost.remove(); endModelDrag(); }, { once: true });
+    move(e);
+  });
 }
 
 /** The card of a model: a compact head (switch, name, alias, file name) and details to fold out. */
@@ -179,8 +244,11 @@ function modelCard(m) {
     setModelGroup(m, state.modelGroups.find((g) => g.id === groupSel.value) || null);
   });
 
+  // the grip: drag the card by it onto a group (the whole card can be dragged with the mouse too)
+  const grip = h('span', { class: 'mg-grip', title: t('mg.dragTitle'), 'aria-hidden': 'true', text: '⠿' });
   const card = h('div', { class: `card model-card${open ? ' open' : ''}${m.visible ? '' : ' off'}`, draggable: 'true' },
     h('div', { class: 'card-head' },
+      grip,
       h('button', { class: `mg-caret${open ? ' open' : ''}`, 'aria-expanded': String(open), 'aria-label': t('models.details'), onclick: () => { m.cardOpen = !open; renderModels(); } }),
       vis, dot,
       h('span', { class: 'card-title' }, label, sub),
@@ -228,12 +296,12 @@ function modelCard(m) {
   // drag the card onto a group (not when the drag starts in a field)
   card.addEventListener('dragstart', (e) => {
     if (e.target.closest?.('input, select, button, .swatch-dot') && e.target !== card) { e.preventDefault(); return; }
-    dragModel = m;
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', m.name);
-    card.classList.add('dragging');
+    startModelDrag(m, card);
   });
-  card.addEventListener('dragend', () => { dragModel = null; card.classList.remove('dragging'); $$('.mgroup.drop').forEach((x) => x.classList.remove('drop')); });
+  card.addEventListener('dragend', endModelDrag);
+  touchDrag(grip, m, card);
   return card;
 }
 

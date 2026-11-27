@@ -491,6 +491,41 @@ async function main() {
     });
     check('long model split into cells for view culling (#60)', cells.buckets > cells.colours && cells.ids === cells.elements, `${cells.buckets} buckets for ${cells.colours} colours, ${cells.ids} elements`);
     check('railway sample: 9 models and a LAZ survey placed in map coordinates', rail.cloud === 'map', `terrain models: ${rail.terrain}`);
+    // model groups by drag and drop: a card dragged onto "new group", then onto another group; by finger (touch)
+    await page2.click('.tab[data-tab="models"]');
+    const cardOf = (name) => page2.locator('.model-card', { hasText: name }).first();
+    const groupsBefore = await page2.evaluate(() => window.onlineIfc.state.modelGroups.length);
+    // the zone for a new group appears once the drag has begun
+    const src = await cardOf('07-Cables.ifc').locator('.mg-grip').boundingBox();
+    await page2.mouse.move(src.x + 4, src.y + 4);
+    await page2.mouse.down();
+    await page2.mouse.move(src.x + 30, src.y + 30, { steps: 5 });
+    await page2.evaluate(() => document.querySelector('.mg-new-drop').scrollIntoView({ block: 'center' }));
+    const zone = await page2.locator('.mg-new-drop').boundingBox();
+    await page2.mouse.move(zone.x + zone.width / 2, zone.y + zone.height / 2, { steps: 8 });
+    await page2.mouse.up();
+    await page2.keyboard.press('Escape'); // the new group's name is being edited: keep the default
+    const afterNew = await page2.evaluate(() => { const { viewer, state } = window.onlineIfc; const m = viewer.models.find((x) => x.name === '07-Cables.ifc'); const g = state.modelGroups.find((x) => x.id === m.groupId); return { groups: state.modelGroups.length, alone: g ? viewer.models.filter((x) => x.groupId === g.id).length : 0 }; });
+    const terrainGroup = page2.locator('.mgroup', { hasText: '08-Terrain.ifc' }).first();
+    await cardOf('07-Cables.ifc').dragTo(terrainGroup.locator('.mg-head'));
+    const afterMove = await page2.evaluate(() => { const { viewer } = window.onlineIfc; const a = viewer.models.find((x) => x.name === '07-Cables.ifc'), b = viewer.models.find((x) => x.name === '08-Terrain.ifc'); return a.groupId === b.groupId; });
+    // touch: the grip followed by pointer events
+    const touch = await page2.evaluate(() => {
+      const { viewer } = window.onlineIfc;
+      const card = [...document.querySelectorAll('.model-card')].find((c) => c.textContent.includes('07-Cables.ifc'));
+      const grip = card.querySelector('.mg-grip');
+      const target = [...document.querySelectorAll('.mgroup')].find((s) => s.textContent.includes('02-Track.ifc'));
+      target.scrollIntoView();
+      const r = target.querySelector('.mg-head').getBoundingClientRect(), g = grip.getBoundingClientRect();
+      const ev = (type, x, y) => grip.dispatchEvent(new PointerEvent(type, { pointerType: 'touch', pointerId: 7, clientX: x, clientY: y, bubbles: true }));
+      ev('pointerdown', g.x + 2, g.y + 2);
+      ev('pointermove', r.x + 40, r.y + r.height / 2);
+      const lit = target.classList.contains('drop');
+      ev('pointerup', r.x + 40, r.y + r.height / 2);
+      const a = viewer.models.find((x) => x.name === '07-Cables.ifc'), b = viewer.models.find((x) => x.name === '02-Track.ifc');
+      return { lit, same: a.groupId === b.groupId };
+    });
+    check('model groups by drag and drop: a new group from a dragged card, moved to another group, and by touch', afterNew.groups === groupsBefore + 1 && afterNew.alone === 1 && afterMove && touch.lit && touch.same, JSON.stringify({ groupsBefore, afterNew, afterMove, touch }));
     // measuring snaps to the corners of a cut, and onto the cut face (a free section across the track, like "cut by face")
     await page2.waitForTimeout(3000); // the sample's opening camera move
     await page2.evaluate(async () => {

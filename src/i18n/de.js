@@ -1029,4 +1029,6 @@ export default {
   'qc.unitHelp': "Die Längeneinheit des Modells ist nicht der Meter (nur richtig, wenn so gewollt).",
   'sight.noApproach': "In dieser Fahrtrichtung gibt es kein Gleis vor dem Ziel (es liegt am Anfang oder Ende der Trasse): wählen Sie die andere Richtung.",
   'sight.notSeen': "Nicht einmal vom nächsten geprüften Punkt zu sehen ({d} vor dem Ziel, bei {station})",
+  'mg.dropNew': "Hier ablegen, um eine neue Gruppe anzulegen",
+  'mg.dragTitle': "In eine Gruppe ziehen (oder auf „neue Gruppe“)",
 };
