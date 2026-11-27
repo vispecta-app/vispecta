@@ -1482,4 +1482,6 @@ export default {
   'qc.unitHelp': "Modellens längdenhet är inte meter (bara rätt om det är avsikten).",
   'sight.noApproach': "Det finns inget spår före målet i denna färdriktning (det ligger vid linjeföringens början eller slut): välj den andra riktningen.",
   'sight.notSeen': "Syns inte ens från närmaste kontrollerade punkt ({d} före målet, vid {station})",
+  'mg.dropNew': "Släpp här för att skapa en ny grupp",
+  'mg.dragTitle': "Dra till en grupp (eller till ”ny grupp”)",
 };

@@ -1482,4 +1482,6 @@ export default {
   'qc.unitHelp': "De lengte-eenheid van het model is niet de meter (alleen juist als dat de bedoeling is).",
   'sight.noApproach': "In deze rijrichting ligt er geen spoor vóór het doel (het ligt aan het begin of einde van het alignement): kies de andere richting.",
   'sight.notSeen': "Zelfs niet te zien vanaf het dichtstbijzijnde gecontroleerde punt ({d} vóór het doel, bij {station})",
+  'mg.dropNew': "Hier neerzetten voor een nieuwe groep",
+  'mg.dragTitle': "Naar een groep slepen (of naar ‘nieuwe groep’)",
 };

@@ -1482,4 +1482,6 @@ export default {
   'qc.unitHelp': "Modellens lengdeenhet er ikke meter (bare riktig når det er meningen).",
   'sight.noApproach': "Det er ikke noe spor før målet i denne kjøreretningen (det ligger ved starten eller slutten av linjeføringen): velg den andre retningen.",
   'sight.notSeen': "Ses ikke engang fra nærmeste kontrollerte punkt ({d} før målet, ved {station})",
+  'mg.dropNew': "Slipp her for å lage en ny gruppe",
+  'mg.dragTitle': "Dra til en gruppe (eller til «ny gruppe»)",
 };

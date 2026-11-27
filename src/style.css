@@ -1037,3 +1037,13 @@ body:has(#welcome:not([hidden])) .viewcube { display: none; }
 .qc-head.error .qc-icon { color: #c0392b; } .qc-head.warning .qc-icon { color: #d68910; } .qc-head.info .qc-icon { color: #2980b9; } .qc-head.ok .qc-icon { color: #27ae60; }
 .qc-body { padding: 4px 10px 8px; }
 .qc-items { margin: 4px 0 0; padding-left: 18px; max-height: 220px; overflow: auto; font-size: 12px; }
+
+/* dragging models into groups */
+.mg-grip { cursor: grab; color: var(--muted); font-size: 14px; line-height: 1; padding: 0 2px; user-select: none; touch-action: none; flex: none; }
+.model-card:hover .mg-grip { color: var(--text); }
+.mg-new-drop { display: none; margin-top: 6px; padding: 10px; border: 1px dashed var(--border-strong); border-radius: var(--r-sm); text-align: center; font-size: var(--fs-sm); color: var(--muted); }
+body.model-dragging .mg-new-drop { display: block; }
+.mg-new-drop.drop { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+body.model-dragging .mgroup:not(.lines):not(.clouds):not(.drawings) { outline: 1px dashed var(--border-strong); outline-offset: 2px; }
+body.model-dragging .mgroup.drop { outline: 2px dashed var(--accent); }
+.mg-ghost { position: fixed; left: 0; top: 0; z-index: 1000; pointer-events: none; padding: 4px 8px; border-radius: 6px; background: var(--panel); border: 1px solid var(--accent); box-shadow: 0 6px 16px rgba(0,0,0,.18); font-size: var(--fs-sm); }

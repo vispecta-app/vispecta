@@ -716,6 +716,8 @@ const en = {
   'mg.delete': 'Remove the group (the models stay loaded)',
   'mg.deleteConfirm': 'Remove the group “{name}”? Its models stay loaded, without a group.',
   'mg.dropHere': 'Drag models here',
+  'mg.dropNew': "Drop here to make a new group",
+  'mg.dragTitle': "Drag to a group (or onto “new group”)",
   'mg.group': 'Group',
   'mg.none': 'No group',
   'mg.newOption': 'New group …',

@@ -1482,4 +1482,6 @@ export default {
   'qc.unitHelp': "L’unité de longueur du modèle n’est pas le mètre (correct seulement si c’est voulu).",
   'sight.noApproach': "Il n’y a pas de voie avant la cible dans ce sens de circulation (elle est au début ou à la fin du tracé) : choisissez l’autre sens.",
   'sight.notSeen': "Pas vue même depuis le point contrôlé le plus proche ({d} avant la cible, au PK {station})",
+  'mg.dropNew': "Déposez ici pour créer un nouveau groupe",
+  'mg.dragTitle': "Faites glisser vers un groupe (ou sur « nouveau groupe »)",
 };

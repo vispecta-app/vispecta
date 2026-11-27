@@ -1482,4 +1482,6 @@ export default {
   'qc.unitHelp': "La unidad de longitud del modelo no es el metro (correcto solo si es intencionado).",
   'sight.noApproach': "No hay vía antes del objetivo en este sentido de circulación (está al inicio o al final del trazado): elija el otro sentido.",
   'sight.notSeen': "No se ve ni desde el punto comprobado más cercano ({d} antes del objetivo, en el PK {station})",
+  'mg.dropNew': "Suelte aquí para crear un grupo nuevo",
+  'mg.dragTitle': "Arrastre a un grupo (o a «grupo nuevo»)",
 };
